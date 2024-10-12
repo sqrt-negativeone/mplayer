@@ -8,7 +8,7 @@ struct Flac_Stream_Info
 	u32 min_frame_size; // 24 bits
 	u32 max_frame_size; // 24 bits
 	u32 sample_rate;    // 20 bits
-	 u8 nb_channels;     // 3 bits
+	u8 nb_channels;     // 3 bits
 	u8 bits_per_sample; // 5 bits
 	u64 samples_count;  // 36 bits
 };
@@ -87,7 +87,7 @@ struct Flac_Stream
 
 
 internal void
-init_flac_stream(Flac_Stream *flac_stream, Buffer data, Memory_Arena *block_arena)
+init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 {
 	// NOTE(fakhri): init bitstream
 	{
@@ -96,7 +96,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data, Memory_Arena *block_aren
 		flac_stream->bitstream.bits_left  = 8;
 	}
 	
-	flac_stream->block_arena = block_arena;
+	flac_stream->block_arena = m_arena_make(megabytes(8));
 	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
@@ -147,7 +147,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data, Memory_Arena *block_aren
 				streaminfo->samples_count   = bitstream_read_bits_unsafe(bitstream, 36);
 				
 				// TODO(fakhri): handle md5 checksum
-bitstream_skip_bytes(bitstream, 16);
+				bitstream_skip_bytes(bitstream, 16);
 				
 				// NOTE(fakhri): streaminfo checks
 				{
@@ -269,10 +269,11 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_s
 }
 
 internal void
-decode_one_block(Flac_Stream *flac_stream)
+flac_decode_one_block(Flac_Stream *flac_stream)
 {
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
+	flac_stream->recent_block.interchannel_sample_count = 0;
 	flac_stream->remaining_frames_count = 0;
 	
 	if (bitstream_is_empty(bitstream))
@@ -280,7 +281,7 @@ decode_one_block(Flac_Stream *flac_stream)
 		flac_stream->done = true;
 		return;
 	}
-
+	
 	// TODO(fakhri): each frame can be decoded in parallel
 	u8 block_crc = 0;
 	Flac_Stereo_Channel_Config channel_config = ZERO_STRUCT;
@@ -291,8 +292,8 @@ decode_one_block(Flac_Stream *flac_stream)
 	u64 coded_number = 0;
 	Flac_Block_Strategy block_strat = ZERO_STRUCT;
 	
-u64 block_size = 0;
-
+	u64 block_size = 0;
+	
 	// NOTE(fakhri): decode header
 	{
 		u64 sync_code = bitstream_read_bits_unsafe(bitstream, 15);
@@ -321,98 +322,98 @@ u64 block_size = 0;
 		
 		u8 coded_byte0 = bitstream_read_u8(bitstream);
 		
-		if (coded_byte0 <=0x7F)
+		if (coded_byte0 <= 0x7F)
 		{ // 0xxx_xxxx
 			coded_number = u64(coded_byte0);
 		}
 		else if (0xC0 <= coded_byte0 && coded_byte0 <= 0xDF)
 		{ // 110x_xxxx 10xx_xxxx
-				u8 coded_byte1 = bitstream_read_u8(bitstream);;
-				assert(coded_byte1 && 0xC0 == 0x80);
-				coded_number = (u64(coded_byte0 & 0x1F) << 6) | u64(coded_byte1 & 0x3F);
-			}
+			u8 coded_byte1 = bitstream_read_u8(bitstream);;
+			assert((coded_byte1 & 0xC0) == 0x80);
+			coded_number = (u64(coded_byte0 & 0x1F) << 6) | u64(coded_byte1 & 0x3F);
+		}
 		else if (0xE0 <= coded_byte0 && coded_byte0 <= 0xEF)
 		{ // 1110_xxxx 10xx_xxxx 10xx_xxxx
-				u8 coded_byte1 = bitstream_read_u8(bitstream);;
-				u8 coded_byte2 = bitstream_read_u8(bitstream);;
-				
+			u8 coded_byte1 = bitstream_read_u8(bitstream);;
+			u8 coded_byte2 = bitstream_read_u8(bitstream);;
+			
 			assert((coded_byte1 & 0xC0) == 0x80);
 			assert((coded_byte2 & 0xC0) == 0x80);
-				coded_number = (u64(coded_byte0 & 0x0F) << 12) | (u64(coded_byte1 & 0x3F) << 6) | u64(coded_byte2 & 0x3F);
-			}
+			coded_number = (u64(coded_byte0 & 0x0F) << 12) | (u64(coded_byte1 & 0x3F) << 6) | u64(coded_byte2 & 0x3F);
+		}
 		else if (0xF0 <= coded_byte0 && coded_byte0 <= 0xF7)
 		{ // 1111_0xxx 10xx_xxxx 10xx_xxxx 10xx_xxxx
-				u8 coded_byte1 = bitstream_read_u8(bitstream);;
-				u8 coded_byte2 = bitstream_read_u8(bitstream);;
-				u8 coded_byte3 = bitstream_read_u8(bitstream);;
-				
+			u8 coded_byte1 = bitstream_read_u8(bitstream);;
+			u8 coded_byte2 = bitstream_read_u8(bitstream);;
+			u8 coded_byte3 = bitstream_read_u8(bitstream);;
+			
 			assert((coded_byte1 & 0xC0) == 0x80);
 			assert((coded_byte2 & 0xC0) == 0x80);
 			assert((coded_byte3 & 0xC0) == 0x80);
-				coded_number = (u64(coded_byte0 & 0x07) << 18) | (u64(coded_byte1 & 0x3F) << 12) | (u64(coded_byte2 & 0x3F) << 6) | u64(coded_byte3 & 0x3F);
-			}
+			coded_number = (u64(coded_byte0 & 0x07) << 18) | (u64(coded_byte1 & 0x3F) << 12) | (u64(coded_byte2 & 0x3F) << 6) | u64(coded_byte3 & 0x3F);
+		}
 		else if (0xF8 <= coded_byte0 && coded_byte0 <= 0xFB)
 		{ // 1111_10xx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
-				u8 coded_byte1 = bitstream_read_u8(bitstream);
-				u8 coded_byte2 = bitstream_read_u8(bitstream);
-				u8 coded_byte3 = bitstream_read_u8(bitstream);
-				u8 coded_byte4 = bitstream_read_u8(bitstream);
-				
+			u8 coded_byte1 = bitstream_read_u8(bitstream);
+			u8 coded_byte2 = bitstream_read_u8(bitstream);
+			u8 coded_byte3 = bitstream_read_u8(bitstream);
+			u8 coded_byte4 = bitstream_read_u8(bitstream);
+			
 			assert((coded_byte1 & 0xC0) == 0x80);
 			assert((coded_byte2 & 0xC0) == 0x80);
 			assert((coded_byte3 & 0xC0) == 0x80);
 			assert((coded_byte4 & 0xC0) == 0x80);
-				coded_number = ((u64(coded_byte0 & 0x03) << 24) | 
-					(u64(coded_byte1 & 0x3F) << 18) | 
-					(u64(coded_byte2 & 0x3F) << 12) | 
-					(u64(coded_byte3 & 0x3F) << 6)  |
-					u64(coded_byte4 & 0x3F));
-			}
+			coded_number = ((u64(coded_byte0 & 0x03) << 24) | 
+				(u64(coded_byte1 & 0x3F) << 18) | 
+				(u64(coded_byte2 & 0x3F) << 12) | 
+				(u64(coded_byte3 & 0x3F) << 6)  |
+				u64(coded_byte4 & 0x3F));
+		}
 		else if (0xFC <= coded_byte0 && coded_byte0 <= 0xFD)
 		{ // 1111_110x 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
-				u8 coded_byte1 = bitstream_read_u8(bitstream);;
-				u8 coded_byte2 = bitstream_read_u8(bitstream);;
-				u8 coded_byte3 = bitstream_read_u8(bitstream);;
-				u8 coded_byte4 = bitstream_read_u8(bitstream);;
-				u8 coded_byte5 = bitstream_read_u8(bitstream);;
-				
+			u8 coded_byte1 = bitstream_read_u8(bitstream);;
+			u8 coded_byte2 = bitstream_read_u8(bitstream);;
+			u8 coded_byte3 = bitstream_read_u8(bitstream);;
+			u8 coded_byte4 = bitstream_read_u8(bitstream);;
+			u8 coded_byte5 = bitstream_read_u8(bitstream);;
+			
 			assert((coded_byte1 & 0xC0) == 0x80);
 			assert((coded_byte2 & 0xC0) == 0x80);
 			assert((coded_byte3 & 0xC0) == 0x80);
 			assert((coded_byte4 & 0xC0) == 0x80);
 			assert((coded_byte5 & 0xC0) == 0x80);
-				
-				coded_number = ((u64(coded_byte0 & 0x01) << 30) | 
-					(u64(coded_byte1 & 0x3F) << 24) | 
-					(u64(coded_byte2 & 0x3F) << 18) | 
-					(u64(coded_byte3 & 0x3F) << 12) | 
-					(u64(coded_byte4 & 0x3F) << 6)  | 
-					u64(coded_byte5 & 0x3F));
-			}
+			
+			coded_number = ((u64(coded_byte0 & 0x01) << 30) | 
+				(u64(coded_byte1 & 0x3F) << 24) | 
+				(u64(coded_byte2 & 0x3F) << 18) | 
+				(u64(coded_byte3 & 0x3F) << 12) | 
+				(u64(coded_byte4 & 0x3F) << 6)  | 
+				u64(coded_byte5 & 0x3F));
+		}
 		else if (coded_byte0 ==  0xFE)
 		{        // 1111_1110 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
-				u8 coded_byte1 = bitstream_read_u8(bitstream);;
-				u8 coded_byte2 = bitstream_read_u8(bitstream);;
-				u8 coded_byte3 = bitstream_read_u8(bitstream);;
-				u8 coded_byte4 = bitstream_read_u8(bitstream);;
-				u8 coded_byte5 = bitstream_read_u8(bitstream);;
-				u8 coded_byte6 = bitstream_read_u8(bitstream);;
-				
-				assert(block_strat == Variable_Size);
-				
+			u8 coded_byte1 = bitstream_read_u8(bitstream);;
+			u8 coded_byte2 = bitstream_read_u8(bitstream);;
+			u8 coded_byte3 = bitstream_read_u8(bitstream);;
+			u8 coded_byte4 = bitstream_read_u8(bitstream);;
+			u8 coded_byte5 = bitstream_read_u8(bitstream);;
+			u8 coded_byte6 = bitstream_read_u8(bitstream);;
+			
+			assert(block_strat == Variable_Size);
+			
 			assert((coded_byte1 & 0xC0) == 0x80);
 			assert((coded_byte2 & 0xC0) == 0x80);
 			assert((coded_byte3 & 0xC0) == 0x80);
 			assert((coded_byte4 & 0xC0) == 0x80);
 			assert((coded_byte5 & 0xC0) == 0x80);
 			assert((coded_byte6 & 0xC0) == 0x80);
-				coded_number = ((u64(coded_byte1 & 0x3F) << 30) | 
-					(u64(coded_byte2 & 0x3F) << 24) | 
-					(u64(coded_byte3 & 0x3F) << 18) | 
-					(u64(coded_byte4 & 0x3F) << 12) | 
-					(u64(coded_byte5 & 0x3F) << 6) | 
-					u64(coded_byte6 & 0x3F));
-			}
+			coded_number = ((u64(coded_byte1 & 0x3F) << 30) | 
+				(u64(coded_byte2 & 0x3F) << 24) | 
+				(u64(coded_byte3 & 0x3F) << 18) | 
+				(u64(coded_byte4 & 0x3F) << 12) | 
+				(u64(coded_byte5 & 0x3F) << 6) | 
+				u64(coded_byte6 & 0x3F));
+		}
 		
 		switch (block_size_bits)
 		{
@@ -495,12 +496,12 @@ u64 block_size = 0;
 				if (0x8 <= subframe_type_bits && subframe_type_bits <= 0xC)
 				{
 					subframe_type.kind = Subframe_Fixed_Prediction;
-				subframe_type.order = u8(subframe_type_bits) - 8;
+					subframe_type.order = u8(subframe_type_bits) - 8;
 				}
 				else if (0x20 <= subframe_type_bits && subframe_type_bits <= 0x3F) 
 				{
 					subframe_type.kind = Subframe_Linear_Prediction;
-				subframe_type.order = u8(subframe_type_bits) - 31;
+					subframe_type.order = u8(subframe_type_bits) - 31;
 				}
 			} break;
 		}
@@ -546,14 +547,14 @@ u64 block_size = 0;
 			case Subframe_Verbatim:
 			{
 				for (u32 i = 0; i < block_size; i += 1)
-{
+				{
 					block_channel_samples->samples[i] = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
 				}
 			} break;
 			
 			case Subframe_Fixed_Prediction:
 			{
-					for (u32 i = 0; i < subframe_type.order; i += 1)
+				for (u32 i = 0; i < subframe_type.order; i += 1)
 				{
 					block_channel_samples->samples[i] = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
 				}
@@ -598,9 +599,9 @@ u64 block_size = 0;
 				predictor_coef_precision_bits += 1;
 				u64 right_shift = bitstream_read_bits_unsafe(bitstream, 5);
 				
-				 i64 *coefficients = m_arena_push_array(flac_stream->block_arena, i64, subframe_type.order);
+				i64 *coefficients = m_arena_push_array(flac_stream->block_arena, i64, subframe_type.order);
 				
-for (u32 i = 0; i < subframe_type.order; i += 1)
+				for (u32 i = 0; i < subframe_type.order; i += 1)
 				{
 					coefficients[i] = bitstream_read_sample_unencoded(bitstream, u8(predictor_coef_precision_bits));
 				}
@@ -625,7 +626,7 @@ for (u32 i = 0; i < subframe_type.order; i += 1)
 		
 		if (wasted_bits != 0)
 		{
-				for (u32 i = 0; i < block_size; i += 1)
+			for (u32 i = 0; i < block_size; i += 1)
 			{
 				block_channel_samples->samples[i] <<= wasted_bits;
 			}
@@ -637,17 +638,17 @@ for (u32 i = 0; i < subframe_type.order; i += 1)
 	{
 		case Left_Side:
 		{
-				for (u32 i = 0; i < block_size; i += 1)
+			for (u32 i = 0; i < block_size; i += 1)
 			{
 				i64 left = decoded_block->samples_per_channel[0].samples[i]; 
 				i64 side = decoded_block->samples_per_channel[1].samples[i];
 				
-				 decoded_block->samples_per_channel[1].samples[i] = left - side;
+				decoded_block->samples_per_channel[1].samples[i] = left - side;
 			}
 		} break;
 		case Side_Right:
 		{
-				for (u32 i = 0; i < block_size; i += 1)
+			for (u32 i = 0; i < block_size; i += 1)
 			{
 				i64 side  = decoded_block->samples_per_channel[0].samples[i]; 
 				i64 right = decoded_block->samples_per_channel[1].samples[i];
@@ -657,7 +658,7 @@ for (u32 i = 0; i < subframe_type.order; i += 1)
 		} break;
 		case Mid_Side:
 		{
-				for (u32 i = 0; i < block_size; i += 1)
+			for (u32 i = 0; i < block_size; i += 1)
 			{
 				i64 mid  = decoded_block->samples_per_channel[0].samples[i]; 
 				i64 side = decoded_block->samples_per_channel[1].samples[i];
@@ -678,3 +679,53 @@ for (u32 i = 0; i < subframe_type.order; i += 1)
 	return;
 }
 
+struct Decoded_Samples
+{
+	f32 *samples;
+	u64 frames_count;
+	u64 channels_count;
+};
+
+internal Decoded_Samples
+flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_Arena *arena)
+{
+	Decoded_Samples result = ZERO_STRUCT;
+	u64 remaining_frames_count = requested_frames_count;
+	result.samples = m_arena_push_array(arena, f32, requested_frames_count * flac_stream->streaminfo.nb_channels);
+	result.channels_count = flac_stream->streaminfo.nb_channels;
+	
+	u64 resample_factor = (1ull << (flac_stream->streaminfo.bits_per_sample - 1));
+	
+	for (;remaining_frames_count != 0;)
+	{
+		if (flac_stream->remaining_frames_count != 0)
+		{
+			u64 frames_to_copy = MIN(flac_stream->remaining_frames_count, remaining_frames_count);
+			u64 offset = flac_stream->recent_block.interchannel_sample_count - flac_stream->remaining_frames_count;
+			u64 nb_channels = flac_stream->recent_block.channels_count;
+			for (u32 index = 0; index < frames_to_copy; index += 1)
+			{
+				for (u32 c_index = 0; c_index < nb_channels; c_index += 1)
+				{
+					Flac_Channel_Samples *channel_samples = flac_stream->recent_block.samples_per_channel + c_index;
+					u64 output_offset = (index + result.frames_count) * nb_channels + c_index;
+					result.samples[output_offset] = f32(channel_samples->samples[offset + index]) / f32(resample_factor);
+				}
+			}
+			flac_stream->remaining_frames_count -= frames_to_copy;
+			remaining_frames_count -= frames_to_copy;
+			result.frames_count += frames_to_copy;
+		}
+		else {
+			m_arena_free_all(flac_stream->block_arena);
+			flac_decode_one_block(flac_stream);
+			flac_stream->remaining_frames_count = flac_stream->recent_block.interchannel_sample_count;
+			
+			if (flac_stream->recent_block.interchannel_sample_count == 0) {
+				// NOTE(fakhri): EOF
+				break;
+			}
+		}
+	}
+	return result;
+}

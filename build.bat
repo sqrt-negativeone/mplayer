@@ -34,7 +34,7 @@ set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
 
 :: add libs to link here
 set platform_libs= ^
-  SDL2.lib SDL2main.lib opengl32.lib
+  opengl32.lib user32.lib gdi32.lib
 
 set common_linker_flags=/incremental:no
 set platform_linker_flags=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32"
@@ -48,7 +48,7 @@ pushd bld
 del *.ilk > NUL 2> NUL
 set time_stamp=%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 
-call cl %compiler_settings% "%code_dir%\code\main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
+call cl %compiler_settings% "%code_dir%\code\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
 
 del *.obj > NUL 2> NUL
 popd
