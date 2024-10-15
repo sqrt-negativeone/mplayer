@@ -110,13 +110,6 @@ vec2i(u32 x, u32 y)
 }
 
 internal V2_F32
-vec2()
-{
-	V2_F32 result = ZERO_STRUCT;
-	return result;
-}
-
-internal V2_F32
 vec2(f32 x, f32 y)
 {
 	V2_F32 result;
@@ -129,6 +122,13 @@ internal V2_F32
 vec2(f32 v)
 {
 	V2_F32 result = vec2(v, v);
+	return result;
+}
+
+internal V2_F32
+vec2()
+{
+	V2_F32 result = vec2(0);
 	return result;
 }
 

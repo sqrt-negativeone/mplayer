@@ -245,6 +245,28 @@ ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F3
 	ui->mouse_p = mouse_p;
 }
 
+internal void
+ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
+{
+	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
+	push_rect(ui->render_ctx, slider_pos, slider_dim, clip, color, 5);
+	
+	V2_F32 track_dim = slider_dim;
+	track_dim.width  *= 0.99f;
+	track_dim.height *= 0.25f;
+	
+	V4_F32 track_color = vec4(0.6f, 0.6f, 0.6f, 1);
+	push_rect(ui->render_ctx, slider_pos, track_dim, clip, track_color, 5);
+	
+	V2_F32 handle_dim = vec2(0.90f * MIN(slider_dim.width, slider_dim.height));
+	V2_F32 handle_pos = slider_pos;
+	handle_pos.x -= 0.5f * (slider_dim.width - handle_dim.width);
+	
+	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_dim.width);
+	V4_F32 handle_color = vec4(0.8f, 0.8f, 0.8f, 1);
+	push_rect(ui->render_ctx, handle_pos, handle_dim, clip, handle_color, 0.5f * handle_dim.width);
+}
+
 
 #define ui_button(ui, font, clip, text, pos) _ui_button(ui, font, clip, text, pos, __LINE__)
 internal Mplayer_UI_Interaction
@@ -381,17 +403,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		
 		// NOTE(fakhri): UI
 	{
+		f32 y = -200.0;
 		ui_begin(&mplayer->ui, render_ctx, &mplayer->input, world_mouse_p);
+		
+		f32 val = 1.0f;
+		ui_slider_f32(&mplayer->ui, &val, 0, 1, vec2(0, y), vec2(1000, 20), clip, 1);
+		y -= 50.f;
+		
 		if (!mplayer->play_track)
 		{
-			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Play"), vec2(0, 0)).clicked)
+			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Play"), vec2(0, y)).clicked)
 			{
 				mplayer->play_track = 1;
 			}
 		}
 		else
 		{
-			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Pause"), vec2(0, 0)).clicked)
+			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Pause"), vec2(0, y)).clicked)
 			{
 				mplayer->play_track = 0;
 			}
