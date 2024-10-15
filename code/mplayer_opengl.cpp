@@ -2,6 +2,31 @@
 #define GL_VERSION_MAJOR 3
 #define GL_VERSION_MINOR 3
 
+struct GL_Rect_Vertex_Attribute
+{
+	V2_F32 pos, uv;
+};
+
+struct Rect_Shader_Uniforms
+{
+	i32 clip, model, color, uv_offset, uv_scale, rect_dim, rect_cent, roundness;
+};
+
+struct GL_Textured_Rect_Shader
+{
+	GLuint prog_id;
+	GLuint vao;
+	GLuint vbo;
+	GLuint ebo;
+	
+	Rect_Shader_Uniforms uniforms;
+};
+
+
+#define SET_VERTEX_ATTRIBUTE(T, m, index) \
+glEnableVertexAttribArray(index); \
+glVertexAttribPointer(index, sizeof(member(T, m)) / sizeof(f32), GL_FLOAT, GL_FALSE, sizeof(T), (void*)member_offset(T, m));
+
 struct OpenGL
 {
 	Render_Context render_ctx;
@@ -9,8 +34,162 @@ struct OpenGL
 	V2_I32 window_dim;
 	
 	u32 *textures2d_array;
+	Load_Entire_File *load_entire_file;
+	
+	GL_Textured_Rect_Shader rect_shader;
 };
 
+
+internal u32
+gl_compile_shader_program(OpenGL *opengl, const char *source_code)
+{
+	u32 id = 0;
+	b32 ok = false;
+  
+	u32 vertex_shader_id   = glCreateShader(GL_VERTEX_SHADER);
+	u32 fragment_shader_id = glCreateShader(GL_FRAGMENT_SHADER);
+  
+	u32 program = glCreateProgram();
+  
+	// NOTE(fakhri): compile vertex shader
+	{
+		const char *vertex_code[] = {"#version 330 core\n", "#define VERTEX_SHADER\n", source_code};
+		glShaderSource(vertex_shader_id, array_count(vertex_code), vertex_code, 0);
+		glCompileShader(vertex_shader_id);
+		
+		i32 status = 0;
+		glGetShaderiv(vertex_shader_id, GL_COMPILE_STATUS, &status);
+		if (status == 0)
+		{
+			GLchar info_log[512];
+			glGetShaderInfoLog(vertex_shader_id, array_count(info_log), 0, info_log);
+			LogError("Couldn't compile vertex shader program\n%s", source_code);
+			LogError("shader error :\n%s", info_log);
+			goto exit;
+		}
+	}
+  
+	// NOTE(fakhri): compile frag shader
+	{
+		const char *frag_code[] = {"#version 330 core\n", "#define FRAGMENT_SHADER\n", source_code};
+		glShaderSource(fragment_shader_id, array_count(frag_code), frag_code, 0);
+		glCompileShader(fragment_shader_id);
+		
+		i32 status = 0;
+		glGetShaderiv(fragment_shader_id, GL_COMPILE_STATUS, &status);
+		if (status == 0)
+		{
+			GLchar info_log[512];
+			glGetShaderInfoLog(fragment_shader_id, array_count(info_log), 0, info_log);
+			LogError("Couldn't compile fragment shader program\n%*s", source_code);
+			LogError("shader error :\n%s", info_log);
+			goto exit;
+		}
+	}
+  
+	// NOTE(fakhri): link shader program
+	{
+		glAttachShader(program, vertex_shader_id);
+		glAttachShader(program, fragment_shader_id);
+		
+		glLinkProgram(program);
+		
+		i32 status = 0;
+		glGetProgramiv(program, GL_LINK_STATUS, &status);
+		if (status == 1)
+		{
+			ok = true;
+			id = program;
+		}
+		else
+		{
+			GLchar info_log[512];
+			glGetProgramInfoLog(program, array_count(info_log), 0, info_log);
+			LogError("Couldn't link shader program\n%*s", source_code);
+			LogError("shader error :\n%s", info_log);
+		}
+	}
+  
+  
+  
+	exit:
+	if (!ok)
+	{
+		glDetachShader(program, vertex_shader_id);
+		glDetachShader(program, fragment_shader_id);
+		glDeleteProgram(program);
+		program = 0;
+	}
+  
+  
+	glDeleteShader(vertex_shader_id);
+	glDeleteShader(fragment_shader_id);
+  
+	return id;
+}
+
+internal b32
+gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_shader)
+{
+	local_persist GL_Rect_Vertex_Attribute rect_vertices[] = {
+		{{-0.5f, +0.5f}, {0.0, 0.0}}, // up-left
+		{{-0.5f, -0.5f}, {0.0, 1.0}}, // down-left
+		{{+0.5f, -0.5f}, {1.0, 1.0}}, // down-right
+		{{+0.5f, +0.5f}, {1.0, 0.0}}, // up-right
+	};
+  
+	local_persist u32 indices[] = {
+		0, 1, 2,
+		0, 2, 3,
+	};
+  
+	Memory_Checkpoint scratch = begin_scratch(0, 0);
+	// TODO(fakhri): bake the shader into the executable
+	const char *rect_shader_source = (char *)opengl->load_entire_file(str8_lit("data/shaders/rectangle_shader.glsl"), scratch.arena).data;
+	
+	b32 result = true;
+  
+	rect_shader->prog_id = gl_compile_shader_program(opengl, rect_shader_source);
+	if (!rect_shader->prog_id)
+	{
+		result = false;
+		goto exit;
+	}
+  
+	glUseProgram(rect_shader->prog_id);
+  
+	glGenVertexArrays(1, &rect_shader->vao);
+	glBindVertexArray(rect_shader->vao);
+  
+	glGenBuffers(1, &rect_shader->vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, rect_shader->vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertices), rect_vertices, GL_STATIC_DRAW);
+  
+	SET_VERTEX_ATTRIBUTE(GL_Rect_Vertex_Attribute, pos, 0);
+	SET_VERTEX_ATTRIBUTE(GL_Rect_Vertex_Attribute, uv,  1);
+  
+	glGenBuffers(1, &rect_shader->ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rect_shader->ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+  
+	glUseProgram(0);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+  
+	rect_shader->uniforms.clip      = glGetUniformLocation(rect_shader->prog_id, "clip");
+	rect_shader->uniforms.model     = glGetUniformLocation(rect_shader->prog_id, "model");
+	rect_shader->uniforms.color     = glGetUniformLocation(rect_shader->prog_id, "color");
+	rect_shader->uniforms.uv_offset = glGetUniformLocation(rect_shader->prog_id, "uv_offset");
+	rect_shader->uniforms.uv_scale  = glGetUniformLocation(rect_shader->prog_id, "uv_scale");
+	rect_shader->uniforms.rect_cent = glGetUniformLocation(rect_shader->prog_id, "rect_cent");
+	rect_shader->uniforms.rect_dim  = glGetUniformLocation(rect_shader->prog_id, "rect_dim");
+	rect_shader->uniforms.roundness = glGetUniformLocation(rect_shader->prog_id, "roundness");
+	
+	exit:;
+	end_scratch(scratch);
+	return result;
+}
 
 internal u32
 gl_get_texture_handle(OpenGL *opengl, Texture texture)
@@ -30,7 +209,7 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 		glBindTexture(GL_TEXTURE_2D, handle);
 		
 		u32 format = GL_RGBA;
-		if (has_flag(texture.flags, Gray_Bit))
+		if (has_flag(texture.flags, TEXTURE_FLAG_GRAY_BIT))
 		{
 			format = GL_RED;
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_ONE);
@@ -73,10 +252,12 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	}
 	glBindTexture(GL_TEXTURE_2D, 0);
 	
-init_renderer(&opengl->render_ctx, arena);
+	init_renderer(&opengl->render_ctx, arena);
 	
 	u32 white_color = 0xFFFFFFFF;
 	gl_upload_texture(opengl, opengl->render_ctx.white_texture, make_buffer((u8*)&white_color, sizeof(white_color)));
+	
+	gl_compile_textured_rect_shader(opengl, &opengl->rect_shader);
 }
 
 
@@ -136,28 +317,66 @@ gl_end_frame(OpenGL *opengl)
 	for (u8 *cmd_ptr = render_ctx->commands.data, *cmds_ptr_end = render_ctx->commands.data + render_ctx->command_offset;
 		cmd_ptr < cmds_ptr_end;)
 	{
-		Render_Command_Header *header = (Render_Command_Header *)cmd_ptr;
+		Render_Entry_Header *header = (Render_Entry_Header *)cmd_ptr;
 		cmd_ptr += sizeof(*header);
 		
-#define RENDER_CMD_FROM_CMD_PTR(cmd_var_name, cmd_ptr, Type) \
-Type *cmd_var_name = (Type *)(cmd_ptr);                    \
-cmd_ptr += sizeof(Type);
-		
+		#define RENDER_ENTRY_FROM_CMD_PTR(cmd_var_name, cmd_ptr, Type) \
+		Type *cmd_var_name = (Type *)(cmd_ptr);                    \
+		cmd_ptr += sizeof(Type);
 		
 		switch(header->kind)
 		{
-			case Render_Command_Kind_Render_Command_Clear_Color:
+			case Render_Entry_Kind_Render_Entry_Clear_Color:
 			{
-				RENDER_CMD_FROM_CMD_PTR(cmd, cmd_ptr, Render_Command_Clear_Color);
+				RENDER_ENTRY_FROM_CMD_PTR(cmd, cmd_ptr, Render_Entry_Clear_Color);
 				
 				glClearColor(cmd->color.r, cmd->color.g, cmd->color.b, cmd->color.a);
 				glClear(GL_COLOR_BUFFER_BIT);
 				
 			} break;
 			
-			invalid_default_case;;
+			case Render_Entry_Kind_Render_Entry_Textured_Rect:
+			{
+				RENDER_ENTRY_FROM_CMD_PTR(cmd, cmd_ptr, Render_Entry_Textured_Rect);
+				
+				GL_Textured_Rect_Shader *rect_shader = &opengl->rect_shader;
+				glUseProgram(rect_shader->prog_id);
+				
+				V2_F32 rect_cent = cmd->pos.xy;
+				
+				V3_F32 pos = cmd->pos;
+				V3_F32 scale = vec3(cmd->dim, 0);
+				
+				M4 translation_m = m4_translate(pos);
+				M4 scaling_m     = m4_scale(scale);
+				M4 model = translation_m * scaling_m;
+				
+				glUniformMatrix4fv(rect_shader->uniforms.clip,  1, GL_FALSE, (f32*)&cmd->clip);
+				glUniformMatrix4fv(rect_shader->uniforms.model, 1, GL_FALSE, (f32*)&model);
+				glUniform4fv(rect_shader->uniforms.color,     1, (f32*)&cmd->color);
+				glUniform2fv(rect_shader->uniforms.uv_offset, 1, (f32*)&cmd->uv_offset);
+				glUniform2fv(rect_shader->uniforms.uv_scale,  1, (f32*)&cmd->uv_scale);
+				
+				glUniform2fv(rect_shader->uniforms.rect_cent,  1, (f32*)&rect_cent);
+				glUniform2fv(rect_shader->uniforms.rect_dim,  1, (f32*)&cmd->dim);
+				glUniform1f(rect_shader->uniforms.roundness, cmd->roundness);
+				
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, 
+					gl_get_texture_handle(opengl, cmd->texture));
+				
+				glBindVertexArray(rect_shader->vao);
+				glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+				
+				glBindVertexArray(0);
+				glBindTexture(GL_TEXTURE_2D, 0);
+				
+				glUseProgram(0);
+			} break;
+			
+			invalid_default_case;
 		}
 		
-#undef RENDER_CMD_FROM_CMD_PTR
+		#undef RENDER_ENTRY_FROM_CMD_PTR
 	}
 }

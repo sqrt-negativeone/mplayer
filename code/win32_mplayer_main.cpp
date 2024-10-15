@@ -1,8 +1,11 @@
 
 #define WIN32_LEAN_AND_MEAN 
 #include <windows.h>
+#include <windowsx.h>
 #undef min
 #undef max
+#undef near
+#undef far
 
 #include "mplayer_base.h"
 #include "mplayer_math.h"
@@ -17,6 +20,7 @@ sys_allocate_memory(u64 size)
 #include "mplayer_memory.cpp"
 #include "mplayer_thread_context.cpp"
 #include "mplayer_string.cpp"
+#include "mplayer_base.cpp"
 #include "mplayer_buffer.h"
 
 internal void
@@ -43,7 +47,7 @@ w32_read_whole_block(HANDLE file, void *data, u64 size)
 
 
 internal Buffer
-w32_read_entire_file(String8 file_path, Memory_Arena *arena)
+w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 {
 	Buffer result = ZERO_STRUCT;
 	
@@ -82,15 +86,17 @@ w32_read_entire_file(String8 file_path, Memory_Arena *arena)
 	
 	return result;
 }
+typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
 #include "mplayer_renderer.cpp"
 #include "mplayer.cpp"
 
 #include "win32_mplayer_renderer_gl.cpp"
 
-
+#pragma warning(disable : 4061)
 #define MINIAUDIO_IMPLEMENTATION
 #include "third_party/miniaudio.h"
+#pragma warning(default : 4061)
 
 struct Audio_Input
 {
@@ -124,6 +130,69 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
 
+
+internal MPlayer_Input_Key_Kind
+w32_resolve_vk_code(WPARAM wParam)
+{
+	local_persist MPlayer_Input_Key_Kind key_table[256] = {0};
+	local_persist b32 key_table_initialized = 0;
+	
+	if(!key_table_initialized)
+	{
+		key_table_initialized = 1;
+		
+		for (u32 i = 'A', j = Key_A; i <= 'Z'; i += 1, j += 1)
+		{
+			key_table[i] = (MPlayer_Input_Key_Kind)j;
+		}
+		for (u32 i = '0', j = Key_0; i <= '9'; i += 1, j += 1)
+		{
+			key_table[i] = (MPlayer_Input_Key_Kind)j;
+		}
+		for (u32 i = VK_F1, j = Key_F1; i <= VK_F24; i += 1, j += 1)
+		{
+			key_table[i] = (MPlayer_Input_Key_Kind)j;
+		}
+		
+		key_table[VK_OEM_1]      = Key_SemiColon;
+		key_table[VK_OEM_2]      = Key_ForwardSlash;
+		key_table[VK_OEM_3]      = Key_GraveAccent;
+		key_table[VK_OEM_4]      = Key_LeftBracket;
+		key_table[VK_OEM_6]      = Key_RightBracket;
+		key_table[VK_OEM_7]      = Key_Quote;
+		key_table[VK_OEM_PERIOD] = Key_Period;
+		key_table[VK_OEM_COMMA]  = Key_Comma;
+		key_table[VK_OEM_MINUS]  = Key_Minus;
+		key_table[VK_OEM_PLUS]   = Key_Plus;
+		
+		key_table[VK_ESCAPE]     = Key_Esc;
+		key_table[VK_BACK]       = Key_Backspace;
+		key_table[VK_TAB]        = Key_Tab;
+		key_table[VK_SPACE]      = Key_Space;
+		key_table[VK_RETURN]     = Key_Enter;
+		key_table[VK_CONTROL]    = Key_Ctrl;
+		key_table[VK_SHIFT]      = Key_Shift;
+		key_table[VK_MENU]       = Key_Alt;
+		key_table[VK_UP]         = Key_Up;
+		key_table[VK_LEFT]       = Key_Left;
+		key_table[VK_DOWN]       = Key_Down;
+		key_table[VK_RIGHT]      = Key_Right;
+		key_table[VK_DELETE]     = Key_Delete;
+		key_table[VK_PRIOR]      = Key_PageUp;
+		key_table[VK_NEXT]       = Key_PageDown;
+		key_table[VK_HOME]       = Key_Home;
+		key_table[VK_END]        = Key_End;
+		
+	}
+	
+	MPlayer_Input_Key_Kind key = Key_Unknown;
+	if(wParam < array_count(key_table))
+	{
+		key = key_table[wParam];
+	}
+	return key;
+}
+
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	init_thread_context();
@@ -154,11 +223,11 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			
 			MPlayer_Context *mplayer = m_arena_push_struct(main_arena, MPlayer_Context);
 			{
-			mplayer->main_arena  = main_arena;
-			mplayer->frame_arena = frame_arena;
-			mplayer->render_ctx  = (Render_Context*)w32_renderer;
+				mplayer->main_arena  = main_arena;
+				mplayer->frame_arena = frame_arena;
+				mplayer->render_ctx  = (Render_Context*)w32_renderer;
 				
-				mplayer->read_entire_file = w32_read_entire_file;
+				mplayer->load_entire_file = w32_load_entire_file;
 				mplayer_initialize(mplayer);
 			}
 			
@@ -188,27 +257,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			for (;running;)
 			{
 				m_arena_free_all(frame_arena);
-				b32 request_close = false;
-				// NOTE(fakhri): process pending event
-				{
-					MSG msg;
-					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
-					{
-						switch (msg.message)
-						{
-							case WM_CLOSE:
-							{
-								request_close = true;
-							} break;
-						}
-						TranslateMessage(&msg);
-						DispatchMessage(&msg);
-					}
-				}
 				
-				if (global_request_quit)
+				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
 				{
-					break;
+					mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
 				}
 				
 				V2_I32 window_dim;
@@ -221,6 +273,142 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				
 				V2_I32 draw_dim = window_dim;
 				Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
+				
+				b32 request_close = false;
+				// NOTE(fakhri): process pending event
+				{
+					mplayer->input.first_event = 0;
+					mplayer->input.last_event = 0;
+					MPlayer_Input_Event *event = 0;
+					MSG msg;
+					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
+					{
+						switch (msg.message)
+						{
+							case WM_CLOSE:
+							{
+								request_close = true;
+							} break;
+							
+							case WM_SYSKEYDOWN: fallthrough;
+							case WM_SYSKEYUP: fallthrough;
+							case WM_KEYDOWN: fallthrough;
+							case WM_KEYUP:
+							{
+								WPARAM vk_code = msg.wParam;
+								
+								b32 alt_key_down = (msg.lParam & (1 << 29)) != 0;
+								b32 was_down = (msg.lParam & (1 << 30)) != 0;
+								b32 is_down = (msg.lParam & (1 << 31)) == 0;
+								
+								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								
+								event->kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
+								event->key = w32_resolve_vk_code(vk_code);
+								
+								mplayer->input.buttons[event->key].is_down = b32(is_down);
+							} break;
+							
+							
+							case WM_CHAR: fallthrough;
+							case WM_SYSCHAR:
+							{
+								u32 char_input = u32(msg.wParam);
+								
+								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
+								{
+									event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+									
+									event->kind = Event_Kind_Text;
+									event->text_character = char_input;
+								}
+							} break;
+							
+							case WM_MBUTTONDOWN: fallthrough;
+							case WM_MBUTTONUP:
+							{
+								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
+								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event->key = Key_MiddleMouse;
+								mplayer->input.buttons[Key_MiddleMouse].is_down = is_down;
+							} break;
+							
+							case WM_LBUTTONDOWN: fallthrough;
+							case WM_LBUTTONUP:
+							{
+								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
+								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event->key = Key_LeftMouse;
+								mplayer->input.buttons[Key_LeftMouse].is_down = is_down;
+							} break;
+							
+							case WM_RBUTTONDOWN: fallthrough;
+							case WM_RBUTTONUP:
+							{
+								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
+								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event->key = Key_RightMouse;
+								mplayer->input.buttons[Key_RightMouse].is_down = is_down;
+							} break;
+							
+							case WM_MOUSEWHEEL:
+							{
+								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
+								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event->kind = Event_Kind_Mouse_Wheel;
+								event->scroll.x = 0;
+								event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;
+							} break;
+							
+							case WM_MOUSEMOVE:
+							{
+								f32 mouse_x = f32(GET_X_LPARAM(msg.lParam)); 
+								f32 mouse_y = f32(GET_Y_LPARAM(msg.lParam)); 
+								mouse_y = f32(window_dim.y - 1) - mouse_y;
+								
+								V2_F32 mouse_clip_pos;
+								mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
+								mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
+								
+								mplayer->input.mouse_clip_pos = mouse_clip_pos;
+							} break;
+						}
+						
+						if (event != 0)
+						{
+							if (event->kind != Event_Kind_Text)
+							{
+								if ((u16(GetKeyState(VK_SHIFT)) & 0x8000) != 0)
+								{
+									set_flag(event->modifiers, Modifier_Shift);
+								}
+								
+								if ((u16(GetKeyState(VK_CONTROL)) & 0x8000) != 0)
+								{
+									set_flag(event->modifiers, Modifier_Ctrl);
+								}
+								
+								if ((u16(GetKeyState(VK_MENU)) & 0x8000) != 0)
+								{
+									set_flag(event->modifiers, Modifier_Alt);
+								}
+							}
+							
+							push_input_event(&mplayer->input, event);
+						}
+						
+						TranslateMessage(&msg);
+						DispatchMessage(&msg);
+					}
+				}
+				
+				if (global_request_quit)
+				{
+					break;
+				}
 				
 				w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
 				mplayer_update_and_render(mplayer);

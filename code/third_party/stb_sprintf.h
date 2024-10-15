@@ -306,32 +306,32 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
     stbsp__uint32 fl;
     
     // macros for the callback buffer stuff
-#define stbsp__chk_cb_bufL(bytes)                        \
-{                                                     \
-int len = (int)(bf - buf);                         \
-if ((len + (bytes)) >= STB_SPRINTF_MIN) {          \
-tlen += len;                                    \
-if (0 == (bf = buf = callback(buf, user, len))) \
-goto done;                                   \
-}                                                  \
-}
-#define stbsp__chk_cb_buf(bytes)    \
-{                                \
-if (callback) {               \
-stbsp__chk_cb_bufL(bytes); \
-}                             \
-}
-#define stbsp__flush_cb()                      \
-{                                           \
-stbsp__chk_cb_bufL(STB_SPRINTF_MIN - 1); \
-} // flush if there is even one byte in the buffer
-#define stbsp__cb_buf_clamp(cl, v)                \
-cl = v;                                        \
-if (callback) {                                \
-int lg = STB_SPRINTF_MIN - (int)(bf - buf); \
-if (cl > lg)                                \
-cl = lg;                                 \
-}
+		#define stbsp__chk_cb_bufL(bytes)                        \
+		{                                                     \
+		int len = (int)(bf - buf);                         \
+		if ((len + (bytes)) >= STB_SPRINTF_MIN) {          \
+		tlen += len;                                    \
+		if (0 == (bf = buf = callback(buf, user, len))) \
+		goto done;                                   \
+		}                                                  \
+		}
+		#define stbsp__chk_cb_buf(bytes)    \
+		{                                \
+		if (callback) {               \
+		stbsp__chk_cb_bufL(bytes); \
+		}                             \
+		}
+		#define stbsp__flush_cb()                      \
+		{                                           \
+		stbsp__chk_cb_bufL(STB_SPRINTF_MIN - 1); \
+		} // flush if there is even one byte in the buffer
+		#define stbsp__cb_buf_clamp(cl, v)                \
+		cl = v;                                        \
+		if (callback) {                                \
+		int lg = STB_SPRINTF_MIN - (int)(bf - buf); \
+		if (cl > lg)                                \
+		cl = lg;                                 \
+		}
     
     // fast copy everything up to the next % (or end of string)
     for (;;) {
@@ -360,14 +360,14 @@ cl = lg;                                 \
         if (callback)
           if ((STB_SPRINTF_MIN - (int)(bf - buf)) < 4)
           goto schk1;
-#ifdef STB_SPRINTF_noUNALIGNED
-        if(((stbsp__uintptr)bf) & 3) {
+				#ifdef STB_SPRINTF_noUNALIGNED
+					if(((stbsp__uintptr)bf) & 3) {
           bf[0] = f[0];
           bf[1] = f[1];
           bf[2] = f[2];
           bf[3] = f[3];
         } else
-#endif
+				#endif
         {
           *(stbsp__uint32 *)bf = v;
         }
@@ -515,18 +515,18 @@ cl = lg;                                 \
     
     // handle each replacement
     switch (f[0]) {
-#define STBSP__NUMSZ 512 // big enough for e308 (with commas) or e-307
-      char num[STBSP__NUMSZ];
+			#define STBSP__NUMSZ 512 // big enough for e308 (with commas) or e-307
+				char num[STBSP__NUMSZ];
       char lead[8];
       char tail[8];
       char *s;
       char const *h;
       stbsp__uint32 l, n, cs;
       stbsp__uint64 n64;
-#ifndef STB_SPRINTF_noFLOAT
-      double fv;
-#endif
-      stbsp__int32 dp;
+			#ifndef STB_SPRINTF_noFLOAT
+				double fv;
+			#endif
+				stbsp__int32 dp;
       char const *sn;
       
       case 's':
@@ -580,8 +580,8 @@ cl = lg;                                 \
         
         //- rjf: get string length
         s = (char *)str.str;
-        sn = (const char *)(str.str + str.size);
-        l = (u32)str.size;
+        sn = (const char *)(str.str + str.len);
+        l = (u32)str.len;
         
         //- rjf: clamp to precision
         lead[0] = 0;
@@ -613,8 +613,8 @@ cl = lg;                                 \
         *d = tlen + (int)(bf - buf);
       } break;
       
-#ifdef STB_SPRINTF_noFLOAT
-      case 'A':              // float
+			#ifdef STB_SPRINTF_noFLOAT
+				case 'A':              // float
       case 'a':              // hex float
       case 'G':              // float
       case 'g':              // float
@@ -630,8 +630,8 @@ cl = lg;                                 \
       dp = 0;
       cs = 0;
       goto scopy;
-#else
-      case 'A': // hex float
+			#else
+				case 'A': // hex float
       case 'a': // hex float
       h = (f[0] == 'A') ? hexu : hex;
       fv = va_arg(va, double);
@@ -654,15 +654,15 @@ cl = lg;                                 \
         n64 += ((((stbsp__uint64)8) << 56) >> (pr * 4));
       // add leading chars
       
-#ifdef STB_SPRINTF_MSVC_MODE
-      *s++ = '0';
+			#ifdef STB_SPRINTF_MSVC_MODE
+				*s++ = '0';
       *s++ = 'x';
-#else
-      lead[1 + lead[0]] = '0';
+			#else
+				lead[1 + lead[0]] = '0';
       lead[2 + lead[0]] = 'x';
       lead[0] += 2;
-#endif
-      *s++ = h[(n64 >> 60) & 15];
+			#endif
+				*s++ = h[(n64 >> 60) & 15];
       n64 <<= 4;
       if (pr)
         *s++ = stbsp__period;
@@ -781,12 +781,12 @@ cl = lg;                                 \
         dp = -dp;
       } else
         tail[2] = '+';
-#ifdef STB_SPRINTF_MSVC_MODE
-      n = 5;
-#else
-      n = (dp >= 100) ? 5 : 4;
-#endif
-      tail[0] = (char)n;
+			#ifdef STB_SPRINTF_MSVC_MODE
+				n = 5;
+			#else
+				n = (dp >= 100) ? 5 : 4;
+			#endif
+				tail[0] = (char)n;
       for (;;) {
         tail[n] = '0' + dp % 10;
         if (n <= 3)
@@ -968,9 +968,9 @@ cl = lg;                                 \
       l = (stbsp__uint32)(s - (num + 64));
       s = num + 64;
       goto scopy;
-#endif
-      
-      case 'B': // upper binary
+			#endif
+				
+				case 'B': // upper binary
       case 'b': // lower binary
       h = (f[0] == 'B') ? hexu : hex;
       lead[0] = 0;
@@ -1068,8 +1068,8 @@ cl = lg;                                 \
         }
       }
       
-#ifndef STB_SPRINTF_noFLOAT
-      if (fl & STBSP__METRIC_SUFFIX) {
+			#ifndef STB_SPRINTF_noFLOAT
+				if (fl & STBSP__METRIC_SUFFIX) {
         if (n64 < 1024)
           pr = 0;
         else if (pr == -1)
@@ -1077,10 +1077,10 @@ cl = lg;                                 \
         fv = (double)(stbsp__int64)n64;
         goto doafloat;
       }
-#endif
-      
-      // convert to string
-      s = num + STBSP__NUMSZ;
+			#endif
+				
+				// convert to string
+				s = num + STBSP__NUMSZ;
       l = 0;
       
       for (;;) {
@@ -1251,11 +1251,11 @@ cl = lg;                                 \
         stbsp__cb_buf_clamp(i, n);
         n -= i;
         STBSP__UNALIGNED(while (i >= 4) {
-                           *(stbsp__uint32 volatile *)bf = *(stbsp__uint32 volatile *)s;
-                           bf += 4;
-                           s += 4;
-                           i -= 4;
-                         })
+						*(stbsp__uint32 volatile *)bf = *(stbsp__uint32 volatile *)s;
+						bf += 4;
+						s += 4;
+						i -= 4;
+					})
           while (i) {
           *bf++ = *s++;
           --i;

@@ -529,7 +529,8 @@ flac_decode_one_block(Flac_Stream *flac_stream)
 			{
 				sample_bit_depth += (channel_index == 0);
 			} break;
-			default: break; // nothing
+			
+			case None: case Left_Right: default: break; // nothing
 		}
 		
 		switch (subframe_type.kind)
@@ -668,7 +669,8 @@ flac_decode_one_block(Flac_Stream *flac_stream)
 				decoded_block->samples_per_channel[1].samples[i] = (mid - side) >> 1;
 			}
 		} break;
-		default: break; // nothing
+		
+		case None: case Left_Right: default: break; // nothing
 	}
 	
 	// NOTE(fakhri): decode footer

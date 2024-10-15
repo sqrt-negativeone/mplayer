@@ -20,11 +20,14 @@ typedef int64_t i64;
 typedef float  f32;
 typedef double f64;
 typedef int32_t b32;
+typedef size_t umem;
 typedef void void_function();
 
 #define internal      static
 #define global        static
 #define local_persist static
+
+#define fallthrough /*fallthrough*/
 
 #if defined(_MSC_VER) 
 # define COMPILER_CL 1
@@ -77,9 +80,27 @@ typedef void void_function();
 #define memory_zero_struct(p) memory_zero(p, sizeof(*(p)))
 
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
-
-#define MIN(a, b) (((a) < (b))? (a):(b))
-
 #define has_flag(flags, f) ((flags) & (1 << (f)))
+#define set_flag(flags, f) ((flags) |= (1 << (f)))
 
+#define member(T, m) (((T*)0)->m)
+#define member_offset(T, m) int_from_ptr(&member(T, m))
+#define cast_from_member(ptr, T, m) (T*)(((u8*)(ptr)) - member_offset(T, m))
+
+#define ENABLE_LOGS 1
+
+#if ENABLE_LOGS
+#define Log(...)         _debug_log(0,           __FILE__, __LINE__, __VA_ARGS__)
+#define LogWarning(...)  _debug_log(Log_Warning, __FILE__, __LINE__, __VA_ARGS__)
+#define LogError(...)    _debug_log(Log_Error,   __FILE__, __LINE__, __VA_ARGS__)
+#else
+#define Log(...)
+#define LogWarning(...)
+#define LogError(...)
+#endif
+
+#define Log_Warning (1<<0)
+#define Log_Error   (1<<1)
+
+internal void _debug_log(i32 flags, const char *file, int line, const char *format, ...);
 #endif //MPLAYER_BASE_H

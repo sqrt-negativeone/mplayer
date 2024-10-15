@@ -37,13 +37,13 @@ w32_init_wgl(HINSTANCE hInstance, HDC dc)
   
   //- NOTE(fakhri): make global invisible window
   HWND dummy_window = CreateWindowW(L"STATIC",
-                                    L"",
-                                    WS_OVERLAPPEDWINDOW,
-                                    CW_USEDEFAULT, CW_USEDEFAULT,
-                                    100, 100,
-                                    0, 0,
-                                    hInstance,
-                                    0);
+		L"",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		100, 100,
+		0, 0,
+		hInstance,
+		0);
   assert(dummy_window);
   if (dummy_window)
   {
@@ -74,9 +74,9 @@ w32_init_wgl(HINSTANCE hInstance, HDC dc)
         wglMakeCurrent(dummy_dc, dummy_gl_conetxt);
 				{
 					wglChoosePixelFormatARB    = (PFNWGLCHOOSEPIXELFORMATARBPROC)    w32_get_gl_proc_address("wglChoosePixelFormatARB");
-  wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC) w32_get_gl_proc_address("wglCreateContextAttribsARB");
-  wglMakeContextCurrentARB   = (PFNWGLMAKECONTEXTCURRENTARBPROC)   w32_get_gl_proc_address("wglMakeContextCurrentARB");
-  wglSwapIntervalEXT         = (PFNWGLSWAPINTERVALEXTPROC)         w32_get_gl_proc_address("wglSwapIntervalEXT");
+					wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC) w32_get_gl_proc_address("wglCreateContextAttribsARB");
+					wglMakeContextCurrentARB   = (PFNWGLMAKECONTEXTCURRENTARBPROC)   w32_get_gl_proc_address("wglMakeContextCurrentARB");
+					wglSwapIntervalEXT         = (PFNWGLSWAPINTERVALEXTPROC)         w32_get_gl_proc_address("wglSwapIntervalEXT");
 				}
         wglMakeCurrent(0, 0);
         
@@ -116,10 +116,10 @@ w32_init_wgl(HINSTANCE hInstance, HDC dc)
           WGL_CONTEXT_MINOR_VERSION_ARB, GL_VERSION_MINOR,
           WGL_CONTEXT_PROFILE_MASK_ARB,  WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
           WGL_CONTEXT_FLAGS_ARB,         WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB
-#if 1
-          | WGL_CONTEXT_DEBUG_BIT_ARB
-#endif
-          ,
+					#if 1
+						| WGL_CONTEXT_DEBUG_BIT_ARB
+					#endif
+						,
           0,
         };
         
@@ -150,7 +150,7 @@ internal void
 w32_load_gl_procs()
 {
 	#define GLProc(name, type) name = (PFNGL##type##PROC)w32_get_gl_proc_address(#name); assert(name);
-#include "gl_functions.inc.h"
+	#include "gl_functions.inc.h"
 }
 
 internal W32_GL_Renderer *
@@ -162,8 +162,13 @@ w32_gl_make_renderer(HINSTANCE hInstance, HDC dc)
 		Memory_Arena *render_arena = m_arena_make(megabytes(128));
 		w32_load_gl_procs();
 		result = m_arena_push_struct(render_arena, W32_GL_Renderer);
-	assert(result);
+		assert(result);
 		result->dc = dc;
+		
+		// NOTE(fakhri): platform vtable
+		{
+			((OpenGL*)result)->load_entire_file = w32_load_entire_file;
+		}
 		
 		init_opengl_renderer((OpenGL*)result, render_arena);
 	}

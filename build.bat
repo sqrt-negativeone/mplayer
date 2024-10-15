@@ -14,10 +14,13 @@ set compiler_warnings= ^
 	/wd4100 /wd4127 /wd4189 ^
   /wd4201 ^
 	/wd4533 /wd4505 ^
-  /wd4459 /wd4471
+  /wd4459 /wd4471 ^
+  /we4061 /we4062
 
 set common_compiler_flags=/FC /Z7 /GR- /EHsc /nologo
-set compiler_flags=%common_compiler_flags% /std:c17
+
+:: We are using C++ 20 only for the designated initializers
+set compiler_flags=%common_compiler_flags% /std:c++20
 
 set compiler_includes= ^
 	/I "%code_dir%/code/"

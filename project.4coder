@@ -1,5 +1,11 @@
 version(2);
 project_name = "mplayer";
+
+indent_with_tabs = true;
+indent_width = "2";
+default_tab_width = "2";
+automatically_indent_text_on_save = true;
+
 patterns = {
   "*.c",
   "*.cpp",
@@ -9,6 +15,7 @@ patterns = {
   "*.sh",
   "*.4coder",
 };
+
 blacklist_patterns = {
   ".*",
 };
