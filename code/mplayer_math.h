@@ -7,6 +7,7 @@
 
 #include <xmmintrin.h>
 
+#define CLAMP(a, x, b) (((x) <= (a))? (a) : (((b) <= (x))? (b):(x)))
 #define MAX(a, b) (((a) >= (b))? (a):(b))
 #define MIN(a, b) (((a) <= (b))? (a):(b))
 #define ABS(a) (((a) >= 0)? (a) : -(a))
@@ -610,6 +611,13 @@ map_into_range_no(f32 min, f32 value, f32 max)
 {
   f32 result = -1.0f + 2.0f * map_into_range_zo(min, value, max);
   return result;
+}
+
+internal inline f32
+lerp(f32 a, f32 t, f32 b)
+{
+	f32 result = (1 - t) * a + t * b;
+	return result;
 }
 
 #endif //MPLAYER_MATH_H

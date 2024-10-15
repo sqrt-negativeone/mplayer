@@ -100,7 +100,7 @@ typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
 struct Audio_Input
 {
-	MPlayer_Context *mplayer;
+	Mplayer_Context *mplayer;
 };
 
 internal void
@@ -131,10 +131,10 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 }
 
 
-internal MPlayer_Input_Key_Kind
+internal Mplayer_Input_Key_Kind
 w32_resolve_vk_code(WPARAM wParam)
 {
-	local_persist MPlayer_Input_Key_Kind key_table[256] = {0};
+	local_persist Mplayer_Input_Key_Kind key_table[256] = {0};
 	local_persist b32 key_table_initialized = 0;
 	
 	if(!key_table_initialized)
@@ -143,15 +143,15 @@ w32_resolve_vk_code(WPARAM wParam)
 		
 		for (u32 i = 'A', j = Key_A; i <= 'Z'; i += 1, j += 1)
 		{
-			key_table[i] = (MPlayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Input_Key_Kind)j;
 		}
 		for (u32 i = '0', j = Key_0; i <= '9'; i += 1, j += 1)
 		{
-			key_table[i] = (MPlayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Input_Key_Kind)j;
 		}
 		for (u32 i = VK_F1, j = Key_F1; i <= VK_F24; i += 1, j += 1)
 		{
-			key_table[i] = (MPlayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Input_Key_Kind)j;
 		}
 		
 		key_table[VK_OEM_1]      = Key_SemiColon;
@@ -185,7 +185,7 @@ w32_resolve_vk_code(WPARAM wParam)
 		
 	}
 	
-	MPlayer_Input_Key_Kind key = Key_Unknown;
+	Mplayer_Input_Key_Kind key = Key_Unknown;
 	if(wParam < array_count(key_table))
 	{
 		key = key_table[wParam];
@@ -221,7 +221,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			HDC wdc = GetDC(window);
 			W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
 			
-			MPlayer_Context *mplayer = m_arena_push_struct(main_arena, MPlayer_Context);
+			Mplayer_Context *mplayer = m_arena_push_struct(main_arena, Mplayer_Context);
 			{
 				mplayer->main_arena  = main_arena;
 				mplayer->frame_arena = frame_arena;
@@ -230,6 +230,18 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				mplayer->load_entire_file = w32_load_entire_file;
 				mplayer_initialize(mplayer);
 			}
+			
+			
+			// NOTE(fakhri): Find refresh rate
+			f32 refresh_rate = 60.0f;
+			{
+				DEVMODEW device_mode;
+				if (EnumDisplaySettingsW(0, ENUM_CURRENT_SETTINGS, &device_mode))
+				{
+					refresh_rate = f32(device_mode.dmDisplayFrequency);
+				}
+			}
+			f32 target_fps = refresh_rate;
 			
 			Audio_Input audio_input = ZERO_STRUCT;
 			audio_input.mplayer = mplayer;
@@ -258,6 +270,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			{
 				m_arena_free_all(frame_arena);
 				
+				mplayer->input.frame_dt = 1.0f / target_fps;
 				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
 				{
 					mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
@@ -279,7 +292,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				{
 					mplayer->input.first_event = 0;
 					mplayer->input.last_event = 0;
-					MPlayer_Input_Event *event = 0;
+					Mplayer_Input_Event *event = 0;
 					MSG msg;
 					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
 					{
@@ -301,7 +314,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								b32 was_down = (msg.lParam & (1 << 30)) != 0;
 								b32 is_down = (msg.lParam & (1 << 31)) == 0;
 								
-								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 								
 								event->kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
 								event->key = w32_resolve_vk_code(vk_code);
@@ -317,7 +330,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								
 								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
 								{
-									event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+									event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 									
 									event->kind = Event_Kind_Text;
 									event->text_character = char_input;
@@ -328,7 +341,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_MiddleMouse;
 								mplayer->input.buttons[Key_MiddleMouse].is_down = is_down;
@@ -338,7 +351,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_LBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_LeftMouse;
 								mplayer->input.buttons[Key_LeftMouse].is_down = is_down;
@@ -348,7 +361,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_RBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_RightMouse;
 								mplayer->input.buttons[Key_RightMouse].is_down = is_down;
@@ -357,7 +370,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MOUSEWHEEL:
 							{
 								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
-								event = m_arena_push_struct(frame_arena, MPlayer_Input_Event);
+								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
 								event->kind = Event_Kind_Mouse_Wheel;
 								event->scroll.x = 0;
 								event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;

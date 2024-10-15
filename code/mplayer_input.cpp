@@ -1,5 +1,5 @@
 
-enum MPlayer_Input_Key_Kind
+enum Mplayer_Input_Key_Kind
 {
 	Key_Unknown,
   Key_Esc,
@@ -97,13 +97,13 @@ enum MPlayer_Input_Key_Kind
 	Key_COUNT,
 };
 
-struct MPlayer_Input_Button
+struct Mplayer_Input_Key
 {
 	b32 is_down;
 	b32 was_down;
 };
 
-enum MPlayer_Input_Event_Kind
+enum Mplayer_Input_Event_Kind
 {
 	Event_Kind_Null,
 	Event_Kind_Press,
@@ -112,36 +112,66 @@ enum MPlayer_Input_Event_Kind
 	Event_Kind_Mouse_Wheel,
 };
 
-enum MPlayer_Key_Modifier_Flag
+enum Mplayer_Key_Modifier_Flag
 {
 	Modifier_Ctrl,
 	Modifier_Shift,
 	Modifier_Alt,
 };
 
-struct MPlayer_Input_Event
+struct Mplayer_Input_Event
 {
-	MPlayer_Input_Event *next;
-	MPlayer_Input_Event_Kind kind;
+	Mplayer_Input_Event *next;
+	Mplayer_Input_Event_Kind kind;
 	u32 modifiers;
-	MPlayer_Input_Key_Kind key;
+	Mplayer_Input_Key_Kind key;
 	u32 text_character;
 	V2_F32 pos;
 	V2_F32 scroll;
 };
 
-struct MPlayer_Input
+struct Mplayer_Input
 {
+	f32 frame_dt;
 	V2_F32 mouse_clip_pos;
-	MPlayer_Input_Event *first_event;
-	MPlayer_Input_Event *last_event;
+	Mplayer_Input_Event *first_event;
+	Mplayer_Input_Event *last_event;
 	
-	MPlayer_Input_Button buttons[Key_COUNT];
+	Mplayer_Input_Key buttons[Key_COUNT];
 };
 
 
+internal b32
+mplayer_button_clicked(Mplayer_Input_Key button)
+{
+	b32 result = !button.was_down && button.is_down;
+	return result;
+}
+
+internal b32
+mplayer_button_released(Mplayer_Input_Key button)
+{
+	b32 result = !button.is_down && button.was_down;
+	return result;
+}
+
+internal b32
+mplayer_button_released(Mplayer_Input *input, Mplayer_Input_Key_Kind key)
+{
+	b32 result = mplayer_button_released(input->buttons[key]);
+	return result;
+}
+
+internal b32
+mplayer_button_clicked(Mplayer_Input *input, Mplayer_Input_Key_Kind key)
+{
+	b32 result = mplayer_button_clicked(input->buttons[key]);
+	return result;
+}
+
+
 internal void
-push_input_event(MPlayer_Input *input, MPlayer_Input_Event *event)
+push_input_event(Mplayer_Input *input, Mplayer_Input_Event *event)
 {
 	if (!input->last_event)
 	{

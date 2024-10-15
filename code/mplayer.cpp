@@ -7,21 +7,22 @@
 
 #include "mplayer_input.cpp"
 
-struct MPlayer_Glyph
+struct Mplayer_Glyph
 {
 	V2_F32 uv_scale;
 	V2_F32 uv_offset;
-	V2_F32 size;
+	V2_F32 dim;
 	V2_F32 offset;
 	f32 advance;
 };
 
-struct MPlayer_Font
+struct Mplayer_Font
 {
+	b32 monospaced;
 	b32 loaded;
 	Texture atlas_tex;
 	Buffer pixels_buf;
-	MPlayer_Glyph *glyphs;
+	Mplayer_Glyph *glyphs;
 	u32 first_glyph_index;
 	u32 opl_glyph_index;
 	f32 line_advance;
@@ -30,23 +31,47 @@ struct MPlayer_Font
 };
 
 
-struct MPlayer_Context
+struct Mplayer_UI_Interaction
+{
+	b32 clicked;
+};
+
+struct Mplayer_UI
+{
+	Render_Context *render_ctx;
+	Mplayer_Input *input;
+	V2_F32 mouse_p;
+	
+	u32 active_widget_id;
+	u32 hot_widget_id;
+	
+	f32 active_t;
+	f32 active_dt;
+	
+	f32 hot_t;
+	f32 hot_dt;
+};
+
+
+struct Mplayer_Context
 {
 	Memory_Arena *main_arena;
 	Memory_Arena *frame_arena;
 	Render_Context *render_ctx;
-	MPlayer_Input input;
+	Mplayer_UI ui;
+	Mplayer_Input input;
 	
+	b32 play_track;
 	Flac_Stream flac_stream;
 	Buffer flac_file_buffer;
 	
 	Load_Entire_File *load_entire_file;
 	
-	MPlayer_Font font;
+	Mplayer_Font font;
 };
 
 internal void
-load_font(MPlayer_Context *mplayer, MPlayer_Font *font, String8 font_path, f32 font_size)
+load_font(Mplayer_Context *mplayer, Mplayer_Font *font, String8 font_path, f32 font_size)
 {
 	if (font->loaded)
 	{
@@ -92,8 +117,11 @@ load_font(MPlayer_Context *mplayer, MPlayer_Font *font, String8 font_path, f32 f
 	stbtt_PackFontRanges(&ctx, (const unsigned char *)font_content.data, 0, &rng, 1);
 	stbtt_PackEnd(&ctx);
   
+	b32 monospaced = true;
+	f32 glyph_advance = -1;
+	
 	// NOTE(fakhri): build direct map
-	MPlayer_Glyph *glyphs = m_arena_push_array(mplayer->main_arena, MPlayer_Glyph, opl_glyph_index - first_glyph_index);
+	Mplayer_Glyph *glyphs = m_arena_push_array(mplayer->main_arena, Mplayer_Glyph, opl_glyph_index - first_glyph_index);
 	assert(glyphs);
   
 	for (u32 ch = first_glyph_index; 
@@ -101,7 +129,7 @@ load_font(MPlayer_Context *mplayer, MPlayer_Font *font, String8 font_path, f32 f
 		ch += 1)
 	{
 		u32 index = ch - first_glyph_index;
-		MPlayer_Glyph *glyph = glyphs + index;;
+		Mplayer_Glyph *glyph = glyphs + index;;
 		
 		f32 x_offset = 0;
 		f32 y_offset = 0;
@@ -111,9 +139,12 @@ load_font(MPlayer_Context *mplayer, MPlayer_Font *font, String8 font_path, f32 f
 		
 		glyph->uv_offset = vec2(quad.s0, quad.t0);
 		glyph->uv_scale  = vec2(ABS(quad.s1 - quad.s0), ABS(quad.t1 - quad.t0));
-		glyph->size      = glyph->uv_scale * vec2(atlas_dim);
-		glyph->offset    = vec2(quad.x0 + 0.5f * glyph->size.x, -(quad.y0 + 0.5f * glyph->size.y));
+		glyph->dim      = glyph->uv_scale * vec2(atlas_dim);
+		glyph->offset    = vec2(quad.x0 + 0.5f * glyph->dim.width, -(quad.y0 + 0.5f * glyph->dim.height));
 		glyph->advance   = x_offset;
+		
+		glyph_advance = (glyph_advance == -1)? glyph->advance:glyph_advance;
+		monospaced = monospaced && (glyph_advance == glyph->advance);
 	}
   
 	font->loaded = true;
@@ -130,10 +161,10 @@ load_font(MPlayer_Context *mplayer, MPlayer_Font *font, String8 font_path, f32 f
 	push_texture_upload_request(&mplayer->render_ctx->upload_buffer, font->atlas_tex, pixels_buf);
 }
 
-internal MPlayer_Glyph
-font_get_glyph_from_char(MPlayer_Font *font, u8 ch)
+internal Mplayer_Glyph
+font_get_glyph_from_char(Mplayer_Font *font, u8 ch)
 {
-	MPlayer_Glyph glyph = ZERO_STRUCT;
+	Mplayer_Glyph glyph = ZERO_STRUCT;
 	if (ch >= font->first_glyph_index && ch < font->opl_glyph_index) 
 	{
 		glyph = font->glyphs[ch - font->first_glyph_index];
@@ -145,8 +176,33 @@ font_get_glyph_from_char(MPlayer_Font *font, u8 ch)
 	return glyph;
 }
 
+internal V2_F32
+font_compute_text_dim(Mplayer_Font *font, String8 text)
+{
+	V2_F32 result;
+	result.height = font->ascent - font->descent;
+	result.width = 0;
+	
+	if (font->monospaced)
+	{
+		Mplayer_Glyph glyph = font_get_glyph_from_char(font, ' ');
+		result.width = text.len * glyph.advance;
+	}
+	else 
+	{
+		for (u32 i = 0; i < text.len; i += 1)
+		{
+			u8 ch = text.str[i];
+			Mplayer_Glyph glyph = font_get_glyph_from_char(font, ch);
+			result.width += glyph.advance;
+		}
+	}
+	
+	return result;
+}
+
 internal void
-draw_text(Render_Context *render_ctx, MPlayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, M4_Inv clip, f32 scale = 1.0f)
+draw_text(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, M4_Inv clip, f32 scale = 1.0f)
 {
 	// NOTE(fakhri): render the text
 	V3_F32 text_pt = vec3(pos, 0);
@@ -156,11 +212,11 @@ draw_text(Render_Context *render_ctx, MPlayer_Font *font, String8 text, V2_F32 p
 	{
 		u8 ch = text.str[offset];
 		// TODO(fakhri): utf8 support
-		MPlayer_Glyph glyph = font_get_glyph_from_char(font, ch);
+		Mplayer_Glyph glyph = font_get_glyph_from_char(font, ch);
 		V3_F32 glyph_p = vec3(text_pt.xy + (glyph.offset * scale), 0);
 		push_image(render_ctx, 
 			glyph_p, 
-			glyph.size * scale,
+			glyph.dim * scale,
 			font->atlas_tex,
 			clip,
 			color,
@@ -173,29 +229,132 @@ draw_text(Render_Context *render_ctx, MPlayer_Font *font, String8 text, V2_F32 p
 }
 
 internal void
-mplayer_get_audio_samples(MPlayer_Context *mplayer, void *output_buf, u32 frame_count)
+draw_text_centered(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, M4_Inv clip, f32 scale = 1.0f)
 {
-	Flac_Stream *flac_stream = &mplayer->flac_stream;
-	if (flac_stream)
+	V2_F32 text_dim = scale * font_compute_text_dim(font, text);
+	pos.x -= 0.5f * text_dim.width;
+	pos.y -= 0.25f * text_dim.height;
+	draw_text(render_ctx, font, text, pos, color, clip, scale);
+}
+
+internal void
+ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F32 mouse_p)
+{
+	ui->render_ctx = render_ctx;
+	ui->input   = input;
+	ui->mouse_p = mouse_p;
+}
+
+
+#define ui_button(ui, font, clip, text, pos) _ui_button(ui, font, clip, text, pos, __LINE__)
+internal Mplayer_UI_Interaction
+_ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F32 pos, u32 id)
+{
+	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
+	
+	V2_F32 padding    = vec2(10, 10);
+	V2_F32 button_dim = font_compute_text_dim(font, text) + padding;
+	
+	if (is_in_range(range_center_dim(pos, button_dim), ui->mouse_p))
 	{
-		u32 channels_count = flac_stream->streaminfo.nb_channels;
+		if (ui->active_widget_id != id)
+		{
+			ui->active_widget_id = id;
+			ui->active_t = 0;
+			ui->active_dt = 8.0f;
+		}
+	}
+	else
+	{
+		if (ui->active_widget_id == id)
+		{
+			ui->active_widget_id = 0;
+		}
 		
-		Memory_Checkpoint scratch = get_scratch(0, 0);
-		Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, scratch.arena);
-		memory_copy(output_buf, streamed_samples.samples, streamed_samples.frames_count * channels_count * sizeof(f32));
+		if (ui->hot_widget_id == id && 
+			mplayer_button_released(ui->input, Key_LeftMouse))
+		{
+			ui->hot_widget_id = 0;
+		}
+	}
+	
+	V2_F32 final_button_dim = button_dim;
+	
+	if (ui->active_widget_id == id)
+	{
+		ui->active_t += ui->input->frame_dt * ui->active_dt;
+		ui->active_t = CLAMP(0, ui->active_t, 1.0f);
+		
+		
+		final_button_dim.height = lerp(final_button_dim.height, 
+			ui->active_t,
+			1.05f * button_dim.height);
+		
+		if (mplayer_button_clicked(ui->input, Key_LeftMouse))
+		{
+			ui->hot_widget_id = id;
+			ui->hot_t = 0;
+			ui->hot_dt = 20.0f;
+		}
+		
+		if (ui->hot_widget_id == id)
+		{
+			if (mplayer_button_released(ui->input, Key_LeftMouse))
+			{
+				interaction.clicked = 1;
+				ui->hot_widget_id = 0;
+			}
+		}
+	}
+	
+	if (ui->hot_widget_id == id)
+	{
+		ui->hot_t += ui->input->frame_dt * ui->hot_dt;
+		ui->hot_t = CLAMP(0, ui->hot_t, 1.0f);
+		
+		
+		final_button_dim.height = lerp(final_button_dim.height, 
+			ui->hot_t,
+			0.95f * button_dim.height);
+	}
+	
+	
+	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
+	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
+	push_rect(ui->render_ctx, pos, final_button_dim, clip, button_bg_color);
+	draw_text_centered(ui->render_ctx, font, text, pos, text_color, clip);
+	return interaction;
+}
+
+
+internal void
+mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
+{
+	if (mplayer->play_track)
+	{
+		Flac_Stream *flac_stream = &mplayer->flac_stream;
+		if (flac_stream)
+		{
+			u32 channels_count = flac_stream->streaminfo.nb_channels;
+			
+			Memory_Checkpoint scratch = get_scratch(0, 0);
+			Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, scratch.arena);
+			memory_copy(output_buf, streamed_samples.samples, streamed_samples.frames_count * channels_count * sizeof(f32));
+		}
 	}
 }
 
 internal void
-mplayer_initialize(MPlayer_Context *mplayer)
+mplayer_initialize(Mplayer_Context *mplayer)
 {
 	mplayer->flac_file_buffer = mplayer->load_entire_file(str8_lit("data/tests/fear_inoculum.flac"), mplayer->main_arena);
 	init_flac_stream(&mplayer->flac_stream, mplayer->flac_file_buffer);
-	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 20);
+	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 40);
+	mplayer->play_track = 0;
 }
 
 internal void
-mplayer_update_and_render(MPlayer_Context *mplayer)
+mplayer_update_and_render(Mplayer_Context *mplayer)
 {
 	Render_Context *render_ctx = mplayer->render_ctx;
 	
@@ -204,7 +363,8 @@ mplayer_update_and_render(MPlayer_Context *mplayer)
 	V2_F32 world_mouse_p = (clip.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
 	
-	Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
+	#if 0	
+		Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
 	{
 		f32 footer_percentage = 0.15f;
 		f32 footer_height = MAX(footer_percentage * range_dim(screen_rect).height, 100);
@@ -217,11 +377,24 @@ mplayer_update_and_render(MPlayer_Context *mplayer)
 		V2_F32 play_button_dim = 0.9f * vec2(footer_dim.height);
 		push_rect(render_ctx, footer_pos, play_button_dim, clip, vec4(0.3f, 0.3f, 0.3f, 1));
 	}
-	
-	V4_F32 cursor_color = vec4(1.0f, 1.0f, 0.0f, 1);
-	if (mplayer->input.buttons[Key_LeftMouse].is_down)
+	#endif
+		
+		// NOTE(fakhri): UI
 	{
-		cursor_color.g = 0;
+		ui_begin(&mplayer->ui, render_ctx, &mplayer->input, world_mouse_p);
+		if (!mplayer->play_track)
+		{
+			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Play"), vec2(0, 0)).clicked)
+			{
+				mplayer->play_track = 1;
+			}
+		}
+		else
+		{
+			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Pause"), vec2(0, 0)).clicked)
+			{
+				mplayer->play_track = 0;
+			}
+		}
 	}
-	push_rect(render_ctx, world_mouse_p, vec2(10, 10), clip, cursor_color);
 }
