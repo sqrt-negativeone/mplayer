@@ -304,6 +304,38 @@ sub_v2(V2_F32 lhs, V2_F32 rhs)
 	return result;
 }
 
+internal inline V4_F32
+add_v4(V4_F32 lhs, V4_F32 rhs)
+{
+	V4_F32 result;
+	#ifdef USE_SSE
+		result.SSE = _mm_add_ps(lhs.SSE, rhs.SSE);
+	#else
+		result.x = lhs.x + rhs.x;
+  result.y = lhs.y + rhs.y;
+  result.z = lhs.z + rhs.z;
+  result.w = lhs.w + rhs.w;
+	#endif
+		
+		return result;
+}
+
+internal inline V4_F32
+sub_v4(V4_F32 lhs, V4_F32 rhs)
+{
+	V4_F32 result;
+	#ifdef USE_SSE
+		result.SSE = _mm_sub_ps(lhs.SSE, rhs.SSE);
+	#else
+		result.x = lhs.x - rhs.x;
+  result.y = lhs.y - rhs.y;
+  result.z = lhs.z - rhs.z;
+  result.w = lhs.w - rhs.w;
+	#endif
+		
+		return result;
+}
+
 internal inline V2_F32
 operator+(V2_F32 lhs, V2_F32 rhs)
 {
@@ -314,6 +346,19 @@ internal inline V2_F32
 operator-(V2_F32 lhs, V2_F32 rhs)
 {
 	return sub_v2(lhs, rhs);
+}
+
+
+internal inline V4_F32
+operator+(V4_F32 lhs, V4_F32 rhs)
+{
+	return add_v4(lhs, rhs);
+}
+
+internal inline V4_F32
+operator-(V4_F32 lhs, V4_F32 rhs)
+{
+	return sub_v4(lhs, rhs);
 }
 
 // NOTE(fakhri): multiplication
@@ -355,6 +400,43 @@ mul_v3(V3_F32 lhs, f32 v)
 	result.z *= v;
 	return result;
 }
+
+
+internal inline V4_F32
+mul_v4(V4_F32 lhs, f32 v)
+{
+  V4_F32 result;
+  
+	#ifdef USE_SSE
+		__m128 scalar = _mm_set1_ps(v);
+  result.SSE = _mm_mul_ps(lhs.SSE, scalar);
+	#else
+		result.x = Left.x * Right;
+  result.y = Left.y * Right;
+  result.z = Left.z * Right;
+  result.w = Left.w * Right;
+	#endif
+		
+		return result;
+}
+
+internal inline V4_F32
+mul_v4(V4_F32 lhs, V4_F32 rhs)
+{
+  V4_F32 result;
+  
+	#ifdef USE_SSE
+		result.SSE = _mm_mul_ps(lhs.SSE, rhs.SSE);
+	#else
+		result.x = lhs.x * rhs.x;
+  result.y = lhs.y * rhs.y;
+  result.z = lhs.z * rhs.z;
+  result.w = lhs.w * rhs.w;
+	#endif
+		
+		return result;
+}
+
 
 internal inline V4_F32
 linear_combine_v4m4(V4_F32 lhs, M4 rhs)
@@ -442,6 +524,24 @@ internal inline V3_F32
 operator*(f32 v, V3_F32 rhs)
 {
 	return mul_v3(rhs, v);
+}
+
+internal inline V4_F32
+operator*(V4_F32 lhs, V4_F32 rhs)
+{
+	return mul_v4(lhs, rhs);
+}
+
+internal inline V4_F32
+operator*(V4_F32 lhs, f32 v)
+{
+	return mul_v4(lhs, v);
+}
+
+internal inline V4_F32
+operator*(f32 v, V4_F32 rhs)
+{
+	return mul_v4(rhs, v);
 }
 
 
@@ -617,6 +717,13 @@ internal inline f32
 lerp(f32 a, f32 t, f32 b)
 {
 	f32 result = (1 - t) * a + t * b;
+	return result;
+}
+
+internal inline V4_F32
+lerp(V4_F32 a, f32 t, V4_F32 b)
+{
+	V4_F32 result = (1 - t) * a + t * b;
 	return result;
 }
 
