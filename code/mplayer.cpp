@@ -68,6 +68,7 @@ struct Mplayer_Context
 	Load_Entire_File *load_entire_file;
 	
 	Mplayer_Font font;
+	f32 volume;
 };
 
 internal void
@@ -245,8 +246,9 @@ ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F3
 	ui->mouse_p = mouse_p;
 }
 
+#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip, __LINE__)
 internal void
-ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
+_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
 	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
@@ -423,7 +425,6 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F3
 			0.95f * button_dim.height);
 	}
 	
-	
 	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
 	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
 	push_rect(ui->render_ctx, pos, final_button_dim, clip, button_bg_color);
@@ -438,13 +439,24 @@ mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_
 	if (mplayer->play_track)
 	{
 		Flac_Stream *flac_stream = &mplayer->flac_stream;
+		f32 volume = mplayer->volume;
 		if (flac_stream)
 		{
 			u32 channels_count = flac_stream->streaminfo.nb_channels;
 			
 			Memory_Checkpoint scratch = get_scratch(0, 0);
 			Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, scratch.arena);
-			memory_copy(output_buf, streamed_samples.samples, streamed_samples.frames_count * channels_count * sizeof(f32));
+			
+			for (u32 i = 0; i < streamed_samples.frames_count; i += 1)
+			{
+				f32 *samples = streamed_samples.samples + i * channels_count;
+				f32 *out_f32 = (f32*)output_buf + i * channels_count;
+				for (u32 c = 0; c < channels_count; c += 1)
+				{
+					out_f32[c] = volume * samples[c];
+				}
+			}
+			// /memory_copy(output_buf, streamed_samples.samples, streamed_samples.frames_count * channels_count * sizeof(f32));
 		}
 	}
 }
@@ -456,6 +468,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	init_flac_stream(&mplayer->flac_stream, mplayer->flac_file_buffer);
 	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 40);
 	mplayer->play_track = 0;
+	mplayer->volume = 1.0f;
 }
 
 internal void
@@ -490,7 +503,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		ui_begin(&mplayer->ui, render_ctx, &mplayer->input, world_mouse_p);
 		
 		local_persist f32 val = 1.0f;
-		ui_slider_f32(&mplayer->ui, &val, 0, 100, vec2(0, y), vec2(1000, 20), clip, 1);
+		ui_slider_f32(&mplayer->ui, &val, 0, 1, vec2(0, y), vec2(1200, 20), clip);
 		y -= 50.f;
 		
 		if (!mplayer->play_track)
@@ -507,5 +520,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				mplayer->play_track = 0;
 			}
 		}
+		
+		ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, vec2(400, y), vec2(200, 20), clip);
 	}
 }
