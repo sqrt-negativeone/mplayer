@@ -74,6 +74,25 @@ struct Flac_Decoded_Block
 };
 
 
+struct Flac_Subframe_Info
+{
+	Bit_Stream_Pos samples_start_pos;
+	Flac_Subframe_Type subframe_type;
+	u8 wasted_bits;
+};
+
+struct Flac_Block_Info
+{
+	Flac_Stereo_Channel_Config channel_config;
+	u8 nb_channels;
+	u8 bits_depth;
+	
+	Flac_Block_Strategy block_strat;
+	u64 block_size;
+	Bit_Stream_Pos start_pos;
+	Flac_Subframe_Info subframes_info[FLAC_MAX_CHANNEL_COUNT];
+};
+
 struct Flac_Stream 
 {
 	b32 done;
@@ -82,118 +101,66 @@ struct Flac_Stream
 	Memory_Arena *block_arena;
 	Flac_Decoded_Block recent_block;
 	u64 remaining_frames_count;
+	
+	Bit_Stream_Pos blocks_start_pos;
+	b32 fixed_blocks;
+	u64 next_sample_number;
 };
 
 
-
 internal void
-init_flac_stream(Flac_Stream *flac_stream, Buffer data)
+flac_skip_coded_residuals(Bit_Stream *bitstream, u32 block_size, u32 order)
 {
-	// NOTE(fakhri): init bitstream
+	u8 params_bits = 0;
+	u8 escape_code = 0;
+	
+	switch (bitstream_read_bits_unsafe(bitstream, 2))
 	{
-		flac_stream->bitstream.buffer = data;
-		flac_stream->bitstream.byte_index = 0;
-		flac_stream->bitstream.bits_left  = 8;
+		case 0: {
+			params_bits = 4;
+			escape_code = 0xF;
+		} break;
+		case 1: {
+			params_bits = 5;
+			escape_code = 0x1F;
+		} break;
+		default: {
+			invalid_code_path("reserved");
+		}
 	}
 	
-	flac_stream->block_arena = m_arena_make(megabytes(8));
-	
-	Bit_Stream *bitstream = &flac_stream->bitstream;
-	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
-	
-	u32 md_blocks_count = 0;
-	b32 is_last_md_block = false;
-	
-	// fLaC marker
-	// STREAMINFO block
-	// ... metadata blocks (127 different kinds of metadata blocks)
-	// audio frames
-	assert(bitstream_read_u32be(bitstream) == 0x664c6143); // "fLaC" marker
-	// NOTE(fakhri): parse meta data blocks
-	for (;!is_last_md_block;)
+	u64 partition_order = bitstream_read_bits_unsafe(bitstream, 4);
+	u64 partition_count = 1ull << partition_order;
+	for (u32 part_index = 0; part_index < partition_count; part_index += 1)
 	{
-		md_blocks_count += 1;
-		
-		is_last_md_block = b32(bitstream_read_bits_unsafe(bitstream, 1));
-		u8 md_type = u8(bitstream_read_bits_unsafe(bitstream, 7));
-		
-		// NOTE(fakhri): big endian
-		u32 md_size = bitstream_read_u24be(bitstream);
-		
-		assert(md_type != 127);
-		if (md_blocks_count == 1)
+		// NOTE(fakhri): we can't do each partition in parallel, if the partition is not an escape partition
+		// then we can't know the size of it because it contains numbers encoded in unary, which have variable
+		// size... BUT, since we know the size of the escape partition, we can have it be decoded in parallel,
+		// and overlap that work with the non escape partition
+		// TODO(fakhri): do escape partitions in parallel
+		u64 residual_samples_count = (block_size >> partition_order) - u32((part_index == 0)? order:0);
+		u8 paramter = u8(bitstream_read_bits_unsafe(bitstream, params_bits));
+		if (paramter == escape_code)
 		{
-			// NOTE(fakhri): make sure the first meta data block is a streaminfo block
-			// as per specification
-			assert(md_type == 0);
-		}
-		
-		switch (md_type)
-		{
-			case 0:
+			// NOTE(fakhri): escape partition
+			u8 residual_bits_precision = u8(bitstream_read_bits_unsafe(bitstream, 5));
+			if (residual_bits_precision != 0)
 			{
-				// NOTE(fakhri): streaminfo block
-				assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
-				
-				streaminfo->min_block_size = bitstream_read_u16be(bitstream);
-				streaminfo->max_block_size = bitstream_read_u16be(bitstream);
-				
-				streaminfo->min_frame_size = bitstream_read_u24be(bitstream);
-				streaminfo->max_frame_size = bitstream_read_u24be(bitstream);
-				
-				streaminfo->sample_rate     = u32(bitstream_read_bits_unsafe(bitstream, 20));
-				streaminfo->nb_channels     = u8(bitstream_read_bits_unsafe(bitstream, 3)) + 1;
-				streaminfo->bits_per_sample = u8(bitstream_read_bits_unsafe(bitstream, 5)) + 1;
-				streaminfo->samples_count   = bitstream_read_bits_unsafe(bitstream, 36);
-				
-				// TODO(fakhri): handle md5 checksum
-				bitstream_skip_bytes(bitstream, 16);
-				
-				// NOTE(fakhri): streaminfo checks
+				for (;residual_samples_count--;)
 				{
-					assert(streaminfo->min_block_size >= 16);
-					assert(streaminfo->max_block_size >= streaminfo->min_block_size);
+					bitstream_read_sample_unencoded(bitstream, residual_bits_precision, 0);
 				}
-			} break;
-			case 1:
+			}
+		}
+		else
+		{
+			for (;residual_samples_count--;)
 			{
-				// NOTE(fakhri): padding
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			case 2:
-			{
-				// NOTE(fakhri): application
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			case 3:
-			{
-				// NOTE(fakhri): seektable
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			case 4:
-			{
-				// vorbis comment
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			case 5:
-			{
-				// NOTE(fakhri): cuesheet
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			case 6:
-			{
-				// NOTE(fakhri): Picture
-				bitstream_skip_bytes(bitstream, int(md_size));
-			} break;
-			default:
-			{
-				bitstream_skip_bytes(bitstream, int(md_size));
-				invalid_code_path();
-			} break;
+				for (;bitstream_read_bits_unsafe(bitstream, 1) == 0;);
+				bitstream_read_bits_unsafe(bitstream, paramter);
+			}
 		}
 	}
-	
-	return;
 }
 
 internal void
@@ -268,8 +235,223 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_s
 	}
 }
 
+internal Flac_Block_Info
+flac_process_block(Flac_Stream *flac_stream, b32 first_block = 0)
+{
+	Flac_Block_Info block_info = ZERO_STRUCT;
+	block_info.start_pos = flac_stream->bitstream.pos;
+	
+	Bit_Stream *bitstream = &flac_stream->bitstream;
+	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
+	flac_stream->recent_block.interchannel_sample_count = 0;
+	flac_stream->remaining_frames_count = 0;
+	
+	if (bitstream_is_empty(bitstream))
+	{
+		flac_stream->done = true;
+		return block_info;
+	}
+	
+	block_info.nb_channels = streaminfo->nb_channels;
+	
+	// NOTE(fakhri): decode header
+	{
+		u64 sync_code = bitstream_read_bits_unsafe(bitstream, 15);
+		assert(sync_code == 0x7ffc); // 0b111111111111100
+		
+		// TODO(fakhri): didn't test Variable_Size startegy yet!!
+		block_info.block_strat = Flac_Block_Strategy(bitstream_read_bits_unsafe(bitstream, 1));
+		
+		u64 block_size_bits  = bitstream_read_bits_unsafe(bitstream, 4);
+		u64 sample_rate_bits = bitstream_read_bits_unsafe(bitstream, 4);
+		u64 channels_bits    = bitstream_read_bits_unsafe(bitstream, 4);
+		u64 bit_depth_bits   = bitstream_read_bits_unsafe(bitstream, 3);
+		
+		if (bit_depth_bits == 0)
+		{
+			block_info.bits_depth = streaminfo->bits_per_sample;
+		}
+		else
+		{
+			assert(bit_depth_bits != 3); // reserved
+			block_info.bits_depth = u8(flac_bits_depth[bit_depth_bits]);
+		}
+		
+		bitstream_skip_bits(bitstream, 1);
+		
+		u8 coded_byte0 = bitstream_read_u8(bitstream);
+		
+		if (coded_byte0 <= 0x7F)
+		{ // 0xxx_xxxx
+		}
+		else if (0xC0 <= coded_byte0 && coded_byte0 <= 0xDF)
+		{ // 110x_xxxx 10xx_xxxx
+			bitstream_skip_bytes(bitstream, 1);
+		}
+		else if (0xE0 <= coded_byte0 && coded_byte0 <= 0xEF)
+		{ // 1110_xxxx 10xx_xxxx 10xx_xxxx
+			bitstream_skip_bytes(bitstream, 2);
+		}
+		else if (0xF0 <= coded_byte0 && coded_byte0 <= 0xF7)
+		{ // 1111_0xxx 10xx_xxxx 10xx_xxxx 10xx_xxxx
+			bitstream_skip_bytes(bitstream, 3);
+		}
+		else if (0xF8 <= coded_byte0 && coded_byte0 <= 0xFB)
+		{ // 1111_10xx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
+			bitstream_skip_bytes(bitstream, 4);
+		}
+		else if (0xFC <= coded_byte0 && coded_byte0 <= 0xFD)
+		{ // 1111_110x 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
+			bitstream_skip_bytes(bitstream, 5);
+		}
+		else if (coded_byte0 ==  0xFE)
+		{        // 1111_1110 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
+			bitstream_skip_bytes(bitstream, 6);
+		}
+		
+		switch (block_size_bits)
+		{
+			case 0: {
+				// NOTE(fakhri): reserved
+				invalid_code_path("block size using reserved bit");
+			} break;
+			case 1: block_info.block_size = 192; break;
+			case 2: case 3: case 4: case 5: block_info.block_size = 144 << block_size_bits; break;
+			case 6: block_info.block_size = u32(bitstream_read_u8(bitstream)) + 1;   break;
+			case 7: block_info.block_size = u32(bitstream_read_u16be(bitstream)) + 1; break;
+			default: block_info.block_size = 1ull << block_size_bits;
+		}
+		
+		switch (sample_rate_bits)
+		{
+			case 0xC:
+			{
+				bitstream_skip_bytes(bitstream, 1);
+			} break;
+			case 0xD:
+			{
+				bitstream_skip_bytes(bitstream, 2);
+			} break;
+			case 0xE:
+			{
+				bitstream_skip_bytes(bitstream, 2);
+			} break;
+			case 0xF:
+			{
+				invalid_code_path("forbidden sample rate bits pattern");
+			} break;
+		}
+		
+		block_info.nb_channels    = flac_block_channel_count[channels_bits];
+		block_info.channel_config = flac_block_channel_config[channels_bits];
+		bitstream_skip_bytes(bitstream, 1);
+	}
+	
+	// NOTE(fakhri): decode subframes
+	for (u32 channel_index = 0;
+		channel_index < block_info.nb_channels;
+		channel_index += 1)
+	{
+		Flac_Subframe_Info *subframe_info = block_info.subframes_info + channel_index;
+		bitstream_skip_bits(bitstream, 1);
+		
+		u64 subframe_type_bits = bitstream_read_bits_unsafe(bitstream, 6);
+		switch (subframe_type_bits)
+		{
+			case 0:
+			{
+				subframe_info->subframe_type.kind = Subframe_Constant;
+			} break;
+			case 1:
+			{
+				subframe_info->subframe_type.kind = Subframe_Verbatim;
+			} break;
+			default: 
+			{
+				if (0x8 <= subframe_type_bits && subframe_type_bits <= 0xC)
+				{
+					subframe_info->subframe_type.kind = Subframe_Fixed_Prediction;
+					subframe_info->subframe_type.order = u8(subframe_type_bits) - 8;
+				}
+				else if (0x20 <= subframe_type_bits && subframe_type_bits <= 0x3F) 
+				{
+					subframe_info->subframe_type.kind = Subframe_Linear_Prediction;
+					subframe_info->subframe_type.order = u8(subframe_type_bits) - 31;
+				}
+			} break;
+		}
+		
+		if (bitstream_read_bits_unsafe(bitstream, 1) == 1)
+		{ // NOTE(fakhri): has wasted bits
+			subframe_info->wasted_bits = 1;
+			
+			for (;bitstream_read_bits_unsafe(bitstream, 1) != 1;)
+			{
+				subframe_info->wasted_bits += 1;
+			}
+		}
+		
+		u8 sample_bit_depth = block_info.bits_depth - u8(subframe_info->wasted_bits);
+		
+		switch (block_info.channel_config)
+		{
+			case Left_Side: case Mid_Side:
+			{
+				// NOTE(fakhri): increase bit depth by 1 in case this is a side channel
+				sample_bit_depth += (channel_index == 1);
+			} break;
+			case Side_Right:
+			{
+				sample_bit_depth += (channel_index == 0);
+			} break;
+			
+			case None: case Left_Right: default: break; // nothing
+		}
+		
+		subframe_info->samples_start_pos = bitstream->pos;
+		switch (subframe_info->subframe_type.kind)
+		{
+			case Subframe_Constant:
+			{
+				bitstream_skip_bits(bitstream, sample_bit_depth);
+			} break;
+			
+			case Subframe_Verbatim:
+			{
+				bitstream_skip_bits(bitstream, sample_bit_depth * block_info.block_size);
+			} break;
+			
+			case Subframe_Fixed_Prediction:
+			{
+				bitstream_skip_bits(bitstream, sample_bit_depth * subframe_info->subframe_type.order);
+				flac_skip_coded_residuals(bitstream, u32(block_info.block_size), subframe_info->subframe_type.order);
+			} break;
+			
+			case Subframe_Linear_Prediction:
+			{
+				bitstream_skip_bits(bitstream, sample_bit_depth * subframe_info->subframe_type.order);
+				
+				u64 predictor_coef_precision_bits = bitstream_read_bits_unsafe(bitstream, 4);
+				assert(predictor_coef_precision_bits != 0xF);
+				predictor_coef_precision_bits += 1;
+				
+				bitstream_skip_bits(bitstream, 5 + subframe_info->subframe_type.order * predictor_coef_precision_bits);
+				flac_skip_coded_residuals(bitstream, u32(block_info.block_size), subframe_info->subframe_type.order);
+			} break;
+		}
+	}
+	
+	// NOTE(fakhri): decode footer
+	{
+		bitstream_advance_to_next_byte_boundary(bitstream);
+		bitstream_read_bits_unsafe(bitstream, 16);
+	}
+	
+	return block_info;
+}
+
 internal void
-flac_decode_one_block(Flac_Stream *flac_stream)
+flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 {
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
@@ -300,8 +482,16 @@ flac_decode_one_block(Flac_Stream *flac_stream)
 		assert(sync_code == 0x7ffc); // 0b111111111111100
 		
 		// TODO(fakhri): didn't test Variable_Size startegy yet!!
-		// TODO(fakhri): make sure that this value doesn't change through the stream
 		block_strat = Flac_Block_Strategy(bitstream_read_bits_unsafe(bitstream, 1));
+		if (first_block)
+		{
+			flac_stream->fixed_blocks = (block_strat == Fixed_Size);
+		}
+		else
+		{
+			// NOTE(fakhri): make sure the value of the block strategy doesn't change throughout the stream
+			assert(flac_stream->fixed_blocks == (block_strat == Fixed_Size));
+		}
 		
 		u64 block_size_bits  = bitstream_read_bits_unsafe(bitstream, 4);
 		u64 sample_rate_bits = bitstream_read_bits_unsafe(bitstream, 4);
@@ -413,6 +603,18 @@ flac_decode_one_block(Flac_Stream *flac_stream)
 				(u64(coded_byte4 & 0x3F) << 12) | 
 				(u64(coded_byte5 & 0x3F) << 6) | 
 				u64(coded_byte6 & 0x3F));
+		}
+		
+		if (flac_stream->fixed_blocks)
+		{
+			u64 frame_number = coded_number;
+			// TODO(fakhri): check if it equals the number of frames preceding this frame
+			
+		}
+		else
+		{
+			u64 first_sample_number = coded_number;
+			// TODO(fakhri): check if it equals the number of samples preceding this frame
 		}
 		
 		switch (block_size_bits)
@@ -681,6 +883,120 @@ flac_decode_one_block(Flac_Stream *flac_stream)
 	return;
 }
 
+internal void
+init_flac_stream(Flac_Stream *flac_stream, Buffer data)
+{
+	// NOTE(fakhri): init bitstream
+	{
+		flac_stream->bitstream.buffer = data;
+		flac_stream->bitstream.pos.byte_index = 0;
+		flac_stream->bitstream.pos.bits_left  = 8;
+	}
+	
+	flac_stream->block_arena = m_arena_make(megabytes(8));
+	
+	Bit_Stream *bitstream = &flac_stream->bitstream;
+	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
+	
+	u32 md_blocks_count = 0;
+	b32 is_last_md_block = false;
+	
+	// fLaC marker
+	// STREAMINFO block
+	// ... metadata blocks (127 different kinds of metadata blocks)
+	// audio frames
+	assert(bitstream_read_u32be(bitstream) == 0x664c6143); // "fLaC" marker
+	// NOTE(fakhri): parse meta data blocks
+	for (;!is_last_md_block;)
+	{
+		md_blocks_count += 1;
+		
+		is_last_md_block = b32(bitstream_read_bits_unsafe(bitstream, 1));
+		u8 md_type = u8(bitstream_read_bits_unsafe(bitstream, 7));
+		
+		// NOTE(fakhri): big endian
+		u32 md_size = bitstream_read_u24be(bitstream);
+		
+		assert(md_type != 127);
+		if (md_blocks_count == 1)
+		{
+			// NOTE(fakhri): make sure the first meta data block is a streaminfo block
+			// as per specification
+			assert(md_type == 0);
+		}
+		
+		switch (md_type)
+		{
+			case 0:
+			{
+				// NOTE(fakhri): streaminfo block
+				assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
+				
+				streaminfo->min_block_size = bitstream_read_u16be(bitstream);
+				streaminfo->max_block_size = bitstream_read_u16be(bitstream);
+				
+				streaminfo->min_frame_size = bitstream_read_u24be(bitstream);
+				streaminfo->max_frame_size = bitstream_read_u24be(bitstream);
+				
+				streaminfo->sample_rate     = u32(bitstream_read_bits_unsafe(bitstream, 20));
+				streaminfo->nb_channels     = u8(bitstream_read_bits_unsafe(bitstream, 3)) + 1;
+				streaminfo->bits_per_sample = u8(bitstream_read_bits_unsafe(bitstream, 5)) + 1;
+				streaminfo->samples_count   = bitstream_read_bits_unsafe(bitstream, 36);
+				
+				// TODO(fakhri): handle md5 checksum
+				bitstream_skip_bytes(bitstream, 16);
+				
+				// NOTE(fakhri): streaminfo checks
+				{
+					assert(streaminfo->min_block_size >= 16);
+					assert(streaminfo->max_block_size >= streaminfo->min_block_size);
+				}
+			} break;
+			case 1:
+			{
+				// NOTE(fakhri): padding
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			case 2:
+			{
+				// NOTE(fakhri): application
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			case 3:
+			{
+				// NOTE(fakhri): seektable
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			case 4:
+			{
+				// vorbis comment
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			case 5:
+			{
+				// NOTE(fakhri): cuesheet
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			case 6:
+			{
+				// NOTE(fakhri): Picture
+				bitstream_skip_bytes(bitstream, int(md_size));
+			} break;
+			default:
+			{
+				bitstream_skip_bytes(bitstream, int(md_size));
+				invalid_code_path();
+			} break;
+		}
+	}
+	
+	flac_stream->blocks_start_pos = bitstream->pos;
+	flac_decode_one_block(flac_stream, 1);
+	return;
+}
+
+
+
 struct Decoded_Samples
 {
 	f32 *samples;
@@ -714,6 +1030,7 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_A
 					result.samples[output_offset] = f32(channel_samples->samples[offset + index]) / f32(resample_factor);
 				}
 			}
+			flac_stream->next_sample_number += frames_to_copy;
 			flac_stream->remaining_frames_count -= frames_to_copy;
 			remaining_frames_count -= frames_to_copy;
 			result.frames_count += frames_to_copy;
@@ -730,4 +1047,30 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_A
 		}
 	}
 	return result;
+}
+
+internal void
+flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
+{
+	if (target_sample < flac_stream->next_sample_number)
+	{
+		flac_stream->bitstream.pos = flac_stream->blocks_start_pos;
+		flac_stream->next_sample_number = 0;
+	}
+	
+	for (;target_sample != flac_stream->next_sample_number;)
+	{
+		assert(target_sample > flac_stream->next_sample_number);
+		Flac_Block_Info block_info = flac_process_block(flac_stream);
+		if (flac_stream->next_sample_number + block_info.block_size >= target_sample)
+		{
+			Memory_Checkpoint scratch = get_scratch(0, 0);
+			if (target_sample > flac_stream->next_sample_number)
+				flac_read_samples(flac_stream, target_sample - flac_stream->next_sample_number, scratch.arena);
+		}
+		else
+		{
+			flac_stream->next_sample_number += block_info.block_size;
+		}
+	}
 }

@@ -33,7 +33,8 @@ struct Mplayer_Font
 
 struct Mplayer_UI_Interaction
 {
-	b32 clicked;
+	b32 pressed;
+	b32 clicked; // pressed widget and released inside the widget
 };
 
 struct Mplayer_UI
@@ -69,6 +70,7 @@ struct Mplayer_Context
 	
 	Mplayer_Font font;
 	f32 volume;
+	f32 seek_percentage;
 };
 
 internal void
@@ -246,8 +248,9 @@ ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F3
 	ui->mouse_p = mouse_p;
 }
 
+
 #define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip, __LINE__)
-internal void
+internal Mplayer_UI_Interaction
 _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
@@ -323,6 +326,7 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 	
 	if (ui->hot_widget_id == id)
 	{
+		interaction.pressed = true;
 		ui->hot_t += ui->input->frame_dt * ui->hot_dt;
 		ui->hot_t = CLAMP(0, ui->hot_t, 1.0f);
 		
@@ -350,6 +354,8 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 	// NOTE(fakhri): draw handle
 	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_final_dim.width);
 	push_rect(ui->render_ctx, handle_pos, handle_final_dim, clip, handle_color, 0.5f * handle_final_dim.width);
+	
+	return interaction;
 }
 
 
@@ -502,8 +508,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		f32 y = -200.0;
 		ui_begin(&mplayer->ui, render_ctx, &mplayer->input, world_mouse_p);
 		
-		local_persist f32 val = 1.0f;
-		ui_slider_f32(&mplayer->ui, &val, 0, 1, vec2(0, y), vec2(1200, 20), clip);
+		f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
+		f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
+		
+		if (ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip).pressed)
+		{
+			mplayer->play_track = false;
+			u64 target_sample = (u64)current_playing_sample;
+			flac_seek_stream(&mplayer->flac_stream, target_sample);
+			mplayer->play_track = true;
+		}
+		
 		y -= 50.f;
 		
 		if (!mplayer->play_track)
