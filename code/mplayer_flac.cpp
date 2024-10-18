@@ -242,7 +242,7 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_s
 }
 
 internal Flac_Block_Info
-flac_process_block(Flac_Stream *flac_stream, b32 first_block = 0)
+flac_preprocess_block(Flac_Stream *flac_stream, b32 first_block = 0)
 {
 	Flac_Block_Info block_info = ZERO_STRUCT;
 	block_info.start_pos = flac_stream->bitstream.pos;
@@ -1030,7 +1030,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 		// NOTE(fakhri): build custom seek table
 		for (;curr_seek_point != opl_seek_point;)
 		{
-			Flac_Block_Info block_info = flac_process_block(flac_stream);
+			Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
 			if (!block_info.success)
 			{
 				break;
@@ -1138,7 +1138,7 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 	for (;target_sample != flac_stream->next_sample_number;)
 	{
 		assert(target_sample > flac_stream->next_sample_number);
-		Flac_Block_Info block_info = flac_process_block(flac_stream);
+		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
 		if (flac_stream->next_sample_number + block_info.block_size >= target_sample)
 		{
 			Memory_Checkpoint scratch = get_scratch(0, 0);
