@@ -1127,7 +1127,8 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 		flac_stream->bitstream.pos.byte_index += best_seek_point->byte_offset;
 		flac_stream->next_sample_number = best_seek_point->sample_number;
 	}
-	else {
+	else
+	{
 		if (target_sample < flac_stream->next_sample_number)
 		{
 			flac_stream->bitstream.pos = flac_stream->first_block_pos;

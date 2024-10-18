@@ -244,6 +244,12 @@ draw_text_centered(Render_Context *render_ctx, Mplayer_Font *font, String8 text,
 }
 
 internal void
+draw_circle(Render_Context *render_ctx, V2_F32 pos, f32 radius, V4_F32 color, M4_Inv clip)
+{
+	push_rect(render_ctx, pos, vec2(2 * radius), clip, color, radius);
+}
+
+internal void
 ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F32 mouse_p)
 {
 	ui->render_ctx = render_ctx;
@@ -525,6 +531,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			mplayer->seek_target_sample = (u64)current_playing_sample;
 			mplayer->seek_requested = true;
 		}
+		
 		
 		y -= 50.f;
 		
