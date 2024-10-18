@@ -74,8 +74,9 @@ typedef void void_function();
 
 #define ZERO_STRUCT {}
 
+#define memory_set(p, v, len) memset(p, v, len)
 #define memory_copy(dst, src, sz) memcpy(dst, src, sz)
-#define memory_zero(p, s) memset(p, 0, s)
+#define memory_zero(p, s) memory_set(p, 0, s)
 #define memory_zero_array(p) memory_zero(p, sizeof(p))
 #define memory_zero_struct(p) memory_zero(p, sizeof(*(p)))
 

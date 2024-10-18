@@ -71,6 +71,9 @@ struct Mplayer_Context
 	Mplayer_Font font;
 	f32 volume;
 	f32 seek_percentage;
+	
+	b32 seek_requested;
+	u64 seek_target_sample;
 };
 
 internal void
@@ -442,6 +445,12 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F3
 internal void
 mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
 {
+	if (mplayer->seek_requested)
+	{
+		flac_seek_stream(&mplayer->flac_stream, mplayer->seek_target_sample);
+		mplayer->seek_requested = false;
+	}
+	
 	if (mplayer->play_track)
 	{
 		Flac_Stream *flac_stream = &mplayer->flac_stream;
@@ -513,10 +522,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		
 		if (ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip).pressed)
 		{
-			mplayer->play_track = false;
-			u64 target_sample = (u64)current_playing_sample;
-			flac_seek_stream(&mplayer->flac_stream, target_sample);
-			mplayer->play_track = true;
+			mplayer->seek_target_sample = (u64)current_playing_sample;
+			mplayer->seek_requested = true;
 		}
 		
 		y -= 50.f;

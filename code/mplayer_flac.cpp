@@ -83,6 +83,7 @@ struct Flac_Subframe_Info
 
 struct Flac_Block_Info
 {
+	b32 success;
 	Flac_Stereo_Channel_Config channel_config;
 	u8 nb_channels;
 	u8 bits_depth;
@@ -93,18 +94,29 @@ struct Flac_Block_Info
 	Flac_Subframe_Info subframes_info[FLAC_MAX_CHANNEL_COUNT];
 };
 
+struct Flac_Seek_Point
+{
+	u64 sample_number; // sample number of the first sample in the target frame
+	u64 byte_offset;   // offset from the first byte of the first frame header to the first byte of the taret frame's header
+	u16 samples_count; // number of samples in the target frame
+};
+
 struct Flac_Stream 
 {
 	b32 done;
 	Bit_Stream bitstream;
 	Flac_Stream_Info streaminfo;
+	Memory_Arena *metadata_arena;
 	Memory_Arena *block_arena;
 	Flac_Decoded_Block recent_block;
 	u64 remaining_frames_count;
 	
-	Bit_Stream_Pos blocks_start_pos;
+	Bit_Stream_Pos first_block_pos;
 	b32 fixed_blocks;
 	u64 next_sample_number;
+	
+	Flac_Seek_Point *seek_table;
+	u64 seek_table_size;
 };
 
 
@@ -137,27 +149,21 @@ flac_skip_coded_residuals(Bit_Stream *bitstream, u32 block_size, u32 order)
 		// then we can't know the size of it because it contains numbers encoded in unary, which have variable
 		// size... BUT, since we know the size of the escape partition, we can have it be decoded in parallel,
 		// and overlap that work with the non escape partition
-		// TODO(fakhri): do escape partitions in parallel
 		u64 residual_samples_count = (block_size >> partition_order) - u32((part_index == 0)? order:0);
 		u8 paramter = u8(bitstream_read_bits_unsafe(bitstream, params_bits));
 		if (paramter == escape_code)
 		{
 			// NOTE(fakhri): escape partition
 			u8 residual_bits_precision = u8(bitstream_read_bits_unsafe(bitstream, 5));
-			if (residual_bits_precision != 0)
-			{
-				for (;residual_samples_count--;)
-				{
-					bitstream_read_sample_unencoded(bitstream, residual_bits_precision, 0);
-				}
-			}
+			
+			bitstream_skip_bits(bitstream, residual_bits_precision * residual_samples_count);
 		}
 		else
 		{
 			for (;residual_samples_count--;)
 			{
 				for (;bitstream_read_bits_unsafe(bitstream, 1) == 0;);
-				bitstream_read_bits_unsafe(bitstream, paramter);
+				bitstream_skip_bits(bitstream, paramter);
 			}
 		}
 	}
@@ -240,6 +246,7 @@ flac_process_block(Flac_Stream *flac_stream, b32 first_block = 0)
 {
 	Flac_Block_Info block_info = ZERO_STRUCT;
 	block_info.start_pos = flac_stream->bitstream.pos;
+	assert(block_info.start_pos.bits_left == 8); // byte boundary
 	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
@@ -248,7 +255,6 @@ flac_process_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	
 	if (bitstream_is_empty(bitstream))
 	{
-		flac_stream->done = true;
 		return block_info;
 	}
 	
@@ -447,6 +453,7 @@ flac_process_block(Flac_Stream *flac_stream, b32 first_block = 0)
 		bitstream_read_bits_unsafe(bitstream, 16);
 	}
 	
+	block_info.success = true;
 	return block_info;
 }
 
@@ -893,7 +900,8 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 		flac_stream->bitstream.pos.bits_left  = 8;
 	}
 	
-	flac_stream->block_arena = m_arena_make(megabytes(8));
+	flac_stream->metadata_arena = m_arena_make(megabytes(64));
+	flac_stream->block_arena    = m_arena_make(megabytes(8));
 	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
@@ -955,47 +963,97 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 			case 1:
 			{
 				// NOTE(fakhri): padding
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 			} break;
 			case 2:
 			{
 				// NOTE(fakhri): application
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 			} break;
 			case 3:
 			{
 				// NOTE(fakhri): seektable
-				bitstream_skip_bytes(bitstream, int(md_size));
+				u64 seek_points_count = md_size / 18;
+				flac_stream->seek_table = m_arena_push_array(flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+				flac_stream->seek_table_size = seek_points_count;
+				assert(flac_stream->seek_table);
+				
+				for (u32 i = 0; i < seek_points_count; i += 1)
+				{
+					Flac_Seek_Point *seek_point = flac_stream->seek_table + i;
+					seek_point->sample_number = bitstream_read_u64be(bitstream);
+					seek_point->byte_offset   = bitstream_read_u64be(bitstream);
+					seek_point->samples_count = bitstream_read_u16be(bitstream);
+				}
 			} break;
 			case 4:
 			{
 				// vorbis comment
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 			} break;
 			case 5:
 			{
 				// NOTE(fakhri): cuesheet
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 			} break;
 			case 6:
 			{
 				// NOTE(fakhri): Picture
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 			} break;
 			default:
 			{
-				bitstream_skip_bytes(bitstream, int(md_size));
+				bitstream_skip_bytes(bitstream, md_size);
 				invalid_code_path();
 			} break;
 		}
 	}
+	flac_stream->first_block_pos = bitstream->pos;
 	
-	flac_stream->blocks_start_pos = bitstream->pos;
+	if (!flac_stream->seek_table)
+	{
+		// NOTE(fakhri): assume we always have the samples count
+		assert(streaminfo->samples_count);
+		
+		u32 seek_points_count = 100;
+		flac_stream->seek_table = m_arena_push_array(flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+		flac_stream->seek_table_size = seek_points_count;
+		assert(flac_stream->seek_table);
+		
+		u64 samples_resolution = streaminfo->samples_count / seek_points_count; // 1% resolution
+		
+		u64 next_seek_sample = 0;
+		Flac_Seek_Point *curr_seek_point = flac_stream->seek_table;
+		Flac_Seek_Point *opl_seek_point  = flac_stream->seek_table + flac_stream->seek_table_size;
+		
+		u64 current_sample_number = 0;
+		// NOTE(fakhri): build custom seek table
+		for (;curr_seek_point != opl_seek_point;)
+		{
+			Flac_Block_Info block_info = flac_process_block(flac_stream);
+			if (!block_info.success)
+			{
+				break;
+			}
+			
+			if (current_sample_number >= next_seek_sample)
+			{
+				curr_seek_point->sample_number = current_sample_number;
+				curr_seek_point->byte_offset   = block_info.start_pos.byte_index - flac_stream->first_block_pos.byte_index;
+				curr_seek_point->samples_count = u16(block_info.block_size);
+				
+				next_seek_sample += samples_resolution;
+				curr_seek_point++;
+			}
+			
+			current_sample_number += block_info.block_size;
+		}
+	}
+	
+	flac_stream->bitstream.pos = flac_stream->first_block_pos;
 	flac_decode_one_block(flac_stream, 1);
 	return;
 }
-
-
 
 struct Decoded_Samples
 {
@@ -1052,10 +1110,29 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_A
 internal void
 flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 {
-	if (target_sample < flac_stream->next_sample_number)
+	if (flac_stream->seek_table)
 	{
-		flac_stream->bitstream.pos = flac_stream->blocks_start_pos;
-		flac_stream->next_sample_number = 0;
+		Flac_Seek_Point *best_seek_point = flac_stream->seek_table;
+		for (u32 i = 1; i < flac_stream->seek_table_size; i += 1)
+		{
+			Flac_Seek_Point *seek_point = flac_stream->seek_table + i;
+			if (seek_point->sample_number > target_sample)
+			{
+				break;
+			}
+			best_seek_point = seek_point;
+		}
+		
+		flac_stream->bitstream.pos = flac_stream->first_block_pos;
+		flac_stream->bitstream.pos.byte_index += best_seek_point->byte_offset;
+		flac_stream->next_sample_number = best_seek_point->sample_number;
+	}
+	else {
+		if (target_sample < flac_stream->next_sample_number)
+		{
+			flac_stream->bitstream.pos = flac_stream->first_block_pos;
+			flac_stream->next_sample_number = 0;
+		}
 	}
 	
 	for (;target_sample != flac_stream->next_sample_number;)

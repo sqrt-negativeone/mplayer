@@ -143,39 +143,38 @@ bitstream_read_u32be(Bit_Stream *bitstream)
 	return result;
 }
 
+internal u64
+bitstream_read_u64be(Bit_Stream *bitstream)
+{
+	Buffer *buffer = &bitstream->buffer;
+	
+	// NOTE(fakhri): make sure we are at byte boundary
+	assert(bitstream->pos.bits_left == 8);
+	u64 result = (((u64)bitstream_read_u32be(bitstream) << 32) | (u64)bitstream_read_u32be(bitstream));
+	
+	return result;
+}
 
+
+internal void
+bitstream_skip_bytes(Bit_Stream *bitstream, u64 bytes_count)
+{
+	bitstream->pos.byte_index += bytes_count;
+	return;
+}
 
 internal void
 bitstream_skip_bits(Bit_Stream *bitstream, u64 bits)
 {
-	// NOTE(fakhri): align to byte boundary
-	if (bitstream->pos.bits_left != 8 && bits > bitstream->pos.bits_left)
+	bitstream_skip_bytes(bitstream, bits / 8);
+	bits &= 7;
+	
+	if (bits >= bitstream->pos.bits_left)
 	{
 		bits -= bitstream->pos.bits_left;
 		bitstream->pos.byte_index += 1;
 		bitstream->pos.bits_left = 8;
 	}
 	
-	if (bits >= 8)
-	{
-		bitstream->pos.byte_index += (bits / 8);
-		bits = bits % 8;
-	}
-	
-	bitstream->pos.bits_left -= (u8)(bits);
-	if (bitstream->pos.bits_left == 0)
-	{
-		bitstream->pos.byte_index += 1;
-		bitstream->pos.bits_left = 8;
-	}
-}
-
-internal void
-bitstream_skip_bytes(Bit_Stream *bitstream, u64 bytes_count)
-{
-	if (bitstream->pos.bits_left == 8)
-		bitstream->pos.byte_index += bytes_count;
-	else
-		bitstream_skip_bits(bitstream, 8 * bytes_count);
-	return;
+	bitstream->pos.bits_left -= u8(bits);
 }
