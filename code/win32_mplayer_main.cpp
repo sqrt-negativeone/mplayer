@@ -280,7 +280,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
     new_wf.cbSize = 0;
 	}
 	
-	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC / 20;
+	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC / 10;
 	res = audio_client->Initialize(
 		AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -566,35 +566,32 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 					break;
 				}
 				
-				// NOTE(fakhri): audio
-				{
-					u32 frame_padding_count = 0;
-					// See how much buffer space is available.
-					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
-					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
-					
-					#if 0					
-						sound_output.sample_rate;
-					mplayer->input.frame_dt;
-					u32 samples_per_frame = ;
-					#endif
-						
-						if (available_frames_count)
-					{
-						u32 flags = 0;
-						u8 *data;
-						sound_output.render_client->GetBuffer(available_frames_count, &data);
-						
-						memory_zero(data, available_frames_count * sound_output.channels_count * sizeof(f32));
-						mplayer_get_audio_samples(mplayer, data, available_frames_count);
-						
-						sound_output.render_client->ReleaseBuffer(available_frames_count, flags);
-					}
-				}
-				
 				w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
 				mplayer_update_and_render(mplayer);
 				w32_gl_render_end(w32_renderer);
+				
+				// NOTE(fakhri): audio
+				{
+					u32 frame_padding_count = 0;
+					u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.sample_rate);
+					
+					// See how much buffer space is available.
+					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
+					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
+					u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
+					
+					if (frames_to_write)
+					{
+						u32 flags = 0;
+						u8 *data;
+						sound_output.render_client->GetBuffer(frames_to_write, &data);
+						
+						memory_zero(data, frames_to_write * sound_output.channels_count * sizeof(f32));
+						mplayer_get_audio_samples(mplayer, data, frames_to_write);
+						
+						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
+					}
+				}
 				
 				running = !(request_close || global_request_quit);
 			}
