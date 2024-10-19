@@ -34,6 +34,7 @@ struct Mplayer_Font
 struct Mplayer_UI_Interaction
 {
 	b32 pressed;
+	b32 released;
 	b32 clicked; // pressed widget and released inside the widget
 };
 
@@ -71,9 +72,6 @@ struct Mplayer_Context
 	Mplayer_Font font;
 	f32 volume;
 	f32 seek_percentage;
-	
-	b32 seek_requested;
-	u64 seek_target_sample;
 };
 
 internal void
@@ -257,26 +255,17 @@ ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F3
 	ui->mouse_p = mouse_p;
 }
 
-
-#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip, __LINE__)
 internal Mplayer_UI_Interaction
-_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
+ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_dim)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
 	
-	V2_F32 track_dim = slider_dim;
-	track_dim.width  *= 0.99f;
-	track_dim.height *= 0.25f;
+	if (ui->hot_widget_id == id && mplayer_button_released(ui->input, Key_LeftMouse))
+	{
+		interaction.released = 1;
+	}
 	
-	V4_F32 track_color = vec4(0.6f, 0.6f, 0.6f, 1);
-	
-	V2_F32 handle_dim = vec2(0.75f * MIN(slider_dim.width, slider_dim.height));
-	V2_F32 handle_pos = slider_pos;
-	handle_pos.x -= 0.5f * (slider_dim.width - handle_dim.width);
-	V4_F32 handle_color = vec4(0.5f, 0.5f, 0.5f, 1);
-	
-	if (is_in_range(range_center_dim(slider_pos, slider_dim), ui->mouse_p))
+	if (is_in_range(range_center_dim(widget_pos, widget_dim), ui->mouse_p))
 	{
 		if (ui->active_widget_id != id)
 		{
@@ -292,29 +281,16 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 			ui->active_widget_id = 0;
 		}
 		
-		if (ui->hot_widget_id == id && 
-			mplayer_button_released(ui->input, Key_LeftMouse))
+		if (interaction.released)
 		{
 			ui->hot_widget_id = 0;
 		}
 	}
 	
-	V2_F32 track_final_dim = track_dim;
-	V2_F32 handle_final_dim = handle_dim;
-	
 	if (ui->active_widget_id == id)
 	{
 		ui->active_t += ui->input->frame_dt * ui->active_dt;
 		ui->active_t = CLAMP(0, ui->active_t, 1.0f);
-		
-		track_final_dim.height = lerp(track_dim.height, 
-			ui->active_t,
-			1.25f * track_dim.height);
-		
-		handle_final_dim.height = lerp(handle_dim.height, 
-			ui->active_t,
-			1.15f * handle_dim.height);
-		
 		
 		if (mplayer_button_clicked(ui->input, Key_LeftMouse))
 		{
@@ -323,22 +299,57 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 			ui->hot_dt = 20.0f;
 		}
 		
-		if (ui->hot_widget_id == id)
+		if (ui->hot_widget_id == id && mplayer_button_released(ui->input, Key_LeftMouse))
 		{
-			if (mplayer_button_released(ui->input, Key_LeftMouse))
-			{
-				interaction.clicked = 1;
-				ui->hot_widget_id = 0;
-			}
+			interaction.clicked = 1;
+			ui->hot_widget_id = 0;
 		}
 	}
+	
 	
 	if (ui->hot_widget_id == id)
 	{
 		interaction.pressed = true;
 		ui->hot_t += ui->input->frame_dt * ui->hot_dt;
 		ui->hot_t = CLAMP(0, ui->hot_t, 1.0f);
+	}
+	return interaction;
+}
+
+#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip, __LINE__)
+internal Mplayer_UI_Interaction
+_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
+{
+	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, slider_pos, slider_dim);
+	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
+	
+	V2_F32 track_dim = slider_dim;
+	track_dim.width  *= 0.99f;
+	track_dim.height *= 0.25f;
+	
+	V4_F32 track_color = vec4(0.6f, 0.6f, 0.6f, 1);
+	
+	V2_F32 handle_dim = vec2(0.75f * MIN(slider_dim.width, slider_dim.height));
+	V2_F32 handle_pos = slider_pos;
+	handle_pos.x -= 0.5f * (slider_dim.width - handle_dim.width);
+	V4_F32 handle_color = vec4(0.5f, 0.5f, 0.5f, 1);
+	
+	V2_F32 track_final_dim = track_dim;
+	V2_F32 handle_final_dim = handle_dim;
+	
+	if (ui->active_widget_id == id)
+	{
+		track_final_dim.height = lerp(track_dim.height, 
+			ui->active_t,
+			1.25f * track_dim.height);
 		
+		handle_final_dim.height = lerp(handle_dim.height, 
+			ui->active_t,
+			1.15f * handle_dim.height);
+	}
+	
+	if (ui->hot_widget_id == id)
+	{
 		handle_final_dim.height = lerp(handle_final_dim.height, 
 			ui->active_t,
 			0.95f * handle_dim.height);
@@ -352,7 +363,6 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 			*value = lerp(min, click_percent, max);
 		}
 	}
-	
 	
 	// NOTE(fakhri): draw slider background
 	push_rect(ui->render_ctx, slider_pos, slider_dim, clip, color, 5);
@@ -372,69 +382,22 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 internal Mplayer_UI_Interaction
 _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F32 pos, u32 id)
 {
-	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	
 	V2_F32 padding    = vec2(10, 10);
 	V2_F32 button_dim = font_compute_text_dim(font, text) + padding;
 	
-	if (is_in_range(range_center_dim(pos, button_dim), ui->mouse_p))
-	{
-		if (ui->active_widget_id != id)
-		{
-			ui->active_widget_id = id;
-			ui->active_t = 0;
-			ui->active_dt = 8.0f;
-		}
-	}
-	else
-	{
-		if (ui->active_widget_id == id)
-		{
-			ui->active_widget_id = 0;
-		}
-		
-		if (ui->hot_widget_id == id && 
-			mplayer_button_released(ui->input, Key_LeftMouse))
-		{
-			ui->hot_widget_id = 0;
-		}
-	}
+	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, pos, button_dim);
 	
 	V2_F32 final_button_dim = button_dim;
 	
 	if (ui->active_widget_id == id)
 	{
-		ui->active_t += ui->input->frame_dt * ui->active_dt;
-		ui->active_t = CLAMP(0, ui->active_t, 1.0f);
-		
-		
 		final_button_dim.height = lerp(final_button_dim.height, 
 			ui->active_t,
 			1.05f * button_dim.height);
-		
-		if (mplayer_button_clicked(ui->input, Key_LeftMouse))
-		{
-			ui->hot_widget_id = id;
-			ui->hot_t = 0;
-			ui->hot_dt = 20.0f;
-		}
-		
-		if (ui->hot_widget_id == id)
-		{
-			if (mplayer_button_released(ui->input, Key_LeftMouse))
-			{
-				interaction.clicked = 1;
-				ui->hot_widget_id = 0;
-			}
-		}
 	}
 	
 	if (ui->hot_widget_id == id)
 	{
-		ui->hot_t += ui->input->frame_dt * ui->hot_dt;
-		ui->hot_t = CLAMP(0, ui->hot_t, 1.0f);
-		
-		
 		final_button_dim.height = lerp(final_button_dim.height, 
 			ui->hot_t,
 			0.95f * button_dim.height);
@@ -451,11 +414,7 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F3
 internal void
 mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
 {
-	if (mplayer->seek_requested)
-	{
-		flac_seek_stream(&mplayer->flac_stream, mplayer->seek_target_sample);
-		mplayer->seek_requested = false;
-	}
+	Log("Processing %d audio frames", frame_count);
 	
 	if (mplayer->play_track)
 	{
@@ -526,12 +485,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
 		f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
 		
-		if (ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip).pressed)
-		{
-			mplayer->seek_target_sample = (u64)current_playing_sample;
-			mplayer->seek_requested = true;
-		}
 		
+		Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip);
+		if (slider.pressed)
+		{
+			mplayer->play_track = false;
+			flac_seek_stream(&mplayer->flac_stream, (u64)current_playing_sample);
+		}
+		else if (slider.released)
+		{
+			mplayer->play_track = true;
+		}
 		
 		y -= 50.f;
 		
