@@ -1,45 +1,35 @@
 
-struct Memory_Arena
+#define M_ARENA_DEFAULT_CAPACITY megabytes(8)
+
+
+struct Memory_Arena_Chunk
 {
-	void *base_memory;
 	u64 capacity;
 	u64 used_memory;
-	u8 alignment;
+	Memory_Arena_Chunk *prev;
 };
 
-struct Memory_Checkpoint
+struct Memory_Arena
 {
-	Memory_Arena *arena;
-	u64 old_used_memory;
-	
-	#if LANG_CPP
-		Memory_Checkpoint() = default;
-	Memory_Checkpoint(Memory_Arena *arena)
-	{
-		this->arena = arena;
-		this->old_used_memory = arena->used_memory;
-	}
-	
-	~Memory_Checkpoint()
-	{
-		arena->used_memory = old_used_memory;
-	}
-	#endif
+	Memory_Arena_Chunk *current_chunk;
+	u64 min_chunk_size;
 };
 
 #define m_arena_push_array(arena, T, count) (T *)m_arena_push(arena, sizeof(T) * (count))
 #define m_arena_push_struct(arena, T) m_arena_push_array(arena, T, 1)
 
-internal Memory_Arena *
-m_arena_make(u64 capacity, u8 alignment = 4)
+#define m_arena_push_array_z(arena, T, count) (T *)m_arena_push_z(arena, sizeof(T) * (count))
+#define m_arena_push_struct_z(arena, T) m_arena_push_array_z(arena, T, 1)
+
+internal Memory_Arena_Chunk *
+m_arena_make_chunk(u64 capacity)
 {
-	void *back_buffer = sys_allocate_memory(capacity + sizeof(Memory_Arena));
+	capacity = capacity + sizeof(Memory_Arena_Chunk);
+	void *back_buffer = sys_allocate_memory(capacity);
 	
-	Memory_Arena *arena = (Memory_Arena *)back_buffer;
-	arena->base_memory = (void *)(arena + 1);
-	arena->capacity = capacity;
-	arena->used_memory = 0;
-	arena->alignment = alignment;
+	Memory_Arena_Chunk *arena = (Memory_Arena_Chunk *)back_buffer;
+	arena->capacity    = capacity;
+	arena->used_memory = sizeof(Memory_Arena_Chunk);
 	return arena;
 }
 
@@ -48,21 +38,43 @@ m_arena_push_aligned(Memory_Arena *arena, u64 size, u8 alignment)
 {
 	void *result = 0;
 	
-	u64 allocation_pos = int_from_ptr(arena->base_memory) + arena->used_memory;
-	u64 alignment_size = align_forward(allocation_pos, alignment) - allocation_pos;
-	u64 availabe_bytes = arena->capacity - (arena->used_memory + alignment_size);
-	if (size <= availabe_bytes)
+	u64 allocation_size  = size;
+	u64 alignment_offset = 0;
+	
+	if (arena->current_chunk)
 	{
-		result = (u8*)arena->base_memory + arena->used_memory + alignment_size;
-		arena->used_memory += size + alignment;
+		u64 pos_address  = int_from_ptr(arena->current_chunk) + arena->current_chunk->used_memory;
+		alignment_offset = align_forward(pos_address, alignment) - pos_address;
+		allocation_size += alignment_offset;
 	}
+	
+	if (!arena->current_chunk ||
+		(arena->current_chunk->used_memory + allocation_size > arena->current_chunk->capacity))
+	{
+		if (!arena->min_chunk_size)
+		{
+			arena->min_chunk_size = M_ARENA_DEFAULT_CAPACITY;
+		}
+		
+		u64 arena_chunk_capacity = MAX(allocation_size, arena->min_chunk_size);
+		Memory_Arena_Chunk *new_chunk = m_arena_make_chunk(arena_chunk_capacity);
+		new_chunk->prev = arena->current_chunk;
+		arena->current_chunk = new_chunk;
+	}
+	
+	assert(arena->current_chunk->used_memory + allocation_size <= arena->current_chunk->capacity);
+	
+	u8 *base_memory = (u8*)arena->current_chunk;
+	result = base_memory + arena->current_chunk->used_memory + alignment_offset;
+	arena->current_chunk->used_memory += allocation_size;
+	
 	return result;
 }
 
 internal void *
 m_arena_push(Memory_Arena *arena, u64 size)
 {
-	void *result = m_arena_push_aligned(arena, size, arena->alignment);
+	void *result = m_arena_push_aligned(arena, size, 8);
 	return result;
 }
 
@@ -75,17 +87,78 @@ m_arena_push_z(Memory_Arena *arena, u64 size)
 }
 
 internal void
+m_arena_free_last_chunk(Memory_Arena *arena)
+{
+	if (arena->current_chunk)
+	{
+		Memory_Arena_Chunk *chunk = arena->current_chunk;
+		arena->current_chunk = chunk->prev;
+		sys_deallocate_memory(chunk);
+	}
+}
+
+internal void
 m_arena_free_all(Memory_Arena *arena)
 {
-	arena->used_memory = 0;
+	for (;arena->current_chunk;)
+	{
+		m_arena_free_last_chunk(arena);
+	}
 }
+
+
+#define m_arena_bootstrap_push(Type, arena_member) (Type*)_m_arena_bootstrap_push(sizeof(Type), member_offset(Type, arena_member))
+internal void *
+_m_arena_bootstrap_push(u64 struct_size, u64 offset_to_arena)
+{
+	Memory_Arena bootstrap = ZERO_STRUCT;
+	void *struct_ptr = m_arena_push(&bootstrap, struct_size);
+	*((Memory_Arena *)((u8*)struct_ptr + offset_to_arena)) = bootstrap;
+	return struct_ptr;
+}
+
+
+
+struct Memory_Checkpoint
+{
+	Memory_Arena *arena;
+	Memory_Arena_Chunk *chunk;
+	u64 old_used_memory;
+	
+	#if LANG_CPP
+		Memory_Checkpoint() = default;
+	
+	Memory_Checkpoint(Memory_Arena *arena)
+	{
+		this->arena = arena;
+		this->chunk = arena->current_chunk;
+		this->old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
+	}
+	
+	~Memory_Checkpoint()
+	{
+		assert(this->arena);
+		for (;this->chunk != this->arena->current_chunk;)
+		{
+			m_arena_free_last_chunk(this->arena);
+		}
+		
+		if (this->chunk)
+		{
+			this->chunk->used_memory = this->old_used_memory;
+		}
+	}
+	
+	#endif
+};
 
 internal Memory_Checkpoint
 m_checkpoint_begin(Memory_Arena *arena)
 {
 	Memory_Checkpoint result;
 	result.arena = arena;
-	result.old_used_memory = arena->used_memory;
+	result.chunk = arena->current_chunk;
+	result.old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
 	return result;
 }
 
@@ -93,5 +166,13 @@ internal void
 m_checkpoint_end(Memory_Checkpoint checkpoint)
 {
 	assert(checkpoint.arena);
-	checkpoint.arena->used_memory = checkpoint.old_used_memory;
+	for (;checkpoint.chunk != checkpoint.arena->current_chunk;)
+	{
+		m_arena_free_last_chunk(checkpoint.arena);
+	}
+	
+	if (checkpoint.chunk)
+	{
+		checkpoint.chunk->used_memory = checkpoint.old_used_memory;
+	}
 }

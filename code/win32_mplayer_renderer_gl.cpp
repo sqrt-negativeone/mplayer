@@ -159,7 +159,7 @@ w32_gl_make_renderer(HINSTANCE hInstance, HDC dc)
 	W32_GL_Renderer *result = 0;
 	if (w32_init_wgl(hInstance, dc))
 	{
-		Memory_Arena *render_arena = m_arena_make(megabytes(128));
+		Memory_Arena *render_arena = (Memory_Arena *)_m_arena_bootstrap_push(sizeof(Memory_Arena), 0);
 		w32_load_gl_procs();
 		result = m_arena_push_struct(render_arena, W32_GL_Renderer);
 		assert(result);

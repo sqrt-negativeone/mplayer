@@ -68,9 +68,10 @@ typedef void void_function();
 #define int_from_ptr(p) (u64)(((u8*)(p)) - 0)
 #define align_forward(n, a) (((n) + (a) - 1) & ~((a) - 1))
 
-#define kilbytes(x)  (((u64)(x)) << 10)
-#define megabytes(x) (((u64)(x)) << 20)
-#define gigabytes(x) (((u64)(x)) << 30)
+
+#define kilobytes(x) (u64(x) << 10)
+#define megabytes(x) (u64(x) << 20)
+#define gigabytes(x) (u64(x) << 30)
 
 #define ZERO_STRUCT {}
 
@@ -87,6 +88,8 @@ typedef void void_function();
 #define member(T, m) (((T*)0)->m)
 #define member_offset(T, m) int_from_ptr(&member(T, m))
 #define cast_from_member(ptr, T, m) (T*)(((u8*)(ptr)) - member_offset(T, m))
+
+#define SWAP(T,a,b) do {T t__ = a; a = b; b = t__;} while(0)
 
 #define ENABLE_LOGS 1
 

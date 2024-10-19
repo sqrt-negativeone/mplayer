@@ -1,4 +1,62 @@
 
+internal b32
+char_is_alpha_upper(u8 c)
+{
+  return c >= 'A' && c <= 'Z';
+}
+
+internal b32
+char_is_alpha_lower(u8 c)
+{
+  return c >= 'a' && c <= 'z';
+}
+
+internal b32
+char_is_alpha(u8 c)
+{
+  return char_is_alpha_upper(c) || char_is_alpha_lower(c);
+}
+
+internal b32
+char_is_digit(u8 c)
+{
+  return (c >= '0' && c <= '9');
+}
+
+internal b32
+char_is_symbol(u8 c)
+{
+  return (c == '~' || c == '!'  || c == '$' || c == '%' || c == '^' ||
+		c == '&' || c == '*'  || c == '-' || c == '=' || c == '+' ||
+		c == '<' || c == '.'  || c == '>' || c == '/' || c == '?' ||
+		c == '|' || c == '\\' || c == '{' || c == '}' || c == '(' ||
+		c == ')' || c == '\\' || c == '[' || c == ']' || c == '#' ||
+		c == ',' || c == ';'  || c == ':' || c == '@');
+}
+
+internal b32
+char_is_space(u8 c)
+{
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\f' || c == '\v';
+}
+
+internal u8
+char_to_upper(u8 c)
+{
+  return (c >= 'a' && c <= 'z') ? ('A' + (c - 'a')) : c;
+}
+
+internal u8
+char_to_lower(u8 c)
+{
+  return (c >= 'A' && c <= 'Z') ? ('a' + (c - 'A')) : c;
+}
+
+internal u8
+char_to_forward_slash(u8 c)
+{
+  return (c == '\\' ? '/' : c);
+}
 
 struct String8
 {
@@ -10,12 +68,25 @@ struct String8
 	u64 len;
 };
 
+struct String16
+{
+	u16 *str;
+	u64 len;
+};
+
+struct Decoded_Codepoint
+{
+  u32 codepoint;
+  u32 advance;
+};
+
 
 #define STB_SPRINTF_STATIC
 #define STB_SPRINTF_IMPLEMENTATION
 #include "third_party/stb_sprintf.h"
 
 #define str8_lit(str) str8((u8*)(str), sizeof(str) - 1)
+#define STR8_EXPAND(s) (int)(s).len, (s).str
 
 internal String8
 str8(u8 *str, u64 len)
@@ -56,4 +127,363 @@ str8_f(Memory_Arena *arena, const char *fmt, ...)
   result = str8_fv(arena, fmt, args);
   va_end(args);
   return result;
+}
+
+global u8 utf8_class[32] =
+{
+  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,2,2,2,2,3,3,4,5,
+};
+
+#define bitmask1 0x01
+#define bitmask2 0x03
+#define bitmask3 0x07
+#define bitmask4 0x0F
+#define bitmask5 0x1F
+#define bitmask6 0x3F
+#define bitmask7 0x7F
+#define bitmask8 0xFF
+#define bitmask9  0x01FF
+#define bitmask10 0x03FF
+
+internal Decoded_Codepoint
+decode_codepoint_from_utf8(u8 *str, u64 max)
+{
+  Decoded_Codepoint result = {~((u32)0), 1};
+  u8 byte = str[0];
+  u8 byte_class = utf8_class[byte >> 3];
+  switch (byte_class)
+  {
+    case 1:
+    {
+      result.codepoint = byte;
+    }break;
+    
+    case 2:
+    {
+      if (2 <= max)
+      {
+        u8 cont_byte = str[1];
+        if (utf8_class[cont_byte >> 3] == 0)
+        {
+          result.codepoint = (byte & bitmask5) << 6;
+          result.codepoint |=  (cont_byte & bitmask6);
+          result.advance = 2;
+        }
+      }
+    }break;
+    
+    case 3:
+    {
+      if (3 <= max)
+      {
+        u8 cont_byte[2] = {str[1], str[2]};
+        if (utf8_class[cont_byte[0] >> 3] == 0 &&
+					utf8_class[cont_byte[1] >> 3] == 0)
+        {
+          result.codepoint = (byte & bitmask4) << 12;
+          result.codepoint |= ((cont_byte[0] & bitmask6) << 6);
+          result.codepoint |=  (cont_byte[1] & bitmask6);
+          result.advance = 3;
+        }
+      }
+    }break;
+    
+    case 4:
+    {
+      if (4 <= max)
+      {
+        u8 cont_byte[3] = {str[1], str[2], str[3]};
+        if (utf8_class[cont_byte[0] >> 3] == 0 &&
+					utf8_class[cont_byte[1] >> 3] == 0 &&
+					utf8_class[cont_byte[2] >> 3] == 0)
+        {
+          result.codepoint = (byte & bitmask3) << 18;
+          result.codepoint |= ((cont_byte[0] & bitmask6) << 12);
+          result.codepoint |= ((cont_byte[1] & bitmask6) <<  6);
+          result.codepoint |=  (cont_byte[2] & bitmask6);
+          result.advance = 4;
+        }
+      }
+    }break;
+  }
+  
+  return result;
+}
+
+internal Decoded_Codepoint
+decode_codepoint_from_utf16(u16 *out, u64 max)
+{
+  Decoded_Codepoint result = {~((u32)0), 1};
+  result.codepoint = out[0];
+  result.advance = 1;
+  if (1 < max && 0xD800 <= out[0] && out[0] < 0xDC00 && 0xDC00 <= out[1] && out[1] < 0xE000)
+  {
+    result.codepoint = ((out[0] - 0xD800) << 10) | (out[1] - 0xDC00);
+    result.advance = 2;
+  }
+  return result;
+}
+
+internal u32             
+utf8_from_codepoint(u8 *out, u32 codepoint)
+{
+	#define bit8 0x80
+		u32 advance = 0;
+  if (codepoint <= 0x7F)
+  {
+    out[0] = (u8)codepoint;
+    advance = 1;
+  }
+  else if (codepoint <= 0x7FF)
+  {
+    out[0] = (bitmask2 << 6) | ((codepoint >> 6) & bitmask5);
+    out[1] = bit8 | (codepoint & bitmask6);
+    advance = 2;
+  }
+  else if (codepoint <= 0xFFFF)
+  {
+    out[0] = (bitmask3 << 5) | ((codepoint >> 12) & bitmask4);
+    out[1] = bit8 | ((codepoint >> 6) & bitmask6);
+    out[2] = bit8 | ( codepoint       & bitmask6);
+    advance = 3;
+  }
+  else if (codepoint <= 0x10FFFF)
+  {
+    out[0] = (bitmask4 << 3) | ((codepoint >> 18) & bitmask3);
+    out[1] = bit8 | ((codepoint >> 12) & bitmask6);
+    out[2] = bit8 | ((codepoint >>  6) & bitmask6);
+    out[3] = bit8 | ( codepoint        & bitmask6);
+    advance = 4;
+  }
+  else
+  {
+    out[0] = '?';
+    advance = 1;
+  }
+  return advance;
+}
+internal u32             
+utf16_from_codepoint(u16 *out, u32 codepoint)
+{
+  u32 advance = 1;
+  if (codepoint == ~((u32)0))
+  {
+    out[0] = (u16)'?';
+  }
+  else if (codepoint < 0x10000)
+  {
+    out[0] = (u16)codepoint;
+  }
+  else
+  {
+    u64 v = codepoint - 0x10000;
+    out[0] = (u16)(0xD800 + (v >> 10));
+    out[1] = (u16)(0xDC00 + (v & bitmask10));
+    advance = 2;
+  }
+  return advance;
+}
+
+internal String16
+str16_from_8(Memory_Arena *arena, String8 in)
+{
+  u64 cap = 2 * in.len;
+  u16 *str = m_arena_push_array(arena, u16, cap + 1);
+  u8 *ptr = in.str;
+  u8 *opl = ptr + in.len;
+  umem size = 0;
+  Decoded_Codepoint consume;
+  for (;ptr < opl;)
+  {
+    consume = decode_codepoint_from_utf8(ptr, opl - ptr);
+    ptr += consume.advance;
+    size += utf16_from_codepoint(str + size, consume.codepoint);
+  }
+  str[size] = 0;
+	
+  String16 result = {str, size};
+  return result;
+}
+
+internal String8
+str8_from_16(Memory_Arena *arena, String16 in)
+{
+  u64 cap = 3 * in.len;
+  u8 *str = m_arena_push_array(arena, u8, cap + 1);
+  u16 *ptr = in.str;
+  u16 *opl = ptr + in.len;
+  u64 size = 0;
+  Decoded_Codepoint consume;
+  for (;ptr < opl;)
+  {
+    consume = decode_codepoint_from_utf16(ptr, opl - ptr);
+    ptr += consume.advance;
+    size += utf8_from_codepoint(str + size, consume.codepoint);
+  }
+  str[size] = 0;
+  return str8(str, size);
+}
+
+
+//- NOTE(fakhri): substrings
+
+internal String8
+substr8(String8 str, u64 start_index, u64 opl_index)
+{
+  if(opl_index > str.len)
+  {
+    opl_index = str.len;
+  }
+  if(start_index > str.len)
+  {
+		start_index = str.len;
+  }
+  if(start_index > opl_index)
+  {
+    SWAP(u64, start_index, opl_index);
+  }
+  str.len = opl_index - start_index;
+  str.str += start_index;
+  return str;
+}
+
+internal String8
+str8_skip_first(String8 str, u64 min)
+{
+  return substr8(str, min, str.len);
+}
+
+internal String8
+str8_chop_last(String8 str, u64 nmax)
+{
+  return substr8(str, 0, str.len-nmax);
+}
+
+internal String8
+prefix8(String8 str, u64 size)
+{
+  return substr8(str, 0, size);
+}
+
+internal String8
+suffix8(String8 str, u64 size)
+{
+  return substr8(str, str.len-size, str.len);
+}
+
+typedef u32 Match_Flags;
+enum
+{
+  MatchFlag_CaseInsensitive  = (1<<0),
+  MatchFlag_RightSideSloppy  = (1<<1),
+  MatchFlag_SlashInsensitive = (1<<2),
+  MatchFlag_FindLast         = (1<<3),
+  MatchFlag_SkipFirst        = (1<<4),
+};
+
+
+//- NOTE(fakhri): Matching
+internal b32
+str8_match(String8 a, String8 b, Match_Flags flags)
+{
+  b32 result = 0;
+  
+  if ((flags & MatchFlag_RightSideSloppy) && b.len > a.len)
+  {
+    b.len = a.len;
+  }
+  
+  if(a.len == b.len)
+  {
+    result = 1;
+    for(u64 i = 0; i < a.len; i += 1)
+    {
+      b32 match = (a.str[i] == b.str[i]);
+      if(flags & MatchFlag_CaseInsensitive)
+      {
+        match |= (char_to_lower(a.str[i]) == char_to_lower(b.str[i]));
+      }
+      if(flags & MatchFlag_SlashInsensitive)
+      {
+        match |= (char_to_forward_slash(a.str[i]) == char_to_forward_slash(b.str[i]));
+      }
+      if(match == 0)
+      {
+        result = 0;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+internal u64
+find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_Flags flags)
+{
+  u64 found_idx = haystack.len;
+  b32 is_first = true;
+  for(u64 i = start_pt; i < haystack.len; i += 1)
+  {
+    if(i + needle.len <= haystack.len)
+    {
+      String8 substr = substr8(haystack, i, i+needle.len);
+      if(str8_match(substr, needle, flags))
+      {
+        found_idx = i;
+        if ((flags & MatchFlag_SkipFirst) && is_first)
+        {
+          is_first = false;
+          continue;
+        }
+        if(!(flags & MatchFlag_FindLast))
+        {
+          break;
+        }
+      }
+    }
+  }
+  return found_idx;
+}
+
+internal b32
+str8_starts_with(String8 a, String8 prefix, Match_Flags flags)
+{
+  b32 result = str8_match(prefix, a, flags | MatchFlag_RightSideSloppy);
+  return result;
+}
+
+internal b32
+str8_ends_with(String8 a, String8 b, Match_Flags flags)
+{
+  b32 result = 1;
+  if (a.len >= b.len)
+  {
+    for(u32 i = 0;
+			i < b.len;
+			i += 1)
+    {
+      b32 match = (a.str[a.len - 1 - i] == b.str[b.len - 1 - i]);
+      if(flags & MatchFlag_CaseInsensitive)
+      {
+        match |= (char_to_lower(a.str[i]) == char_to_lower(b.str[i]));
+      }
+      if(flags & MatchFlag_SlashInsensitive)
+      {
+        match |= (char_to_forward_slash(a.str[i]) == char_to_forward_slash(b.str[i]));
+      }
+      if(!match)
+      {
+        result = 0;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+internal u64
+string_find_first_non_whitespace(String8 str){
+  u64 i = 0;
+  for (;i < str.len && char_is_space(str.str[i]); i += 1);
+  return(i);
 }

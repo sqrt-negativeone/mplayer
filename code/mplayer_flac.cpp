@@ -106,8 +106,8 @@ struct Flac_Stream
 	b32 done;
 	Bit_Stream bitstream;
 	Flac_Stream_Info streaminfo;
-	Memory_Arena *metadata_arena;
-	Memory_Arena *block_arena;
+	Memory_Arena metadata_arena;
+	Memory_Arena block_arena;
 	Flac_Decoded_Block recent_block;
 	u64 remaining_frames_count;
 	
@@ -677,7 +677,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 		channel_index += 1)
 	{
 		Flac_Channel_Samples *block_channel_samples = decoded_block->samples_per_channel + channel_index;
-		block_channel_samples->samples = m_arena_push_array(flac_stream->block_arena, i64, block_size);
+		block_channel_samples->samples = m_arena_push_array(&flac_stream->block_arena, i64, block_size);
 		block_channel_samples->count = block_size;
 		assert(block_channel_samples->samples);
 		
@@ -809,7 +809,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 				predictor_coef_precision_bits += 1;
 				u64 right_shift = bitstream_read_bits_unsafe(bitstream, 5);
 				
-				i64 *coefficients = m_arena_push_array(flac_stream->block_arena, i64, subframe_type.order);
+				i64 *coefficients = m_arena_push_array(&flac_stream->block_arena, i64, subframe_type.order);
 				
 				for (u32 i = 0; i < subframe_type.order; i += 1)
 				{
@@ -900,9 +900,6 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 		flac_stream->bitstream.pos.bits_left  = 8;
 	}
 	
-	flac_stream->metadata_arena = m_arena_make(megabytes(64));
-	flac_stream->block_arena    = m_arena_make(megabytes(8));
-	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
 	
@@ -974,7 +971,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 			{
 				// NOTE(fakhri): seektable
 				u64 seek_points_count = md_size / 18;
-				flac_stream->seek_table = m_arena_push_array(flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+				flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
 				flac_stream->seek_table_size = seek_points_count;
 				assert(flac_stream->seek_table);
 				
@@ -1016,7 +1013,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 		assert(streaminfo->samples_count);
 		
 		u32 seek_points_count = 100;
-		flac_stream->seek_table = m_arena_push_array(flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+		flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
 		flac_stream->seek_table_size = seek_points_count;
 		assert(flac_stream->seek_table);
 		
@@ -1094,7 +1091,7 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_A
 			result.frames_count += frames_to_copy;
 		}
 		else {
-			m_arena_free_all(flac_stream->block_arena);
+			m_arena_free_all(&flac_stream->block_arena);
 			flac_decode_one_block(flac_stream);
 			flac_stream->remaining_frames_count = flac_stream->recent_block.interchannel_sample_count;
 			

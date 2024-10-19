@@ -1,4 +1,33 @@
 
+struct File_Iterator_Handle
+{
+	u8 opaque[kilobytes(1)];
+};
+
+enum File_Flag
+{
+	FileFlag_Directory,
+	FileFlag_Valid,
+};
+typedef u32 File_Flags;
+
+struct File_Info
+{
+	File_Flags flags;
+	String8 path;
+	String8 name;
+	String8 extension;
+	u64 size;
+};
+
+typedef b32       File_Iter_Begin_Proc(File_Iterator_Handle *it, String8 path);
+typedef File_Info File_Iter_Next_Proc (File_Iterator_Handle *it, Memory_Arena *arena);
+typedef void      File_Iter_End_Proc  (File_Iterator_Handle *it);
+
+typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
+
+
+#include "mplayer_renderer.cpp"
 #include "mplayer_bitstream.cpp"
 #include "mplayer_flac.cpp"
 
@@ -54,11 +83,27 @@ struct Mplayer_UI
 	f32 hot_dt;
 };
 
+struct Mplayer_OS_Vtable
+{
+	File_Iter_Begin_Proc *file_iter_begin;
+	File_Iter_Next_Proc  *file_iter_next;
+	File_Iter_End_Proc   *file_iter_end;
+	Load_Entire_File *load_entire_file;
+};
+
+struct Music_Track
+{
+	Music_Track *next;
+	
+	Memory_Arena *arena;
+	String8 path;
+	String8 name;
+};
 
 struct Mplayer_Context
 {
-	Memory_Arena *main_arena;
-	Memory_Arena *frame_arena;
+	Memory_Arena main_arena;
+	Memory_Arena frame_arena;
 	Render_Context *render_ctx;
 	Mplayer_UI ui;
 	Mplayer_Input input;
@@ -67,12 +112,52 @@ struct Mplayer_Context
 	Flac_Stream flac_stream;
 	Buffer flac_file_buffer;
 	
-	Load_Entire_File *load_entire_file;
-	
 	Mplayer_Font font;
 	f32 volume;
 	f32 seek_percentage;
+	
+	String8 library_path;
+	
+	Mplayer_OS_Vtable os;
+	
+	Music_Track *first_music;
+	Music_Track *last_music;
+	Music_Track *music_free_list;
 };
+
+internal Music_Track *
+mplayer_make_music_track(Mplayer_Context *mplayer)
+{
+	Music_Track *result = 0;
+	if (mplayer->music_free_list)
+	{
+		result = mplayer->music_free_list;
+		mplayer->music_free_list = result->next;
+	}
+	
+	if (!result)
+	{
+		result = m_arena_push_struct(&mplayer->main_arena, Music_Track);
+	}
+	
+	assert(result);
+	
+	return result;
+}
+
+internal void
+mplayer_push_music_track(Mplayer_Context *mplayer, Music_Track *music_track)
+{
+	if (!mplayer->last_music)
+	{
+		mplayer->last_music = mplayer->first_music = music_track;
+	}
+	else
+	{
+		mplayer->last_music->next = music_track;
+		mplayer->last_music = music_track;
+	}
+}
 
 internal void
 load_font(Mplayer_Context *mplayer, Mplayer_Font *font, String8 font_path, f32 font_size)
@@ -86,10 +171,10 @@ load_font(Mplayer_Context *mplayer, Mplayer_Font *font, String8 font_path, f32 f
   
 	Memory_Checkpoint scratch = begin_scratch(0, 0);
   
-	Buffer font_content = mplayer->load_entire_file(font_path, scratch.arena);
+	Buffer font_content = mplayer->os.load_entire_file(font_path, scratch.arena);
 	assert(font_content.data);
   
-	Buffer pixels_buf = arena_push_buffer(mplayer->main_arena, atlas_dim.width * atlas_dim.height);
+	Buffer pixels_buf = arena_push_buffer(&mplayer->main_arena, atlas_dim.width * atlas_dim.height);
 	assert(pixels_buf.data);
   
 	f32 ascent   = 0;
@@ -125,7 +210,7 @@ load_font(Mplayer_Context *mplayer, Mplayer_Font *font, String8 font_path, f32 f
 	f32 glyph_advance = -1;
 	
 	// NOTE(fakhri): build direct map
-	Mplayer_Glyph *glyphs = m_arena_push_array(mplayer->main_arena, Mplayer_Glyph, opl_glyph_index - first_glyph_index);
+	Mplayer_Glyph *glyphs = m_arena_push_array(&mplayer->main_arena, Mplayer_Glyph, opl_glyph_index - first_glyph_index);
 	assert(glyphs);
   
 	for (u32 ch = first_glyph_index; 
@@ -414,8 +499,6 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F3
 internal void
 mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
 {
-	Log("Processing %d audio frames", frame_count);
-	
 	if (mplayer->play_track)
 	{
 		Flac_Stream *flac_stream = &mplayer->flac_stream;
@@ -442,13 +525,59 @@ mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_
 }
 
 internal void
+mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
+{
+	Memory_Checkpoint temp_mem = m_checkpoint_begin(&mplayer->frame_arena);
+	File_Iterator_Handle *it = m_arena_push_struct(temp_mem.arena, File_Iterator_Handle);
+	
+	if (mplayer->os.file_iter_begin(it, library_path))
+	{
+		for (;;)
+		{
+			Memory_Checkpoint scratch = get_scratch(0, 0);
+			File_Info info = mplayer->os.file_iter_next(it, scratch.arena);
+			if (!has_flag(info.flags, FileFlag_Valid))
+			{
+				break;
+			}
+			
+			if (has_flag(info.flags, FileFlag_Directory))
+			{
+				// NOTE(fakhri): directory
+				Log("directory: %.*s", STR8_EXPAND(info.name));
+				if (info.name.str[0] != '.')
+				{
+					String8 path = str8_f(scratch.arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
+					mplayer_load_library(mplayer, path);
+				}
+			}
+			else
+			{
+				if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
+				{
+					Log("file: %.*s", STR8_EXPAND(info.name));
+					
+					Music_Track *music_track = mplayer_make_music_track(mplayer);
+					mplayer_push_music_track(mplayer, music_track);
+					
+				}
+			}
+		}
+		
+		mplayer->os.file_iter_end(it);
+	}
+}
+
+internal void
 mplayer_initialize(Mplayer_Context *mplayer)
 {
-	mplayer->flac_file_buffer = mplayer->load_entire_file(str8_lit("data/tests/fear_inoculum.flac"), mplayer->main_arena);
+	mplayer->flac_file_buffer = mplayer->os.load_entire_file(str8_lit("data/tests/fear_inoculum.flac"), &mplayer->main_arena);
 	init_flac_stream(&mplayer->flac_stream, mplayer->flac_file_buffer);
 	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 40);
 	mplayer->play_track = 0;
 	mplayer->volume = 1.0f;
+	
+	mplayer_load_library(mplayer, mplayer->library_path);
 }
 
 internal void
@@ -484,7 +613,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		
 		f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
 		f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
-		
 		
 		Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip);
 		if (slider.pressed)

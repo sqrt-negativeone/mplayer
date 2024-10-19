@@ -29,7 +29,6 @@ struct Textures_Upload_Buffer
 	u64 count;
 };
 
-
 struct Render_Context
 {
 	Memory_Arena *arena;
@@ -143,7 +142,6 @@ compute_draw_region_aspect_ratio_fit(V2_I32 render_dim, V2_I32 window_dim)
   
 	return result;
 }
-
 
 
 internal Render_Entry_Header *

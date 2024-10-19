@@ -1,5 +1,4 @@
 
-
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -15,11 +14,58 @@
 #include "mplayer_base.h"
 #include "mplayer_math.h"
 
+enum Memory_Allocator_Operation
+{
+	Mem_Op_Reserve,
+	Mem_Op_Commit,
+	Mem_Op_Decommit,
+	Mem_Op_Release,
+};
+
+typedef void *Allocator_Function(void *user_data, Memory_Allocator_Operation op, void *memory, umem size);
+struct Memory_Allocator
+{
+	Allocator_Function *alloc;
+	void *user_data;
+};
+
+internal void *
+sys_memory_allocator(void *user_data, Memory_Allocator_Operation op, void *memory, u64 size)
+{
+	void *result = 0;
+	switch (op)
+	{
+		case Mem_Op_Reserve:
+		{
+			result = VirtualAlloc(0, size, MEM_RESERVE, PAGE_NOACCESS);
+		} break;
+		case Mem_Op_Commit:
+		{
+			result = VirtualAlloc(memory, size, MEM_COMMIT, PAGE_READWRITE);
+		} break;
+		case Mem_Op_Decommit:
+		{
+			VirtualFree(memory, size, MEM_DECOMMIT);
+		} break;
+		case Mem_Op_Release:
+		{
+			VirtualFree(memory, 0, MEM_RELEASE);
+		} break;
+	}
+	return result;
+}
+
 internal void *
 sys_allocate_memory(u64 size)
 {
-	void *result = malloc(size);
+	void *result = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	return result;
+}
+
+internal void
+sys_deallocate_memory(void *memory)
+{
+	VirtualFree(memory, 0, MEM_RELEASE);
 }
 
 #include "mplayer_memory.cpp"
@@ -91,9 +137,8 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	
 	return result;
 }
-typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
-#include "mplayer_renderer.cpp"
+
 #include "mplayer.cpp"
 
 #include "win32_mplayer_renderer_gl.cpp"
@@ -201,6 +246,7 @@ w32_output_err(const char *title, const char *format, ...)
 	text[required_characters-1] = 0;
 	MessageBoxA(0, text, title, MB_OK);
 }
+
 #define REFTIMES_PER_SEC  10000000
 #define REFTIMES_PER_MILLISEC  10000
 
@@ -315,7 +361,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 	return sound_output;
 }
 
-LARGE_INTEGER w32_timer_freq;
+global LARGE_INTEGER w32_timer_freq;
 
 struct W32_Timer
 {
@@ -340,13 +386,99 @@ w32_get_seconds_elapsed(W32_Timer *timer)
 }
 
 
+struct W32_File_Iterator
+{
+	HANDLE state;
+	b32 first;
+	WIN32_FIND_DATAW find_data;
+};
+
+internal b32
+w32_file_iter_begin(File_Iterator_Handle *it, String8 path)
+{
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	String8 cpath;
+	if (path.str[path.len - 1] == '/' || 
+		path.str[path.len - 1] == '\\' )
+	{
+		cpath = str8_f(scratch.arena, "%.*s*", STR8_EXPAND(path));
+	}
+	else
+	{
+		cpath = str8_f(scratch.arena, "%.*s/*", STR8_EXPAND(path));
+	}
+	
+	String16 cpath16 = str16_from_8(scratch.arena, cpath);
+	
+  WIN32_FIND_DATAW find_data = ZERO_STRUCT;
+  HANDLE state = FindFirstFileW((WCHAR*)cpath16.str, &find_data);
+  
+  //- fill results
+  b32 result = !!state;
+  if (result)
+  {
+    W32_File_Iterator *win32_it = (W32_File_Iterator*)it; 
+    win32_it->state = state;
+    win32_it->first = 1;
+    memory_copy(&win32_it->find_data, &find_data, sizeof(find_data));
+  }
+	
+	return result;
+}
+
+
+internal File_Info
+w32_file_iter_next(File_Iterator_Handle *it, Memory_Arena *arena)
+{
+  //- get low-level file info for this step
+  b32 good = 0;
+  
+  W32_File_Iterator *win32_it = (W32_File_Iterator*)it; 
+  WIN32_FIND_DATAW *find_data = &win32_it->find_data;
+  if (win32_it->first)
+  {
+    win32_it->first = 0;
+    good = 1;
+  }
+  else
+  {
+    good = FindNextFileW(win32_it->state, find_data);
+  }
+  
+  //- convert to File_Info
+  File_Info result = {0};
+  if (good)
+  {
+    set_flag(result.flags, FileFlag_Valid);
+    
+    if (find_data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    {
+      set_flag(result.flags, FileFlag_Directory);
+    }
+    u16 *filename_base = (u16*)find_data->cFileName;
+    u16 *ptr = filename_base;
+    for (;*ptr != 0; ptr += 1);
+    String16 filename16 = {0};
+    filename16.str = filename_base;
+    filename16.len = (u64)(ptr - filename_base);
+    result.name = str8_from_16(arena, filename16);
+    result.size = ((((u64)find_data->nFileSizeHigh) << 32) |
+			((u64)find_data->nFileSizeLow));
+  }
+  return result;
+}
+
+
+internal void
+w32_file_iter_end(File_Iterator_Handle *it)
+{
+  W32_File_Iterator *win32_it = (W32_File_Iterator*)it; 
+  FindClose(win32_it->state);
+}
 
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	init_thread_context();
-	Memory_Arena *main_arena = m_arena_make(gigabytes(4));
-	Memory_Arena *frame_arena = m_arena_make(gigabytes(4));
-	
 	timeBeginPeriod(1);
 	QueryPerformanceFrequency(&w32_timer_freq);
 	
@@ -372,13 +504,16 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			HDC wdc = GetDC(window);
 			W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
 			
-			Mplayer_Context *mplayer = m_arena_push_struct(main_arena, Mplayer_Context);
+			Mplayer_Context *mplayer = (Mplayer_Context *)_m_arena_bootstrap_push(gigabytes(1), member_offset(Mplayer_Context, main_arena));
 			{
-				mplayer->main_arena  = main_arena;
-				mplayer->frame_arena = frame_arena;
 				mplayer->render_ctx  = (Render_Context*)w32_renderer;
 				
-				mplayer->load_entire_file = w32_load_entire_file;
+				mplayer->library_path = str8_lit("f://Music/");
+				
+				mplayer->os.file_iter_begin = w32_file_iter_begin;
+				mplayer->os.file_iter_next  = w32_file_iter_next;
+				mplayer->os.file_iter_end   = w32_file_iter_end;
+				mplayer->os.load_entire_file = w32_load_entire_file;
 				mplayer_initialize(mplayer);
 			}
 			
@@ -407,12 +542,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			b32 running = true;
 			for (;running;)
 			{
-				m_arena_free_all(frame_arena);
+				m_arena_free_all(&mplayer->frame_arena);
 				
 				mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
 				w32_update_timer(&timer);
-				
-				Log("frame dt: %f", mplayer->input.frame_dt);
 				
 				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
 				{
@@ -457,7 +590,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								b32 was_down = (msg.lParam & (1 << 30)) != 0;
 								b32 is_down = (msg.lParam & (1 << 31)) == 0;
 								
-								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 								
 								event->kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
 								event->key = w32_resolve_vk_code(vk_code);
@@ -473,7 +606,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								
 								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
 								{
-									event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+									event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 									
 									event->kind = Event_Kind_Text;
 									event->text_character = char_input;
@@ -484,7 +617,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_MiddleMouse;
 								mplayer->input.buttons[Key_MiddleMouse].is_down = is_down;
@@ -494,7 +627,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_LBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_LeftMouse;
 								mplayer->input.buttons[Key_LeftMouse].is_down = is_down;
@@ -504,7 +637,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_RBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_RightMouse;
 								mplayer->input.buttons[Key_RightMouse].is_down = is_down;
@@ -513,7 +646,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MOUSEWHEEL:
 							{
 								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
-								event = m_arena_push_struct(frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = Event_Kind_Mouse_Wheel;
 								event->scroll.x = 0;
 								event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;
