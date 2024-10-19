@@ -1,9 +1,14 @@
 
-#define WIN32_LEAN_AND_MEAN 
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
+#include <timeapi.h>
 #include <windowsx.h>
-#undef min
-#undef max
+#include <Objbase.h>
+#include <audiopolicy.h>
+#include <mmdeviceapi.h>
+
 #undef near
 #undef far
 
@@ -93,24 +98,6 @@ typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
 #include "win32_mplayer_renderer_gl.cpp"
 
-#pragma warning(disable : 4061)
-#define MINIAUDIO_IMPLEMENTATION
-#include "third_party/miniaudio.h"
-#pragma warning(default : 4061)
-
-struct Audio_Input
-{
-	Mplayer_Context *mplayer;
-};
-
-internal void
-audio_device_data(ma_device *device, void *output_buf, const void *input_buf, u32 frame_count)
-{
-	init_thread_context();
-	Audio_Input *input = (Audio_Input*)device->pUserData;
-	mplayer_get_audio_samples(input->mplayer, output_buf, frame_count);
-}
-
 #define W32_WINDOW_NAME "mplayer"
 #define W32_CLASS_NAME (W32_WINDOW_NAME "_CLASS")
 #define W32_WINDOW_W 1280
@@ -193,11 +180,175 @@ w32_resolve_vk_code(WPARAM wParam)
 	return key;
 }
 
+internal void
+w32_output_err(const char *title, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	u32 required_characters = vsnprintf(0, 0, format, args)+1;
+	va_end(args);
+	
+	char text[4096] = {0};
+	if(required_characters > 4096)
+	{
+		required_characters = 4096;
+	}
+	
+	va_start(args, format);
+	vsnprintf(text, required_characters, format, args);
+	va_end(args);
+	
+	text[required_characters-1] = 0;
+	MessageBoxA(0, text, title, MB_OK);
+}
+#define REFTIMES_PER_SEC  10000000
+#define REFTIMES_PER_MILLISEC  10000
+
+#ifndef AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
+#endif
+
+#ifndef AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
+#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
+#endif
+
+const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
+const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
+const IID IID_IAudioClient = __uuidof(IAudioClient);
+const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
+
+#define EXIT_ON_ERROR(err, title, message, ...)  \
+if ((err) != S_OK)                             \
+{                                              \
+w32_output_err(title, message, __VA_ARGS__); \
+ExitProcess(1);                              \
+} 
+
+struct W32_Sound_Output
+{
+	b32 initialized;
+	
+	IMMDeviceEnumerator *enumerator;
+	IMMDevice *device;
+	IAudioClient *audio_client;
+	IAudioRenderClient *render_client;
+	u32 buffer_frame_count;
+	REFERENCE_TIME buffer_duration;
+	u32 sample_rate;
+	u16 channels_count;
+};
+
+internal W32_Sound_Output
+w32_init_wasapi(u32 sample_rate, u16 channels_count)
+{
+	W32_Sound_Output sound_output = ZERO_STRUCT;
+	assert(channels_count <= 2);
+	
+	IMMDeviceEnumerator *enumerator = 0;
+	IMMDevice *device = 0;
+	IAudioClient *audio_client = 0;
+	IAudioRenderClient *render_client = 0;
+	u32 buffer_frame_count = 0;
+	
+	CoInitializeEx(0, COINIT_SPEED_OVER_MEMORY);
+	
+	HRESULT res = CoCreateInstance(CLSID_MMDeviceEnumerator, 0,
+		CLSCTX_ALL, IID_IMMDeviceEnumerator,
+		(void**)&enumerator);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to create Device Enumartor");
+	
+	res = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed get default audio endpoint");
+	
+	
+	res = device->Activate(IID_IAudioClient, CLSCTX_ALL,
+		0, (void**)&audio_client);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to activate device");
+	
+	WAVEFORMATEX *wfx = 0;
+	res = audio_client->GetMixFormat(&wfx);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to get mix format");
+	
+	WAVEFORMATEX new_wf = *wfx;
+	{
+		new_wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+    new_wf.nChannels  = channels_count;
+		new_wf.wBitsPerSample = 32;
+		new_wf.nSamplesPerSec = sample_rate;
+		new_wf.nBlockAlign = (WORD)((channels_count * new_wf.wBitsPerSample) / 8);
+		new_wf.nAvgBytesPerSec = new_wf.nBlockAlign * sample_rate;
+    new_wf.cbSize = 0;
+	}
+	
+	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC / 20;
+	res = audio_client->Initialize(
+		AUDCLNT_SHAREMODE_SHARED,
+		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+		requested_duration,
+		0,
+		&new_wf,
+		0);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to Initialize audio");
+	
+	res = audio_client->GetBufferSize(&buffer_frame_count);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to get buffer size");
+	
+	res = audio_client->GetService(
+		IID_IAudioRenderClient,
+		(void**)&render_client);
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to Get render client");
+	
+	res = audio_client->Start();
+	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed Start playing audio");
+	
+	sound_output.initialized = true;
+	
+	sound_output.enumerator         = enumerator;
+	sound_output.device             = device;
+	sound_output.audio_client       = audio_client;
+	sound_output.render_client      = render_client;
+	sound_output.buffer_frame_count = buffer_frame_count;
+	sound_output.buffer_duration    = (REFERENCE_TIME)((f64)REFTIMES_PER_SEC * buffer_frame_count / sample_rate);
+	sound_output.sample_rate        = sample_rate;
+	sound_output.channels_count     = channels_count;
+	
+	return sound_output;
+}
+
+LARGE_INTEGER w32_timer_freq;
+
+struct W32_Timer
+{
+	LARGE_INTEGER start_counter;
+};
+
+internal void
+w32_update_timer(W32_Timer *timer)
+{
+	QueryPerformanceCounter(&timer->start_counter);
+}
+
+internal f32
+w32_get_seconds_elapsed(W32_Timer *timer)
+{
+	LARGE_INTEGER end_counter;
+	QueryPerformanceCounter(&end_counter);
+	
+	u64 ticks = end_counter.QuadPart - timer->start_counter.QuadPart;
+	f32 result = (f32)ticks / (f32)w32_timer_freq.QuadPart;
+	return result;
+}
+
+
+
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	init_thread_context();
 	Memory_Arena *main_arena = m_arena_make(gigabytes(4));
 	Memory_Arena *frame_arena = m_arena_make(gigabytes(4));
+	
+	timeBeginPeriod(1);
+	QueryPerformanceFrequency(&w32_timer_freq);
 	
 	WNDCLASSA wc = ZERO_STRUCT;
 	{
@@ -231,6 +382,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				mplayer_initialize(mplayer);
 			}
 			
+			W32_Sound_Output sound_output = w32_init_wasapi(mplayer->flac_stream.streaminfo.sample_rate, 
+				mplayer->flac_stream.streaminfo.nb_channels);
+			assert(sound_output.initialized);
+			
 			
 			// NOTE(fakhri): Find refresh rate
 			f32 refresh_rate = 60.0f;
@@ -243,34 +398,22 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 			}
 			f32 target_fps = refresh_rate;
 			
-			Audio_Input audio_input = ZERO_STRUCT;
-			audio_input.mplayer = mplayer;
-			
-			ma_device_config config = ma_device_config_init(ma_device_type_playback);
-			config.playback.format   = ma_format_f32;  // Set to ma_format_unknown to use the device's native format.
-			config.playback.channels = u32(mplayer->flac_stream.streaminfo.nb_channels);     // Set to 0 to use the device's native channel count.
-			config.sampleRate        = mplayer->flac_stream.streaminfo.sample_rate; // Set to 0 to use the device's native sample rate.
-			config.dataCallback      = audio_device_data; // Set to 0 to use the device's native sample rate.
-			config.pUserData         = &audio_input; // Set to 0 to use the device's native sample rate.
-			
-			ma_device device;
-			if (ma_device_init(0, &config, &device) != MA_SUCCESS)
-			{
-				printf("failed to initialize miniaudio device");
-				return 1;
-			}
-			
-			ma_device_start(&device);
-			
 			ShowWindow(window, nShowCmd);
 			UpdateWindow(window);
+			
+			W32_Timer timer;
+			w32_update_timer(&timer);
 			
 			b32 running = true;
 			for (;running;)
 			{
 				m_arena_free_all(frame_arena);
 				
-				mplayer->input.frame_dt = 1.0f / target_fps;
+				mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
+				w32_update_timer(&timer);
+				
+				Log("frame dt: %f", mplayer->input.frame_dt);
+				
 				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
 				{
 					mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
@@ -423,6 +566,32 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 					break;
 				}
 				
+				// NOTE(fakhri): audio
+				{
+					u32 frame_padding_count = 0;
+					// See how much buffer space is available.
+					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
+					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
+					
+					#if 0					
+						sound_output.sample_rate;
+					mplayer->input.frame_dt;
+					u32 samples_per_frame = ;
+					#endif
+						
+						if (available_frames_count)
+					{
+						u32 flags = 0;
+						u8 *data;
+						sound_output.render_client->GetBuffer(available_frames_count, &data);
+						
+						memory_zero(data, available_frames_count * sound_output.channels_count * sizeof(f32));
+						mplayer_get_audio_samples(mplayer, data, available_frames_count);
+						
+						sound_output.render_client->ReleaseBuffer(available_frames_count, flags);
+					}
+				}
+				
 				w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
 				mplayer_update_and_render(mplayer);
 				w32_gl_render_end(w32_renderer);
@@ -430,7 +599,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				running = !(request_close || global_request_quit);
 			}
 			
-			ma_device_stop(&device);
 		}
 	}
 	

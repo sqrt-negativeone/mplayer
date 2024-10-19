@@ -37,7 +37,7 @@ set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
 
 :: add libs to link here
 set platform_libs= ^
-  opengl32.lib user32.lib gdi32.lib
+  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib
 
 set common_linker_flags=/incremental:no
 set platform_linker_flags=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32"
