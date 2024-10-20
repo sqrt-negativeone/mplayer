@@ -69,7 +69,7 @@ struct Mplayer_UI_Interaction
 
 struct Mplayer_UI
 {
-	Render_Context *render_ctx;
+	Render_Group *group;
 	Mplayer_Input *input;
 	V2_F32 mouse_p;
 	
@@ -95,7 +95,7 @@ struct Music_Track
 {
 	Music_Track *next;
 	
-	Memory_Arena *arena;
+	Memory_Arena arena;
 	String8 path;
 	String8 name;
 };
@@ -137,10 +137,12 @@ mplayer_make_music_track(Mplayer_Context *mplayer)
 	
 	if (!result)
 	{
-		result = m_arena_push_struct(&mplayer->main_arena, Music_Track);
+		result = m_arena_push_struct_z(&mplayer->main_arena, Music_Track);
 	}
 	
 	assert(result);
+	
+	m_arena_free_all(&result->arena);
 	
 	return result;
 }
@@ -291,7 +293,7 @@ font_compute_text_dim(Mplayer_Font *font, String8 text)
 }
 
 internal void
-draw_text(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, M4_Inv clip, f32 scale = 1.0f)
+draw_text(Render_Group *group, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, f32 scale = 1.0f)
 {
 	// NOTE(fakhri): render the text
 	V3_F32 text_pt = vec3(pos, 0);
@@ -303,11 +305,10 @@ draw_text(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 p
 		// TODO(fakhri): utf8 support
 		Mplayer_Glyph glyph = font_get_glyph_from_char(font, ch);
 		V3_F32 glyph_p = vec3(text_pt.xy + (glyph.offset * scale), 0);
-		push_image(render_ctx, 
+		push_image(group, 
 			glyph_p, 
 			glyph.dim * scale,
 			font->atlas_tex,
-			clip,
 			color,
 			0.0f,
 			glyph.uv_scale, 
@@ -318,24 +319,24 @@ draw_text(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 p
 }
 
 internal void
-draw_text_centered(Render_Context *render_ctx, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, M4_Inv clip, f32 scale = 1.0f)
+draw_text_centered(Render_Group *group, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, f32 scale = 1.0f)
 {
 	V2_F32 text_dim = scale * font_compute_text_dim(font, text);
 	pos.x -= 0.5f * text_dim.width;
 	pos.y -= 0.25f * text_dim.height;
-	draw_text(render_ctx, font, text, pos, color, clip, scale);
+	draw_text(group, font, text, pos, color, scale);
 }
 
 internal void
-draw_circle(Render_Context *render_ctx, V2_F32 pos, f32 radius, V4_F32 color, M4_Inv clip)
+draw_circle(Render_Group *group, V2_F32 pos, f32 radius, V4_F32 color)
 {
-	push_rect(render_ctx, pos, vec2(2 * radius), clip, color, radius);
+	push_rect(group, pos, vec2(2 * radius), color, radius);
 }
 
 internal void
-ui_begin(Mplayer_UI *ui, Render_Context *render_ctx, Mplayer_Input *input, V2_F32 mouse_p)
+ui_begin(Mplayer_UI *ui, Render_Group *group, Mplayer_Input *input, V2_F32 mouse_p)
 {
-	ui->render_ctx = render_ctx;
+	ui->group   = group;
 	ui->input   = input;
 	ui->mouse_p = mouse_p;
 }
@@ -401,9 +402,9 @@ ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_d
 	return interaction;
 }
 
-#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, clip, __LINE__)
+#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, __LINE__)
 internal Mplayer_UI_Interaction
-_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, M4_Inv clip, u32 id)
+_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, u32 id)
 {
 	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, slider_pos, slider_dim);
 	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
@@ -450,22 +451,22 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 	}
 	
 	// NOTE(fakhri): draw slider background
-	push_rect(ui->render_ctx, slider_pos, slider_dim, clip, color, 5);
+	push_rect(ui->group, slider_pos, slider_dim, color, 5);
 	
 	// NOTE(fakhri): draw track
-	push_rect(ui->render_ctx, slider_pos, track_final_dim, clip, track_color, 5);
+	push_rect(ui->group, slider_pos, track_final_dim, track_color, 5);
 	
 	// NOTE(fakhri): draw handle
 	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_final_dim.width);
-	push_rect(ui->render_ctx, handle_pos, handle_final_dim, clip, handle_color, 0.5f * handle_final_dim.width);
+	push_rect(ui->group, handle_pos, handle_final_dim, handle_color, 0.5f * handle_final_dim.width);
 	
 	return interaction;
 }
 
 
-#define ui_button(ui, font, clip, text, pos) _ui_button(ui, font, clip, text, pos, __LINE__)
+#define ui_button(ui, font, text, pos) _ui_button(ui, font, text, pos, __LINE__)
 internal Mplayer_UI_Interaction
-_ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F32 pos, u32 id)
+_ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u32 id)
 {
 	V2_F32 padding    = vec2(10, 10);
 	V2_F32 button_dim = font_compute_text_dim(font, text) + padding;
@@ -490,8 +491,8 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font, M4_Inv clip,  String8 text, V2_F3
 	
 	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
 	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
-	push_rect(ui->render_ctx, pos, final_button_dim, clip, button_bg_color);
-	draw_text_centered(ui->render_ctx, font, text, pos, text_color, clip);
+	push_rect(ui->group, pos, final_button_dim, button_bg_color);
+	draw_text_centered(ui->group, font, text, pos, text_color);
 	return interaction;
 }
 
@@ -553,12 +554,14 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 			}
 			else
 			{
+				
 				if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
 				{
 					Log("file: %.*s", STR8_EXPAND(info.name));
-					
 					Music_Track *music_track = mplayer_make_music_track(mplayer);
 					mplayer_push_music_track(mplayer, music_track);
+					music_track->path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
+					music_track->name = push_str8_copy(&music_track->arena, info.name);
 					
 				}
 			}
@@ -585,9 +588,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 {
 	Render_Context *render_ctx = mplayer->render_ctx;
 	
-	M4_Inv clip = compute_clip_matrix(vec2(0, 0), render_ctx->draw_dim);
+	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim);
 	
-	V2_F32 world_mouse_p = (clip.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
+	M4_Inv proj = group.config.proj;
+	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
 	
 	#if 0	
@@ -606,15 +610,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	}
 	#endif
 		
-		// NOTE(fakhri): UI
+		
+		draw_text_centered(&group, &mplayer->font, str8_lit("Library"), vec2(0, 300), vec4(1, 1, 1, 1));
+	for (Music_Track *music = mplayer->first_music; music; music = music->next)
 	{
-		f32 y = -200.0;
-		ui_begin(&mplayer->ui, render_ctx, &mplayer->input, world_mouse_p);
+		
+	}
+	
+	
+	// NOTE(fakhri): UI
+	{
+		f32 y = -250.0;
+		ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
 		
 		f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
 		f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
 		
-		Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20), clip);
+		Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20));
 		if (slider.pressed)
 		{
 			mplayer->play_track = false;
@@ -624,24 +636,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		{
 			mplayer->play_track = true;
 		}
-		
 		y -= 50.f;
 		
 		if (!mplayer->play_track)
 		{
-			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Play"), vec2(0, y)).clicked)
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Play"), vec2(0, y)).clicked)
 			{
 				mplayer->play_track = 1;
 			}
 		}
 		else
 		{
-			if (ui_button(&mplayer->ui, &mplayer->font, clip, str8_lit("Pause"), vec2(0, y)).clicked)
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Pause"), vec2(0, y)).clicked)
 			{
 				mplayer->play_track = 0;
 			}
 		}
 		
-		ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, vec2(400, y), vec2(200, 20), clip);
+		ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, vec2(400, y), vec2(200, 20));
 	}
 }

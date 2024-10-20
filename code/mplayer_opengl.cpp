@@ -234,6 +234,10 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 internal void
 init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 {
+	opengl->render_ctx.rects_count = 0;
+	opengl->render_ctx.max_rects   = 5000;
+	opengl->render_ctx.rects = m_arena_push_array(arena, Textured_Rect, opengl->render_ctx.max_rects);
+	
 	opengl->render_ctx.textures_count = 0;
 	opengl->render_ctx.textures_capacity = 128;
 	opengl->textures2d_array = m_arena_push_array(arena, u32, opengl->render_ctx.textures_capacity);
@@ -264,6 +268,7 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 internal void
 gl_begin_frame(OpenGL *opengl, V2_I32 window_dim, V2_I32 draw_dim, Range2_I32 draw_region)
 {
+	opengl->render_ctx.rects_count = 0;
 	opengl->render_ctx.command_offset = 0;
 	opengl->render_ctx.draw_dim       = vec2(draw_dim);
 	opengl->window_dim  = window_dim;
@@ -335,41 +340,48 @@ gl_end_frame(OpenGL *opengl)
 				
 			} break;
 			
-			case Render_Entry_Kind_Render_Entry_Textured_Rect:
+			case Render_Entry_Kind_Render_Entry_Textured_Rects:
 			{
-				RENDER_ENTRY_FROM_CMD_PTR(cmd, cmd_ptr, Render_Entry_Textured_Rect);
+				RENDER_ENTRY_FROM_CMD_PTR(cmd, cmd_ptr, Render_Entry_Textured_Rects);
 				
 				GL_Textured_Rect_Shader *rect_shader = &opengl->rect_shader;
 				glUseProgram(rect_shader->prog_id);
 				
-				V2_F32 rect_cent = cmd->pos.xy;
+				Render_Config config = cmd->config;
+				// TODO(fakhri): culling
 				
-				V3_F32 pos = cmd->pos;
-				V3_F32 scale = vec3(cmd->dim, 0);
-				
-				M4 translation_m = m4_translate(pos);
-				M4 scaling_m     = m4_scale(scale);
-				M4 model = translation_m * scaling_m;
-				
-				glUniformMatrix4fv(rect_shader->uniforms.clip,  1, GL_FALSE, (f32*)&cmd->clip);
-				glUniformMatrix4fv(rect_shader->uniforms.model, 1, GL_FALSE, (f32*)&model);
-				glUniform4fv(rect_shader->uniforms.color,     1, (f32*)&cmd->color);
-				glUniform2fv(rect_shader->uniforms.uv_offset, 1, (f32*)&cmd->uv_offset);
-				glUniform2fv(rect_shader->uniforms.uv_scale,  1, (f32*)&cmd->uv_scale);
-				
-				glUniform2fv(rect_shader->uniforms.rect_cent,  1, (f32*)&rect_cent);
-				glUniform2fv(rect_shader->uniforms.rect_dim,  1, (f32*)&cmd->dim);
-				glUniform1f(rect_shader->uniforms.roundness, cmd->roundness);
-				
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, 
-					gl_get_texture_handle(opengl, cmd->texture));
-				
-				glBindVertexArray(rect_shader->vao);
-				glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-				
-				glBindVertexArray(0);
-				glBindTexture(GL_TEXTURE_2D, 0);
+				for (u32 i = 0; i < cmd->rects_count; i += 1)
+				{
+					Textured_Rect *rect = render_ctx->rects + cmd->rect_start_index + i;
+					
+					V3_F32 pos = rect->pos;
+					V3_F32 scale = vec3(rect->dim, 0);
+					
+					M4 translation_m = m4_translate(pos);
+					M4 scaling_m     = m4_scale(scale);
+					M4 model = translation_m * scaling_m;
+					
+					glUniformMatrix4fv(rect_shader->uniforms.clip,  1, GL_FALSE, (f32*)&config.proj.mat);
+					glUniformMatrix4fv(rect_shader->uniforms.model, 1, GL_FALSE, (f32*)&model);
+					glUniform4fv(rect_shader->uniforms.color,     1, (f32*)&rect->color);
+					glUniform2fv(rect_shader->uniforms.uv_offset, 1, (f32*)&rect->uv_offset);
+					glUniform2fv(rect_shader->uniforms.uv_scale,  1, (f32*)&rect->uv_scale);
+					
+					glUniform2fv(rect_shader->uniforms.rect_cent,  1, (f32*)&rect->pos);
+					glUniform2fv(rect_shader->uniforms.rect_dim,  1, (f32*)&rect->dim);
+					glUniform1f(rect_shader->uniforms.roundness, rect->roundness);
+					
+					glActiveTexture(GL_TEXTURE0);
+					glBindTexture(GL_TEXTURE_2D, 
+						gl_get_texture_handle(opengl, rect->texture));
+					
+					glBindVertexArray(rect_shader->vao);
+					glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+					
+					glBindVertexArray(0);
+					glBindTexture(GL_TEXTURE_2D, 0);
+					
+				}
 				
 				glUseProgram(0);
 			} break;

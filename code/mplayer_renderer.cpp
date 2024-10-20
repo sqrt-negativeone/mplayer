@@ -29,6 +29,19 @@ struct Textures_Upload_Buffer
 	u64 count;
 };
 
+
+struct Textured_Rect
+{
+	Texture texture;
+	V2_F32 uv_scale;
+	V2_F32 uv_offset;
+	
+	f32 roundness;
+	V3_F32 pos;
+	V2_F32 dim;
+	V4_F32 color;
+};
+
 struct Render_Context
 {
 	Memory_Arena *arena;
@@ -42,12 +55,16 @@ struct Render_Context
 	u64 textures_capacity;
 	
 	Texture white_texture;
+	
+	Textured_Rect *rects;
+	u32 max_rects;
+	u32 rects_count;
 };
 
 enum Render_Entry_Kind
 {
 	Render_Entry_Kind_Render_Entry_Clear_Color,
-	Render_Entry_Kind_Render_Entry_Textured_Rect,
+	Render_Entry_Kind_Render_Entry_Textured_Rects,
 };
 
 struct Render_Entry_Header
@@ -60,16 +77,26 @@ struct Render_Entry_Clear_Color
 	V4_F32 color;
 };
 
-struct Render_Entry_Textured_Rect
+struct Render_Config
 {
-	Texture texture;
-	V3_F32 pos;
-	V2_F32 dim;
-	V4_F32 color;
-	V2_F32 uv_scale;
-	V2_F32 uv_offset;
-	M4_Inv clip;
-	f32 roundness;
+	V2_F32 camera_pos;
+	V2_F32 camera_dim;
+	Range2_F32 cull_range;
+	M4_Inv proj;
+};
+
+struct Render_Entry_Textured_Rects
+{
+	Render_Config config;
+	u32 rects_count;
+	u32 rect_start_index;
+};
+
+struct Render_Group
+{
+	Render_Context *render_ctx;
+	Render_Config config;
+	Render_Entry_Textured_Rects *textured_rects;
 };
 
 internal Texture
@@ -186,33 +213,50 @@ push_clear_color(Render_Context *render_ctx, V4_F32 color)
 }
 
 internal void
-push_image(Render_Context *render_ctx, V3_F32 pos, V2_F32 dim, Texture texture, M4_Inv clip, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0f, V2_F32 uv_scale = vec2(1, 1), V2_F32 uv_offset = vec2(0, 0))
+render_group_flush(Render_Group *group)
 {
-	Render_Entry_Textured_Rect *cmd = rndr_push_cmd(render_ctx, Render_Entry_Textured_Rect);
-	assert(cmd);
-	if (cmd)
+	group->textured_rects = 0;
+}
+
+internal void
+push_image(Render_Group *group, V3_F32 pos, V2_F32 dim, Texture texture, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0f, V2_F32 uv_scale = vec2(1, 1), V2_F32 uv_offset = vec2(0, 0))
+{
+	Render_Context *render_ctx = group->render_ctx;
+	
+	if (!group->textured_rects)
 	{
-		cmd->texture   = texture;
-		cmd->pos       = pos;
-		cmd->dim       = dim;
-		cmd->color     = color;
-		cmd->uv_scale  = uv_scale;
-		cmd->uv_offset = uv_offset;
-		cmd->clip      = clip;
-		cmd->roundness = roundness;
+		group->textured_rects = rndr_push_cmd(render_ctx, Render_Entry_Textured_Rects);
+		group->textured_rects->config = group->config;
+		group->textured_rects->rect_start_index = render_ctx->rects_count;
+		group->textured_rects->rects_count = 0;
 	}
+	
+	render_ctx->rects_count += 1;
+	
+	Render_Entry_Textured_Rects *entry = group->textured_rects;
+	u32 rect_index = entry->rect_start_index + entry->rects_count++;
+	assert(rect_index < render_ctx->max_rects);
+	
+	Textured_Rect *rect = render_ctx->rects + rect_index;
+	rect->texture   = texture;
+	rect->pos       = pos;
+	rect->dim       = dim;
+	rect->color     = color;
+	rect->uv_scale  = uv_scale;
+	rect->uv_offset = uv_offset;
+	rect->roundness = roundness;
 }
 
 internal void
-push_rect(Render_Context *render_ctx, V3_F32 pos, V2_F32 dim, M4_Inv clip, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
+push_rect(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(render_ctx, pos, dim, render_ctx->white_texture, clip, color, roundness);
+	push_image(group, pos, dim, group->render_ctx->white_texture, color, roundness);
 }
 
 internal void
-push_rect(Render_Context *render_ctx, V2_F32 pos, V2_F32 dim, M4_Inv clip, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
+push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(render_ctx, vec3(pos, 0), dim, render_ctx->white_texture, clip, color, roundness);
+	push_image(group, vec3(pos, 0), dim, group->render_ctx->white_texture, color, roundness);
 }
 
 
@@ -249,4 +293,16 @@ push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture textu
 	entry->tex_buf = tex_buf;
 	
 	upload_buffer->count += 1;
+}
+
+
+internal Render_Group
+begin_render_group(Render_Context *render_ctx, V2_F32 camera_pos, V2_F32 camera_dim, Range2_F32 cull_dim = RANGE2_F32_FULL_ZO)
+{
+	Render_Group group = ZERO_STRUCT;
+	group.render_ctx = render_ctx;
+	group.config.camera_pos = camera_pos;
+	group.config.camera_dim = camera_dim;
+	group.config.proj = compute_clip_matrix(camera_pos, camera_dim);
+	return group;
 }

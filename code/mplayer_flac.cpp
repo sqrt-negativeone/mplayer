@@ -891,6 +891,48 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 }
 
 internal void
+flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
+{
+	
+	// NOTE(fakhri): assume we always have the samples count
+	assert(streaminfo->samples_count);
+	
+	u32 seek_points_count = 100;
+	flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+	flac_stream->seek_table_size = seek_points_count;
+	assert(flac_stream->seek_table);
+	
+	u64 samples_resolution = streaminfo->samples_count / seek_points_count; // 1% resolution
+	
+	u64 next_seek_sample = 0;
+	Flac_Seek_Point *curr_seek_point = flac_stream->seek_table;
+	Flac_Seek_Point *opl_seek_point  = flac_stream->seek_table + flac_stream->seek_table_size;
+	
+	u64 current_sample_number = 0;
+	// NOTE(fakhri): build custom seek table
+	for (;curr_seek_point != opl_seek_point;)
+	{
+		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
+		if (!block_info.success)
+		{
+			break;
+		}
+		
+		if (current_sample_number >= next_seek_sample)
+		{
+			curr_seek_point->sample_number = current_sample_number;
+			curr_seek_point->byte_offset   = block_info.start_pos.byte_index - flac_stream->first_block_pos.byte_index;
+			curr_seek_point->samples_count = u16(block_info.block_size);
+			
+			next_seek_sample += samples_resolution;
+			curr_seek_point++;
+		}
+		
+		current_sample_number += block_info.block_size;
+	}
+}
+
+internal void
 init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 {
 	// NOTE(fakhri): init bitstream
@@ -1007,46 +1049,6 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 	}
 	flac_stream->first_block_pos = bitstream->pos;
 	
-	if (!flac_stream->seek_table)
-	{
-		// NOTE(fakhri): assume we always have the samples count
-		assert(streaminfo->samples_count);
-		
-		u32 seek_points_count = 100;
-		flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
-		flac_stream->seek_table_size = seek_points_count;
-		assert(flac_stream->seek_table);
-		
-		u64 samples_resolution = streaminfo->samples_count / seek_points_count; // 1% resolution
-		
-		u64 next_seek_sample = 0;
-		Flac_Seek_Point *curr_seek_point = flac_stream->seek_table;
-		Flac_Seek_Point *opl_seek_point  = flac_stream->seek_table + flac_stream->seek_table_size;
-		
-		u64 current_sample_number = 0;
-		// NOTE(fakhri): build custom seek table
-		for (;curr_seek_point != opl_seek_point;)
-		{
-			Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
-			if (!block_info.success)
-			{
-				break;
-			}
-			
-			if (current_sample_number >= next_seek_sample)
-			{
-				curr_seek_point->sample_number = current_sample_number;
-				curr_seek_point->byte_offset   = block_info.start_pos.byte_index - flac_stream->first_block_pos.byte_index;
-				curr_seek_point->samples_count = u16(block_info.block_size);
-				
-				next_seek_sample += samples_resolution;
-				curr_seek_point++;
-			}
-			
-			current_sample_number += block_info.block_size;
-		}
-	}
-	
 	flac_stream->bitstream.pos = flac_stream->first_block_pos;
 	flac_decode_one_block(flac_stream, 1);
 	return;
@@ -1107,6 +1109,12 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_A
 internal void
 flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 {
+	if (!flac_stream->seek_table)
+	{
+		// TODO(fakhri): build the seek table in another thread?
+		flac_build_seek_table(flac_stream, &flac_stream->streaminfo);
+	}
+	
 	if (flac_stream->seek_table)
 	{
 		Flac_Seek_Point *best_seek_point = flac_stream->seek_table;

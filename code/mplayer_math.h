@@ -98,7 +98,8 @@ union Range2_F32
 	struct {f32 min_x, min_y, max_x, max_y;};
 };
 
-
+#define RANGE2_F32_EMPTY ZERO_STRUCT
+#define RANGE2_F32_FULL_ZO Range2_F32{.min_x = 0, .min_y = 0, .max_x = 1, .max_y = 1}
 
 internal V2_I32
 vec2i(u32 x, u32 y)

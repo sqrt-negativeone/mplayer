@@ -129,6 +129,16 @@ str8_f(Memory_Arena *arena, const char *fmt, ...)
   return result;
 }
 
+internal String8
+push_str8_copy(Memory_Arena *arena, String8 str)
+{
+	String8 result;
+	result.str = m_arena_push_array(arena, u8, str.len);
+	result.len = str.len;
+	memory_copy(result.str, str.str, str.len);
+	return result;
+}
+
 global u8 utf8_class[32] =
 {
   1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,2,2,2,2,3,3,4,5,
