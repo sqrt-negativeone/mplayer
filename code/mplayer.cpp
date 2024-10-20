@@ -594,65 +594,89 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
 	
-	#if 0	
-		Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
+	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
+	
+	Range2_F32 available_space = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
+	// NOTE(fakhri): track control
 	{
-		f32 footer_percentage = 0.15f;
-		f32 footer_height = MAX(footer_percentage * range_dim(screen_rect).height, 100);
-		Range2_F32 footer = rect_cut_bottom(screen_rect, footer_height);
-		V2_F32 footer_pos = range_center(footer);
-		V2_F32 footer_dim = range_dim(footer);
+		Range2_F32_Cut cut = range_cut_bottom(available_space, 125);
+		available_space = cut.top;
 		
-		push_rect(render_ctx, footer_pos, footer_dim, clip, vec4(0.2f, 0.2f, 0.2f, 1));
+		push_rect(&group, range_center(cut.bottom), range_dim(cut.bottom), vec4(0.05f, 0.05f, 0.05f, 1.0f));
 		
-		V2_F32 play_button_dim = 0.9f * vec2(footer_dim.height);
-		push_rect(render_ctx, footer_pos, play_button_dim, clip, vec4(0.3f, 0.3f, 0.3f, 1));
+		// NOTE(fakhri): padding
+		cut = range_cut_top(cut.bottom, 10);
+		
+		// NOTE(fakhri): track
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			
+			Range2_F32 track_rect = cut.top;
+			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
+			
+			f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
+			f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
+			
+			Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect));
+			if (slider.pressed)
+			{
+				mplayer->play_track = false;
+				flac_seek_stream(&mplayer->flac_stream, (u64)current_playing_sample);
+			}
+			else if (slider.released)
+			{
+				mplayer->play_track = true;
+			}
+		}
+		
+		// NOTE(fakhri): horizontal padding
+		cut = range_cut_left_percentage(cut.bottom, 1.0f/3.0f);
+		
+		// NOTE(fakhri): play button
+		{
+			cut = range_cut_left_percentage(cut.right, 0.5f);
+			Range2_F32 button_rect = cut.left;
+			
+			if (!mplayer->play_track)
+			{
+				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Play"), range_center(button_rect)).clicked)
+				{
+					mplayer->play_track = 1;
+				}
+			}
+			else
+			{
+				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Pause"), range_center(button_rect)).clicked)
+				{
+					mplayer->play_track = 0;
+				}
+			}
+		}
+		
+		// NOTE(fakhri): volume
+		{
+			// NOTE(fakhri): vertical padding
+			cut = range_cut_top(cut.right, 30);
+			
+			// NOTE(fakhri): horizontal padding
+			cut = range_cut_right(cut.right, 20);
+			
+			// NOTE(fakhri): volume rect
+			cut = range_cut_right(cut.left, 150);
+			Range2_F32 volume_rect = range_cut_top(cut.right, 20).top;
+			ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, range_center(volume_rect), range_dim(volume_rect));
+		}
 	}
-	#endif
-		
-		
-		draw_text_centered(&group, &mplayer->font, str8_lit("Library"), vec2(0, 300), vec4(1, 1, 1, 1));
+	
+	
+	{
+		Range2_F32_Cut cut = range_cut_left(available_space, 150);
+		push_rect(&group, range_center(cut.left), range_dim(cut.left), vec4(0.15f, 0.15f, 0.15f, 1.0f));
+	}
+	
+	draw_text_centered(&group, &mplayer->font, str8_lit("Library"), vec2(0, 300), vec4(1, 1, 1, 1));
 	for (Music_Track *music = mplayer->first_music; music; music = music->next)
 	{
 		
-	}
-	
-	
-	// NOTE(fakhri): UI
-	{
-		f32 y = -250.0;
-		ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
-		
-		f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
-		f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
-		
-		Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, vec2(0, y), vec2(1200, 20));
-		if (slider.pressed)
-		{
-			mplayer->play_track = false;
-			flac_seek_stream(&mplayer->flac_stream, (u64)current_playing_sample);
-		}
-		else if (slider.released)
-		{
-			mplayer->play_track = true;
-		}
-		y -= 50.f;
-		
-		if (!mplayer->play_track)
-		{
-			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Play"), vec2(0, y)).clicked)
-			{
-				mplayer->play_track = 1;
-			}
-		}
-		else
-		{
-			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Pause"), vec2(0, y)).clicked)
-			{
-				mplayer->play_track = 0;
-			}
-		}
-		
-		ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, vec2(400, y), vec2(200, 20));
 	}
 }

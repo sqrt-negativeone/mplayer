@@ -98,6 +98,12 @@ union Range2_F32
 	struct {f32 min_x, min_y, max_x, max_y;};
 };
 
+union Range2_F32_Cut
+{
+	struct { Range2_F32 left, right;};
+	struct { Range2_F32 top, bottom;};
+};
+
 #define RANGE2_F32_EMPTY ZERO_STRUCT
 #define RANGE2_F32_FULL_ZO Range2_F32{.min_x = 0, .min_y = 0, .max_x = 1, .max_y = 1}
 
@@ -610,68 +616,110 @@ range_center(Range2_F32 range)
 	return result;
 }
 
-internal Range2_F32
-rect_cut_top(Range2_F32 rect, f32 cut_h)
-{
-	Range2_F32 top = rect;
-	top.min_y = top.max_y - cut_h;
-	return top;
-}
 
-internal Range2_F32
-rect_cut_bottom(Range2_F32 rect, f32 cut_h)
+
+internal Range2_F32_Cut
+range_cut_top(Range2_F32 rect, f32 cut_h)
 {
+	if (cut_h < 0) cut_h = 0; 
+	
+	Range2_F32 top    = rect;
 	Range2_F32 bottom = rect;
+	
+	top.min_y    = top.max_y - cut_h;
+	bottom.max_y = top.min_y;
+	
+	Range2_F32_Cut result;
+	result.top    = top;
+	result.bottom = bottom;
+	
+	return result;
+}
+
+internal Range2_F32_Cut
+range_cut_bottom(Range2_F32 rect, f32 cut_h)
+{
+	if (cut_h < 0) cut_h = 0; 
+	
+	Range2_F32 top    = rect;
+	Range2_F32 bottom = rect;
+	
 	bottom.max_y = bottom.min_y + cut_h;
-	return bottom;
+	top   .min_y = bottom.max_y;
+	
+	Range2_F32_Cut result;
+	result.top    = top;
+	result.bottom = bottom;
+	
+	return result;
 }
 
-internal Range2_F32
-rect_cut_left(Range2_F32 rect, f32 cut_w)
+internal Range2_F32_Cut
+range_cut_left(Range2_F32 rect, f32 cut_w)
 {
-	Range2_F32 left = rect;
-	left.max_x = left.min_x + cut_w;
-	return left;
-}
-
-internal Range2_F32
-rect_cut_right(Range2_F32 rect, f32 cut_w)
-{
+	if (cut_w < 0) cut_w = 0; 
+	Range2_F32 left  = rect;
 	Range2_F32 right = rect;
+	
+	left.max_x = left.min_x + cut_w;
+	right.min_x = left.max_x;
+	
+	Range2_F32_Cut result;
+	result.left  = left;
+	result.right = right;
+	
+	return result;
+}
+
+internal Range2_F32_Cut
+range_cut_right(Range2_F32 rect, f32 cut_w)
+{
+	if (cut_w < 0) cut_w = 0; 
+	Range2_F32 left  = rect;
+	Range2_F32 right = rect;
+	
 	right.min_x = right.max_x - cut_w;
-	return right;
+	left .max_x = right.min_x;
+	
+	
+	Range2_F32_Cut result;
+	result.left  = left;
+	result.right = right;
+	
+	
+	return result;
 }
 
-internal Range2_F32
-rect_cut_top_percentage(Range2_F32 rect, f32 h_percent)
+internal Range2_F32_Cut
+range_cut_top_percentage(Range2_F32 rect, f32 h_percent)
 {
 	assert(0 <= h_percent && h_percent <= 1);
-	Range2_F32 top = rect_cut_top(rect, h_percent * range_dim(rect).height);
-	return top;
+	Range2_F32_Cut cut = range_cut_top(rect, h_percent * range_dim(rect).height);
+	return cut;
 }
 
-internal Range2_F32
-rect_cut_bottom_percentage(Range2_F32 rect, f32 h_percent)
+internal Range2_F32_Cut
+range_cut_bottom_percentage(Range2_F32 rect, f32 h_percent)
 {
 	assert(0 <= h_percent && h_percent <= 1);
-	Range2_F32 bottom = rect_cut_bottom(rect, h_percent * range_dim(rect).height);
-	return bottom;
+	Range2_F32_Cut cut = range_cut_bottom(rect, h_percent * range_dim(rect).height);
+	return cut;
 }
 
-internal Range2_F32
-rect_cut_left_percentage(Range2_F32 rect, f32 w_percent)
+internal Range2_F32_Cut
+range_cut_left_percentage(Range2_F32 rect, f32 w_percent)
 {
 	assert(0 <= w_percent && w_percent <= 1);
-	Range2_F32 left = rect_cut_left(rect, w_percent * range_dim(rect).width);
-	return left;
+	Range2_F32_Cut cut = range_cut_left(rect, w_percent * range_dim(rect).width);
+	return cut;
 }
 
-internal Range2_F32
-rect_cut_right_percentage(Range2_F32 rect, f32 w_percent)
+internal Range2_F32_Cut
+range_cut_right_percentage(Range2_F32 rect, f32 w_percent)
 {
 	assert(0 <= w_percent && w_percent <= 1);
-	Range2_F32 right = rect_cut_right(rect, w_percent * range_dim(rect).width);
-	return right;
+	Range2_F32_Cut cut = range_cut_right(rect, w_percent * range_dim(rect).width);
+	return cut;
 }
 
 
