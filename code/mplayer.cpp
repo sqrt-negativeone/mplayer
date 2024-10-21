@@ -26,7 +26,6 @@ typedef void      File_Iter_End_Proc  (File_Iterator_Handle *it);
 
 typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
-
 #include "mplayer_renderer.cpp"
 #include "mplayer_bitstream.cpp"
 #include "mplayer_flac.cpp"
@@ -112,7 +111,9 @@ struct Mplayer_Context
 	Flac_Stream flac_stream;
 	Buffer flac_file_buffer;
 	
+	Mplayer_Font timestamp_font;
 	Mplayer_Font font;
+	Mplayer_Font debug_font;
 	f32 volume;
 	f32 seek_percentage;
 	
@@ -293,7 +294,7 @@ font_compute_text_dim(Mplayer_Font *font, String8 text)
 }
 
 internal void
-draw_text(Render_Group *group, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, f32 scale = 1.0f)
+draw_text(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, String8 text)
 {
 	// NOTE(fakhri): render the text
 	V3_F32 text_pt = vec3(pos, 0);
@@ -304,27 +305,51 @@ draw_text(Render_Group *group, Mplayer_Font *font, String8 text, V2_F32 pos, V4_
 		u8 ch = text.str[offset];
 		// TODO(fakhri): utf8 support
 		Mplayer_Glyph glyph = font_get_glyph_from_char(font, ch);
-		V3_F32 glyph_p = vec3(text_pt.xy + (glyph.offset * scale), 0);
+		V3_F32 glyph_p = vec3(text_pt.xy + (glyph.offset), 0);
 		push_image(group, 
 			glyph_p, 
-			glyph.dim * scale,
+			glyph.dim,
 			font->atlas_tex,
 			color,
 			0.0f,
 			glyph.uv_scale, 
 			glyph.uv_offset);
 		
-		text_pt.x += scale * glyph.advance;
+		text_pt.x += glyph.advance;
 	}
 }
 
 internal void
-draw_text_centered(Render_Group *group, Mplayer_Font *font, String8 text, V2_F32 pos, V4_F32 color, f32 scale = 1.0f)
+draw_text_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, const char *fmt, ...)
 {
-	V2_F32 text_dim = scale * font_compute_text_dim(font, text);
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	va_list args;
+  va_start(args, fmt);
+	String8 text = str8_fv(scratch.arena, fmt, args);
+  va_end(args);
+	
+	draw_text(group, font, pos, color, text);
+}
+
+internal void
+draw_text_centered(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, String8 text)
+{
+	V2_F32 text_dim = font_compute_text_dim(font, text);
 	pos.x -= 0.5f * text_dim.width;
 	pos.y -= 0.25f * text_dim.height;
-	draw_text(group, font, text, pos, color, scale);
+	draw_text(group, font, pos, color, text);
+}
+
+internal void
+draw_text_centered_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, const char *fmt, ...)
+{
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	va_list args;
+  va_start(args, fmt);
+	String8 text = str8_fv(scratch.arena, fmt, args);
+  va_end(args);
+	
+	draw_text_centered(group, font, pos, color, text);
 }
 
 internal void
@@ -402,9 +427,9 @@ ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_d
 	return interaction;
 }
 
-#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, __LINE__)
+#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress,  __LINE__)
 internal Mplayer_UI_Interaction
-_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, u32 id)
+_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, b32 progress, u32 id)
 {
 	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, slider_pos, slider_dim);
 	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
@@ -455,9 +480,19 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 	
 	// NOTE(fakhri): draw track
 	push_rect(ui->group, slider_pos, track_final_dim, track_color, 5);
+	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_final_dim.width);
+	
+	if (progress)
+	{
+		V4_F32 progress_color = vec4(1, 1, 1, 1);
+		// NOTE(fakhri): draw progress
+		Range2_F32 track_rect = range_center_dim(slider_pos, track_final_dim);
+		Range2_F32 progress_rect = range_cut_left(track_rect, 0.5f * track_final_dim.width + handle_pos.x - slider_pos.x).left;
+		push_rect(ui->group, range_center(progress_rect), range_dim(progress_rect), progress_color, 5);
+	}
+	
 	
 	// NOTE(fakhri): draw handle
-	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_final_dim.width);
 	push_rect(ui->group, handle_pos, handle_final_dim, handle_color, 0.5f * handle_final_dim.width);
 	
 	return interaction;
@@ -492,7 +527,7 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u32 id
 	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
 	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
 	push_rect(ui->group, pos, final_button_dim, button_bg_color);
-	draw_text_centered(ui->group, font, text, pos, text_color);
+	draw_text_centered(ui->group, font, pos, text_color, text);
 	return interaction;
 }
 
@@ -577,10 +612,37 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	mplayer->flac_file_buffer = mplayer->os.load_entire_file(str8_lit("data/tests/fear_inoculum.flac"), &mplayer->main_arena);
 	init_flac_stream(&mplayer->flac_stream, mplayer->flac_file_buffer);
 	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 40);
+	load_font(mplayer, &mplayer->debug_font, str8_lit("data/fonts/arial.ttf"), 20);
+	load_font(mplayer, &mplayer->timestamp_font, str8_lit("data/fonts/arial.ttf"), 20);
 	mplayer->play_track = 0;
 	mplayer->volume = 1.0f;
 	
 	mplayer_load_library(mplayer, mplayer->library_path);
+}
+
+struct Mplayer_Timestamp
+{
+	u8 hours;
+	u8 minutes;
+	u8 seconds;
+};
+
+
+internal Mplayer_Timestamp
+flac_get_current_timestap(Flac_Stream *flac_stream)
+{
+	u64 seconds_elapsed = flac_stream->next_sample_number / u64(flac_stream->streaminfo.sample_rate);
+	u64 hours = seconds_elapsed / 3600;
+	seconds_elapsed %= 3600;
+	
+	u64 minutes = seconds_elapsed / 60;
+	seconds_elapsed %= 60;
+	
+	Mplayer_Timestamp result;
+	result.hours   = u8(hours);
+	result.minutes = u8(minutes);
+	result.seconds = u8(seconds_elapsed);
+	return result;
 }
 
 internal void
@@ -593,6 +655,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	M4_Inv proj = group.config.proj;
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
+	
+	// NOTE(fakhri): draw fps
+	{
+		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
+		fps_pos.x -= 20;
+		fps_pos.y -= 15;
+		draw_text_centered_f(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), "%d", u32(1.0f / mplayer->input.frame_dt));
+	}
 	
 	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
 	
@@ -610,20 +680,30 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		// NOTE(fakhri): track
 		{
 			cut = range_cut_top(cut.bottom, 20);
-			
 			Range2_F32 track_rect = cut.top;
+			
+			// NOTE(fakhri): timestamp
+			{
+				Range2_F32_Cut cut2 = range_cut_left(track_rect, 100);
+				track_rect = cut2.right;
+				
+				Range2_F32 timestamp_rect = range_cut_right(cut2.left, 100).right;
+				Mplayer_Timestamp current_timestamp = flac_get_current_timestap(&mplayer->flac_stream);
+				draw_text_centered_f(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
+			}
+			
 			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
 			
 			f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
 			f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
 			
-			Mplayer_UI_Interaction slider = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect));
-			if (slider.pressed)
+			Mplayer_UI_Interaction track = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect), 1);
+			if (track.pressed)
 			{
 				mplayer->play_track = false;
 				flac_seek_stream(&mplayer->flac_stream, (u64)current_playing_sample);
 			}
-			else if (slider.released)
+			else if (track.released)
 			{
 				mplayer->play_track = true;
 			}
@@ -664,7 +744,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			// NOTE(fakhri): volume rect
 			cut = range_cut_right(cut.left, 150);
 			Range2_F32 volume_rect = range_cut_top(cut.right, 20).top;
-			ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, range_center(volume_rect), range_dim(volume_rect));
+			ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, range_center(volume_rect), range_dim(volume_rect), 1);
 		}
 	}
 	
@@ -674,7 +754,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		push_rect(&group, range_center(cut.left), range_dim(cut.left), vec4(0.15f, 0.15f, 0.15f, 1.0f));
 	}
 	
-	draw_text_centered(&group, &mplayer->font, str8_lit("Library"), vec2(0, 300), vec4(1, 1, 1, 1));
+	draw_text_centered(&group, &mplayer->font, vec2(0, 300), vec4(1, 1, 1, 1), str8_lit("Library"));
 	for (Music_Track *music = mplayer->first_music; music; music = music->next)
 	{
 		

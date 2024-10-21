@@ -103,7 +103,6 @@ struct Flac_Seek_Point
 
 struct Flac_Stream 
 {
-	b32 done;
 	Bit_Stream bitstream;
 	Flac_Stream_Info streaminfo;
 	Memory_Arena metadata_arena;
@@ -467,7 +466,6 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	
 	if (bitstream_is_empty(bitstream))
 	{
-		flac_stream->done = true;
 		return;
 	}
 	
@@ -893,6 +891,8 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 internal void
 flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
 {
+	Bit_Stream_Pos saved_pos = flac_stream->bitstream.pos;
+	flac_stream->bitstream.pos = flac_stream->first_block_pos;
 	
 	// NOTE(fakhri): assume we always have the samples count
 	assert(streaminfo->samples_count);
@@ -930,6 +930,8 @@ flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
 		
 		current_sample_number += block_info.block_size;
 	}
+	
+	flac_stream->bitstream.pos = saved_pos;
 }
 
 internal void
@@ -1145,6 +1147,10 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 	{
 		assert(target_sample > flac_stream->next_sample_number);
 		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
+		if (!block_info.success)
+		{
+			break;
+		}
 		if (flac_stream->next_sample_number + block_info.block_size >= target_sample)
 		{
 			Memory_Checkpoint scratch = get_scratch(0, 0);
