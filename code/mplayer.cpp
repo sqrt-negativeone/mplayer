@@ -728,7 +728,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 {
 	Render_Context *render_ctx = mplayer->render_ctx;
 	
-	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim, range_center_dim(vec2(0, 0), render_ctx->draw_dim));
+	Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
+	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim, screen_rect);
 	
 	M4_Inv proj = group.config.proj;
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
@@ -805,6 +806,19 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		
 		// NOTE(fakhri): horizontal padding
 		cut = range_cut_left_percentage(cut.bottom, 1.0f/3.0f);
+		
+		// NOTE(fakhri): track name
+		{
+			if (mplayer->current_music)
+			{
+				// TODO(fakhri): stack of render configs?
+				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, cut.left);
+				
+				draw_text_centered(&group, &mplayer->font, range_center(cut.left), vec4(1, 1, 1, 1), mplayer->current_music->name);
+				
+				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, screen_rect);
+			}
+		}
 		
 		// NOTE(fakhri): play button
 		{
