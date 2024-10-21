@@ -708,24 +708,30 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				
 				// NOTE(fakhri): audio
 				{
+					u32 max_ms_lag = 100;
+					u32 max_lag_sample_count = max_ms_lag * sound_output.config.sample_rate / 1000;
+					
 					u32 frame_padding_count = 0;
 					u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.config.sample_rate);
 					
 					// See how much buffer space is available.
 					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
-					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
-					u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
-					
-					if (frames_to_write)
+					if (frame_padding_count < max_lag_sample_count)
 					{
-						u32 flags = 0;
-						u8 *data;
-						sound_output.render_client->GetBuffer(frames_to_write, &data);
+						u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
+						u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
 						
-						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
-						mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
-						
-						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
+						if (frames_to_write)
+						{
+							u32 flags = 0;
+							u8 *data;
+							sound_output.render_client->GetBuffer(frames_to_write, &data);
+							
+							memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
+							mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
+							
+							sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
+						}
 					}
 				}
 				
