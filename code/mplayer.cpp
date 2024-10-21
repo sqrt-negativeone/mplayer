@@ -141,10 +141,14 @@ struct Mplayer_Context
 	Mplayer_Music_Track *first_music;
 	Mplayer_Music_Track *last_music;
 	Mplayer_Music_Track *music_free_list;
-	
+	u64 music_count;
 	Mplayer_Mode mode;
 	
 	Mplayer_Music_Track *current_music;
+	
+	f32 music_view_scroll;
+	f32 music_view_scroll_speed;
+	f32 music_view_target_scroll;
 };
 
 internal Mplayer_Music_Track *
@@ -173,6 +177,7 @@ mplayer_make_music_track(Mplayer_Context *mplayer)
 internal void
 mplayer_push_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
 {
+	mplayer->music_count += 1;
 	if (!mplayer->last_music)
 	{
 		mplayer->last_music = mplayer->first_music = music_track;
@@ -876,8 +881,39 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			V2_F32 music_option_pos = range_center(available_space);
 			music_option_pos.y += 0.5f * (available_space_dim.height - music_option_dim.height);
 			
-			f32 scroll = 0 * 100 * sin_f(mplayer->input.time * 2 * PI32);
-			music_option_pos.y -= scroll;
+			for (Mplayer_Input_Event *event = mplayer->input.first_event; event; event = event->next)
+			{
+				if (event->consumed) continue;
+				if (event->kind == Event_Kind_Mouse_Wheel)
+				{
+					event->consumed = true;
+					
+					mplayer->music_view_target_scroll -= 3.0f * event->scroll.y;
+					mplayer->music_view_target_scroll = CLAMP(0, mplayer->music_view_target_scroll, mplayer->music_count - 1);
+				}
+			}
+			
+			Range2_F32 scrollbar_rect = range_cut_right(available_space, 50).right;
+			
+			// NOTE(fakhri): animate scroll
+			{
+				f32 dt = mplayer->input.frame_dt;
+				f32 current_scroll = mplayer->music_view_scroll;
+				f32 target_scroll  = mplayer->music_view_target_scroll;
+				f32 scroll_speed  = mplayer->music_view_scroll_speed;
+				
+				f32 freq = 5.0f;
+				f32 zeta = 1.f;
+				
+				f32 K1 = zeta / (PI32 * freq);
+				f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
+				
+				f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
+				mplayer->music_view_scroll_speed += dt * scroll_accel;
+				mplayer->music_view_scroll += dt * mplayer->music_view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
+			}
+			
+			music_option_pos.y += mplayer->music_view_scroll * music_option_dim.height;
 			
 			Mplayer_Music_Track *music = mplayer->first_music;
 			// NOTE(fakhri): skip until the first visible option 
@@ -903,10 +939,16 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, int_from_ptr(music), range_center(visible_range), range_dim(visible_range));
 				
 				V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+				if (music == mplayer->current_music)
+				{
+					bg_color = vec4(0.f, 0.f,0.f, 1);
+				}
+				
 				if (interaction.hover)
 				{
 					bg_color = vec4(0.2f, 0.2f,0.2f, 1);
 				}
+				
 				if (interaction.pressed)
 				{
 					bg_color = vec4(0.14f, 0.14f,0.14f, 1);

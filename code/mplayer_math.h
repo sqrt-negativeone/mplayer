@@ -9,6 +9,7 @@
 
 #include <xmmintrin.h>
 
+#define SQUARE(x) ((x) * (x))
 #define CLAMP(a, x, b) (((x) <= (a))? (a) : (((b) <= (x))? (b):(x)))
 #define MAX(a, b) (((a) >= (b))? (a):(b))
 #define MIN(a, b) (((a) <= (b))? (a):(b))

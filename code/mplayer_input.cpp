@@ -122,6 +122,7 @@ enum Mplayer_Key_Modifier_Flag
 struct Mplayer_Input_Event
 {
 	Mplayer_Input_Event *next;
+	b32 consumed;
 	Mplayer_Input_Event_Kind kind;
 	u32 modifiers;
 	Mplayer_Input_Key_Kind key;

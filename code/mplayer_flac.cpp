@@ -1097,8 +1097,7 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requ
 	
 	SRC_STATE *src_ctx = flac_stream->src_ctx;
 	
-	#if 1
-		for (;remaining_frames_count != 0;)
+	for (;remaining_frames_count != 0;)
 	{
 		if (flac_stream->remaining_frames_count != 0)
 		{
@@ -1137,42 +1136,8 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requ
 			}
 		}
 	}
-	#else
-		for (;remaining_frames_count != 0;)
-	{
-		if (flac_stream->remaining_frames_count != 0)
-		{
-			u64 nb_channels = flac_stream->recent_block.channels_count;
-			u64 in_offset = (flac_stream->recent_block.frames_count - flac_stream->remaining_frames_count) * nb_channels;
-			f32 *in_samples = flac_stream->recent_block.samples + in_offset;
-			
-			u64 out_offset   = result.frames_count * nb_channels;
-			f32 *out_samples = result.samples + out_offset;
-			
-			u64 frames_to_copy = MIN(flac_stream->remaining_frames_count, remaining_frames_count);
-			memory_copy(out_samples, in_samples, frames_to_copy * nb_channels * sizeof(f32));
-			
-			flac_stream->next_sample_number     += frames_to_copy;
-			flac_stream->remaining_frames_count -= frames_to_copy;
-			
-			remaining_frames_count -= frames_to_copy;
-			result.frames_count    += frames_to_copy;
-		}
-		else
-		{
-			m_arena_free_all(&flac_stream->block_arena);
-			flac_decode_one_block(flac_stream);
-			flac_stream->remaining_frames_count = flac_stream->recent_block.frames_count;
-			
-			if (flac_stream->recent_block.frames_count == 0) {
-				// NOTE(fakhri): EOF
-				break;
-			}
-		}
-	}
-	#endif
-		
-		return result;
+	
+	return result;
 }
 
 internal void
