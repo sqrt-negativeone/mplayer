@@ -107,6 +107,7 @@ struct Mplayer_Music_Track
 	String8 path;
 	String8 name;
 	
+	Memory_Checkpoint arena_data_start;
 	Flac_Stream *flac_stream;
 	b32 file_loaded;
 	Buffer flac_file_buffer;
@@ -186,6 +187,31 @@ mplayer_push_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_tr
 	{
 		mplayer->last_music->next = music_track;
 		mplayer->last_music = music_track;
+	}
+}
+
+internal void
+mplayer_music_reset(Mplayer_Music_Track *music_track)
+{
+	if (music_track && music_track->flac_stream)
+	{
+		music_track->flac_stream->bitstream.pos = music_track->flac_stream->first_block_pos;
+	}
+}
+
+internal void
+mplayer_player_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
+{
+	if (mplayer->current_music != music_track)
+	{
+		Mplayer_Music_Track *prev_music = mplayer->current_music;
+		
+		if (prev_music)
+		{
+			m_checkpoint_end(prev_music->arena_data_start);
+		}
+		mplayer_music_reset(music_track);
+		mplayer->current_music = music_track;
 	}
 }
 
@@ -673,7 +699,7 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					mplayer_push_music_track(mplayer, music_track);
 					music_track->path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
 					music_track->name = push_str8_copy(&music_track->arena, info.name);
-					
+					music_track->arena_data_start = m_checkpoint_begin(&music_track->arena);
 				}
 			}
 		}
@@ -979,7 +1005,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						init_flac_stream(music->flac_stream, music->flac_file_buffer);
 					}
 					
-					mplayer->current_music = music;
+					mplayer_player_music_track(mplayer, music);
 					mplayer->play_track = true;
 				}
 				
