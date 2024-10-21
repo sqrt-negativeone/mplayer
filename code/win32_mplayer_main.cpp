@@ -113,7 +113,10 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	DWORD flags_and_attributes = 0;
 	HANDLE template_file = 0;
 	
-	HANDLE file = CreateFileA((LPCSTR)file_path.str,
+	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	String16 cpath16 = str16_from_8(scratch.arena, file_path);
+	
+	HANDLE file = CreateFileW((LPCWSTR)cpath16.str,
 		desired_access,
 		share_mode,
 		&security_attributes,
@@ -137,7 +140,6 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	
 	return result;
 }
-
 
 #include "mplayer.cpp"
 
@@ -569,10 +571,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				{
 					mplayer->input.first_event = 0;
 					mplayer->input.last_event = 0;
-					Mplayer_Input_Event *event = 0;
 					MSG msg;
 					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
 					{
+						Mplayer_Input_Event *event = 0;
 						switch (msg.message)
 						{
 							case WM_CLOSE:
@@ -591,7 +593,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								b32 was_down = (msg.lParam & (1 << 30)) != 0;
 								b32 is_down = (msg.lParam & (1 << 31)) == 0;
 								
-								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 								
 								event->kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
 								event->key = w32_resolve_vk_code(vk_code);
@@ -607,7 +609,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								
 								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
 								{
-									event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+									event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 									
 									event->kind = Event_Kind_Text;
 									event->text_character = char_input;
@@ -618,7 +620,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_MiddleMouse;
 								mplayer->input.buttons[Key_MiddleMouse].is_down = is_down;
@@ -628,7 +630,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_LBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_LeftMouse;
 								mplayer->input.buttons[Key_LeftMouse].is_down = is_down;
@@ -638,7 +640,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_RBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
 								event->key = Key_RightMouse;
 								mplayer->input.buttons[Key_RightMouse].is_down = is_down;
@@ -647,7 +649,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MOUSEWHEEL:
 							{
 								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
-								event = m_arena_push_struct(&mplayer->frame_arena, Mplayer_Input_Event);
+								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
 								event->kind = Event_Kind_Mouse_Wheel;
 								event->scroll.x = 0;
 								event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;
