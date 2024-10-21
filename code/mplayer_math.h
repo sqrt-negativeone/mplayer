@@ -5,12 +5,17 @@
 
 #define USE_SSE 1
 
+#include <math.h>
+
 #include <xmmintrin.h>
 
 #define CLAMP(a, x, b) (((x) <= (a))? (a) : (((b) <= (x))? (b):(x)))
 #define MAX(a, b) (((a) >= (b))? (a):(b))
 #define MIN(a, b) (((a) <= (b))? (a):(b))
 #define ABS(a) (((a) >= 0)? (a) : -(a))
+
+#define PI 3.14159265358979323846
+#define PI32 3.14159265359f
 
 union V2_F32
 {
@@ -106,6 +111,13 @@ union Range2_F32_Cut
 
 #define RANGE2_F32_EMPTY ZERO_STRUCT
 #define RANGE2_F32_FULL_ZO Range2_F32{.min_x = 0, .min_y = 0, .max_x = 1, .max_y = 1}
+
+internal inline f32
+sin_f(f32 angle)
+{
+	f32 result = sinf(angle);
+	return result;
+}
 
 internal V2_I32
 vec2i(u32 x, u32 y)
@@ -732,7 +744,7 @@ is_in_range(Range2_F32 range, V2_F32 p)
 }
 
 internal inline b32
-range_intersect(Range2_F32 range1, Range2_F32 range2)
+is_range_intersect(Range2_F32 range1, Range2_F32 range2)
 {
   b32 result = !(range1.max_x < range2.min_x ||
     range2.max_x < range1.min_x ||
@@ -742,6 +754,17 @@ range_intersect(Range2_F32 range1, Range2_F32 range2)
   return result;
 }
 
+internal Range2_F32
+range_intersection(Range2_F32 range1, Range2_F32 range2)
+{
+	Range2_F32 result;
+	result.min_y = MAX(range1.min_y, range2.min_y);
+	result.max_y = MIN(range1.max_y, range2.max_y);
+	
+	result.min_x = MAX(range1.min_x, range2.min_x);
+	result.max_x = MIN(range1.max_x, range2.max_x);
+	return result;
+}
 
 internal inline f32
 map_into_range_zo(f32 min, f32 value, f32 max)
@@ -760,6 +783,13 @@ map_into_range_no(f32 min, f32 value, f32 max)
 {
   f32 result = -1.0f + 2.0f * map_into_range_zo(min, value, max);
   return result;
+}
+
+internal inline f32
+map_into_range(f32 value, f32 old_min, f32 old_max, f32 new_min, f32 new_max)
+{
+	f32 result = new_min + map_into_range_zo(old_min, value, old_max) * (new_max - new_min);
+	return result;
 }
 
 internal inline f32

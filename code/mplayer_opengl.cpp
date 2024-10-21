@@ -349,6 +349,19 @@ gl_end_frame(OpenGL *opengl)
 				
 				Render_Config config = cmd->config;
 				// TODO(fakhri): culling
+				Range2_F32 cull_range = config.cull_range;
+				cull_range.minp = (config.proj.mat * vec4(cull_range.min_x, cull_range.min_y, 0, 1)).xy;
+				cull_range.maxp = (config.proj.mat * vec4(cull_range.max_x, cull_range.max_y, 0, 1)).xy;
+				
+				i32 min_x = round_f32_i32(map_into_range(cull_range.min_x, -1, 1, 0, f32(opengl->window_dim.width)));
+				i32 min_y = round_f32_i32(map_into_range(cull_range.min_y, -1, 1, 0, f32(opengl->window_dim.height)));
+				
+				i32 max_x = round_f32_i32(map_into_range(cull_range.max_x, -1, 1, 0, f32(opengl->window_dim.width)));
+				i32 max_y = round_f32_i32(map_into_range(cull_range.max_y, -1, 1, 0, f32(opengl->window_dim.height)));
+				
+				glScissor(min_x, min_y,
+					max_x - min_x,
+					max_y - min_y);
 				
 				for (u32 i = 0; i < cmd->rects_count; i += 1)
 				{

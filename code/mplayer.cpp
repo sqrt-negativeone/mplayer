@@ -1,4 +1,12 @@
 
+#include "third_party/samplerate.h"
+
+struct Sound_Config
+{
+	u32 sample_rate;
+	u16 channels_count;
+};
+
 struct File_Iterator_Handle
 {
 	u8 opaque[kilobytes(1)];
@@ -61,6 +69,7 @@ struct Mplayer_Font
 
 struct Mplayer_UI_Interaction
 {
+	b32 hover;
 	b32 pressed;
 	b32 released;
 	b32 clicked; // pressed widget and released inside the widget
@@ -72,8 +81,8 @@ struct Mplayer_UI
 	Mplayer_Input *input;
 	V2_F32 mouse_p;
 	
-	u32 active_widget_id;
-	u32 hot_widget_id;
+	u64 active_widget_id;
+	u64 hot_widget_id;
 	
 	f32 active_t;
 	f32 active_dt;
@@ -90,13 +99,23 @@ struct Mplayer_OS_Vtable
 	Load_Entire_File *load_entire_file;
 };
 
-struct Music_Track
+struct Mplayer_Music_Track
 {
-	Music_Track *next;
+	Mplayer_Music_Track *next;
 	
 	Memory_Arena arena;
 	String8 path;
 	String8 name;
+	
+	Flac_Stream *flac_stream;
+	b32 file_loaded;
+	Buffer flac_file_buffer;
+};
+
+enum Mplayer_Mode
+{
+	MODE_Library,
+	MODE_Lyrics,
 };
 
 struct Mplayer_Context
@@ -108,8 +127,6 @@ struct Mplayer_Context
 	Mplayer_Input input;
 	
 	b32 play_track;
-	Flac_Stream flac_stream;
-	Buffer flac_file_buffer;
 	
 	Mplayer_Font timestamp_font;
 	Mplayer_Font font;
@@ -121,15 +138,19 @@ struct Mplayer_Context
 	
 	Mplayer_OS_Vtable os;
 	
-	Music_Track *first_music;
-	Music_Track *last_music;
-	Music_Track *music_free_list;
+	Mplayer_Music_Track *first_music;
+	Mplayer_Music_Track *last_music;
+	Mplayer_Music_Track *music_free_list;
+	
+	Mplayer_Mode mode;
+	
+	Mplayer_Music_Track *current_music;
 };
 
-internal Music_Track *
+internal Mplayer_Music_Track *
 mplayer_make_music_track(Mplayer_Context *mplayer)
 {
-	Music_Track *result = 0;
+	Mplayer_Music_Track *result = 0;
 	if (mplayer->music_free_list)
 	{
 		result = mplayer->music_free_list;
@@ -138,18 +159,19 @@ mplayer_make_music_track(Mplayer_Context *mplayer)
 	
 	if (!result)
 	{
-		result = m_arena_push_struct_z(&mplayer->main_arena, Music_Track);
+		result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Music_Track);
 	}
 	
 	assert(result);
 	
 	m_arena_free_all(&result->arena);
+	result->flac_stream = 0;
 	
 	return result;
 }
 
 internal void
-mplayer_push_music_track(Mplayer_Context *mplayer, Music_Track *music_track)
+mplayer_push_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
 {
 	if (!mplayer->last_music)
 	{
@@ -263,7 +285,8 @@ font_get_glyph_from_char(Mplayer_Font *font, u8 ch)
 	}
 	else
 	{
-		invalid_code_path();
+		// TODO(fakhri): add utf8 support
+		glyph = font_get_glyph_from_char(font, '?');
 	}
 	return glyph;
 }
@@ -359,6 +382,40 @@ draw_circle(Render_Group *group, V2_F32 pos, f32 radius, V4_F32 color)
 }
 
 internal void
+draw_outline(Render_Group *group, V3_F32 pos, V2_F32 dim, f32 thickness, V4_F32 color = vec4(1, 1, 1, 1))
+{
+	// left
+	push_rect(group,
+		vec3(pos.x - 0.5f * (dim.width - thickness), pos.y, pos.z),
+		vec2(thickness, dim.height),
+		color);
+  
+	// right
+	push_rect(group,
+		vec3(pos.x + 0.5f * (dim.width - thickness), pos.y, pos.z),
+		vec2(thickness, dim.height),
+		color);
+  
+	// top
+	push_rect(group,
+		vec3(pos.x, pos.y + 0.5f * (dim.height - thickness), pos.z),
+		vec2(dim.width, thickness),
+		color);
+  
+	// bottom
+	push_rect(group,
+		vec3(pos.x, pos.y - 0.5f * (dim.height - thickness), pos.z),
+		vec2(dim.width, thickness),
+		color);
+}
+
+internal void
+draw_outline(Render_Group *group, V2_F32 pos, V2_F32 dim, f32 thickness, V4_F32 color = vec4(1, 1, 1, 1))
+{
+	draw_outline(group, vec3(pos, 0), dim, thickness, color);
+}
+
+internal void
 ui_begin(Mplayer_UI *ui, Render_Group *group, Mplayer_Input *input, V2_F32 mouse_p)
 {
 	ui->group   = group;
@@ -366,8 +423,10 @@ ui_begin(Mplayer_UI *ui, Render_Group *group, Mplayer_Input *input, V2_F32 mouse
 	ui->mouse_p = mouse_p;
 }
 
+#define ui_widget_interaction(ui, widget_pos, widget_dim) _ui_widget_interaction(ui, __LINE__, widget_pos, widget_dim)
+
 internal Mplayer_UI_Interaction
-ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_dim)
+_ui_widget_interaction(Mplayer_UI *ui, u64 id, V2_F32 widget_pos, V2_F32 widget_dim)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
 	
@@ -378,6 +437,7 @@ ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_d
 	
 	if (is_in_range(range_center_dim(widget_pos, widget_dim), ui->mouse_p))
 	{
+		interaction.hover = 1;
 		if (ui->active_widget_id != id)
 		{
 			ui->active_widget_id = id;
@@ -429,9 +489,9 @@ ui_widget_interaction(Mplayer_UI *ui, u32 id, V2_F32 widget_pos, V2_F32 widget_d
 
 #define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress,  __LINE__)
 internal Mplayer_UI_Interaction
-_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, b32 progress, u32 id)
+_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, b32 progress, u64 id)
 {
-	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, slider_pos, slider_dim);
+	Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, id, slider_pos, slider_dim);
 	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
 	
 	V2_F32 track_dim = slider_dim;
@@ -448,7 +508,7 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 	V2_F32 track_final_dim = track_dim;
 	V2_F32 handle_final_dim = handle_dim;
 	
-	if (ui->active_widget_id == id)
+	if (interaction.hover)
 	{
 		track_final_dim.height = lerp(track_dim.height, 
 			ui->active_t,
@@ -459,7 +519,7 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 			1.15f * handle_dim.height);
 	}
 	
-	if (ui->hot_widget_id == id)
+	if (interaction.pressed)
 	{
 		handle_final_dim.height = lerp(handle_final_dim.height, 
 			ui->active_t,
@@ -501,23 +561,23 @@ _ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, 
 
 #define ui_button(ui, font, text, pos) _ui_button(ui, font, text, pos, __LINE__)
 internal Mplayer_UI_Interaction
-_ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u32 id)
+_ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u64 id)
 {
 	V2_F32 padding    = vec2(10, 10);
 	V2_F32 button_dim = font_compute_text_dim(font, text) + padding;
 	
-	Mplayer_UI_Interaction interaction = ui_widget_interaction(ui, id, pos, button_dim);
+	Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, id, pos, button_dim);
 	
 	V2_F32 final_button_dim = button_dim;
 	
-	if (ui->active_widget_id == id)
+	if (interaction.hover)
 	{
 		final_button_dim.height = lerp(final_button_dim.height, 
 			ui->active_t,
 			1.05f * button_dim.height);
 	}
 	
-	if (ui->hot_widget_id == id)
+	if (interaction.pressed)
 	{
 		final_button_dim.height = lerp(final_button_dim.height, 
 			ui->hot_t,
@@ -533,29 +593,40 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u32 id
 
 
 internal void
-mplayer_get_audio_samples(Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
+mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
 {
 	if (mplayer->play_track)
 	{
-		Flac_Stream *flac_stream = &mplayer->flac_stream;
-		f32 volume = mplayer->volume;
-		if (flac_stream)
+		Mplayer_Music_Track *music = mplayer->current_music;
+		if (music)
 		{
-			u32 channels_count = flac_stream->streaminfo.nb_channels;
-			
-			Memory_Checkpoint scratch = get_scratch(0, 0);
-			Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, scratch.arena);
-			
-			for (u32 i = 0; i < streamed_samples.frames_count; i += 1)
+			Flac_Stream *flac_stream = music->flac_stream;
+			f32 volume = mplayer->volume;
+			if (flac_stream)
 			{
-				f32 *samples = streamed_samples.samples + i * channels_count;
-				f32 *out_f32 = (f32*)output_buf + i * channels_count;
-				for (u32 c = 0; c < channels_count; c += 1)
+				u32 channels_count = flac_stream->streaminfo.nb_channels;
+				
+				// TODO(fakhri): convert to device channel layout
+				assert(channels_count == device_config.channels_count);
+				
+				if (device_config.sample_rate != flac_stream->streaminfo.sample_rate)
 				{
-					out_f32[c] = volume * samples[c];
+					
+				}
+				
+				Memory_Checkpoint scratch = get_scratch(0, 0);
+				Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, device_config.sample_rate, scratch.arena);
+				
+				for (u32 i = 0; i < streamed_samples.frames_count; i += 1)
+				{
+					f32 *samples = streamed_samples.samples + i * channels_count;
+					f32 *out_f32 = (f32*)output_buf + i * channels_count;
+					for (u32 c = 0; c < channels_count; c += 1)
+					{
+						out_f32[c] = volume * samples[c];
+					}
 				}
 			}
-			// /memory_copy(output_buf, streamed_samples.samples, streamed_samples.frames_count * channels_count * sizeof(f32));
 		}
 	}
 }
@@ -593,7 +664,7 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 				if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
 				{
 					Log("file: %.*s", STR8_EXPAND(info.name));
-					Music_Track *music_track = mplayer_make_music_track(mplayer);
+					Mplayer_Music_Track *music_track = mplayer_make_music_track(mplayer);
 					mplayer_push_music_track(mplayer, music_track);
 					music_track->path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
 					music_track->name = push_str8_copy(&music_track->arena, info.name);
@@ -609,9 +680,7 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 internal void
 mplayer_initialize(Mplayer_Context *mplayer)
 {
-	mplayer->flac_file_buffer = mplayer->os.load_entire_file(str8_lit("data/tests/fear_inoculum.flac"), &mplayer->main_arena);
-	init_flac_stream(&mplayer->flac_stream, mplayer->flac_file_buffer);
-	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 40);
+	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 30);
 	load_font(mplayer, &mplayer->debug_font, str8_lit("data/fonts/arial.ttf"), 20);
 	load_font(mplayer, &mplayer->timestamp_font, str8_lit("data/fonts/arial.ttf"), 20);
 	mplayer->play_track = 0;
@@ -631,17 +700,21 @@ struct Mplayer_Timestamp
 internal Mplayer_Timestamp
 flac_get_current_timestap(Flac_Stream *flac_stream)
 {
-	u64 seconds_elapsed = flac_stream->next_sample_number / u64(flac_stream->streaminfo.sample_rate);
-	u64 hours = seconds_elapsed / 3600;
-	seconds_elapsed %= 3600;
+	Mplayer_Timestamp result = ZERO_STRUCT;
+	if (flac_stream)
+	{
+		u64 seconds_elapsed = flac_stream->next_sample_number / u64(flac_stream->streaminfo.sample_rate);
+		u64 hours = seconds_elapsed / 3600;
+		seconds_elapsed %= 3600;
+		
+		u64 minutes = seconds_elapsed / 60;
+		seconds_elapsed %= 60;
+		
+		result.hours   = u8(hours);
+		result.minutes = u8(minutes);
+		result.seconds = u8(seconds_elapsed);
+	}
 	
-	u64 minutes = seconds_elapsed / 60;
-	seconds_elapsed %= 60;
-	
-	Mplayer_Timestamp result;
-	result.hours   = u8(hours);
-	result.minutes = u8(minutes);
-	result.seconds = u8(seconds_elapsed);
 	return result;
 }
 
@@ -650,7 +723,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 {
 	Render_Context *render_ctx = mplayer->render_ctx;
 	
-	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim);
+	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim, range_center_dim(vec2(0, 0), render_ctx->draw_dim));
 	
 	M4_Inv proj = group.config.proj;
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
@@ -669,6 +742,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	Range2_F32 available_space = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
 	// NOTE(fakhri): track control
 	{
+		Mplayer_Music_Track *current_music = mplayer->current_music;
+		
 		Range2_F32_Cut cut = range_cut_bottom(available_space, 125);
 		available_space = cut.top;
 		
@@ -688,25 +763,39 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				track_rect = cut2.right;
 				
 				Range2_F32 timestamp_rect = range_cut_right(cut2.left, 100).right;
-				Mplayer_Timestamp current_timestamp = flac_get_current_timestap(&mplayer->flac_stream);
+				Mplayer_Timestamp current_timestamp = ZERO_STRUCT;
+				if (current_music) current_timestamp = flac_get_current_timestap(current_music->flac_stream);
 				draw_text_centered_f(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
 			}
 			
 			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
 			
-			f32 samples_count = (f32)mplayer->flac_stream.streaminfo.samples_count;
-			f32 current_playing_sample = (f32)mplayer->flac_stream.next_sample_number;
+			f32 samples_count = 0;
+			f32 current_playing_sample = 0;
+			if (current_music && current_music->flac_stream)
+			{
+				samples_count = (f32)current_music->flac_stream->streaminfo.samples_count;
+				current_playing_sample = (f32)current_music->flac_stream->next_sample_number;
+			}
 			
 			Mplayer_UI_Interaction track = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect), 1);
 			if (track.pressed)
 			{
-				mplayer->play_track = false;
-				flac_seek_stream(&mplayer->flac_stream, (u64)current_playing_sample);
+				if (current_music && current_music->flac_stream)
+				{
+					mplayer->play_track = false;
+					flac_seek_stream(current_music->flac_stream, (u64)current_playing_sample);
+				}
 			}
 			else if (track.released)
 			{
 				mplayer->play_track = true;
 			}
+		}
+		
+		if (!(current_music && current_music->flac_stream))
+		{
+			mplayer->play_track = false;
 		}
 		
 		// NOTE(fakhri): horizontal padding
@@ -748,15 +837,116 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		}
 	}
 	
-	
+	// NOTE(fakhri): left side
 	{
 		Range2_F32_Cut cut = range_cut_left(available_space, 150);
-		push_rect(&group, range_center(cut.left), range_dim(cut.left), vec4(0.15f, 0.15f, 0.15f, 1.0f));
+		push_rect(&group, range_center(cut.left), range_dim(cut.left), vec4(0.06f, 0.06f, 0.06f, 1.0f));
+		available_space = cut.right;
+		
+		// NOTE(fakhri): Library button  
+		cut = range_cut_top(cut.left, 30);
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Library"), range_center(cut.top)).clicked)
+			{
+				mplayer->mode = MODE_Library;
+			}
+		}
+		
+		// NOTE(fakhri):  button  
+		cut = range_cut_top(cut.bottom, 30);
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Lyrics"), range_center(cut.top)).clicked)
+			{
+				mplayer->mode = MODE_Lyrics;
+			}
+		}
 	}
 	
-	draw_text_centered(&group, &mplayer->font, vec2(0, 300), vec4(1, 1, 1, 1), str8_lit("Library"));
-	for (Music_Track *music = mplayer->first_music; music; music = music->next)
+	switch (mplayer->mode)
 	{
+		case MODE_Library:
+		{
+			available_space = range_cut_top(available_space, 65).bottom;
+			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
+			
+			V2_F32 available_space_dim = range_dim(available_space);
+			V2_F32 music_option_dim = vec2(available_space_dim.width, 50);
+			V2_F32 music_option_pos = range_center(available_space);
+			music_option_pos.y += 0.5f * (available_space_dim.height - music_option_dim.height);
+			
+			f32 scroll = 0 * 100 * sin_f(mplayer->input.time * 2 * PI32);
+			music_option_pos.y -= scroll;
+			
+			Mplayer_Music_Track *music = mplayer->first_music;
+			// NOTE(fakhri): skip until the first visible option 
+			for (music = mplayer->first_music; music; music = music->next)
+			{
+				Range2_F32 music_rect = range_center_dim(music_option_pos, music_option_dim);
+				if (is_range_intersect(music_rect, available_space))
+				{
+					break;
+				}
+				music_option_pos.y -= music_option_dim.height;
+			}
+			
+			for (; music; music = music->next)
+			{
+				Range2_F32 music_rect = range_center_dim(music_option_pos, music_option_dim);
+				if (!is_range_intersect(music_rect, available_space))
+				{
+					break;
+				}
+				
+				Range2_F32 visible_range = range_intersection(music_rect, available_space);
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, int_from_ptr(music), range_center(visible_range), range_dim(visible_range));
+				
+				V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+				if (interaction.hover)
+				{
+					bg_color = vec4(0.2f, 0.2f,0.2f, 1);
+				}
+				if (interaction.pressed)
+				{
+					bg_color = vec4(0.14f, 0.14f,0.14f, 1);
+					
+					if (!music->file_loaded)
+					{
+						music->flac_file_buffer = mplayer->os.load_entire_file(music->path, &music->arena);
+						music->file_loaded = true;
+					}
+					
+					if (!music->flac_stream)
+					{
+						music->flac_stream = m_arena_push_struct_z(&music->arena, Flac_Stream);
+						init_flac_stream(music->flac_stream, music->flac_file_buffer);
+					}
+					
+					mplayer->current_music = music;
+					mplayer->play_track = true;
+				}
+				
+				// NOTE(fakhri): background
+				push_rect(&group, music_option_pos, music_option_dim, bg_color);
+				draw_outline(&group, music_option_pos, music_option_dim, 1, vec4(0, 0, 0, 1));
+				
+				Range2_F32_Cut cut = range_cut_left(music_rect, 20); // horizontal padding
+				
+				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, music->name);
+				cut = range_cut_left(cut.right, name_dim.width);
+				
+				Range2_F32 name_rect = cut.left;
+				draw_text_centered(&group, &mplayer->font, range_center(name_rect), vec4(1, 1, 1, 1), music->name);
+				
+				music_option_pos.y -= music_option_dim.height;
+			}
+			
+		} break;
 		
+		case MODE_Lyrics:
+		{
+			draw_text_centered(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), str8_lit("Lyrics not available"));
+		} break;
 	}
 }

@@ -60,17 +60,13 @@ global i16 flac_bits_depth[] = {
 };
 
 
-struct Flac_Channel_Samples
-{
-	i64 *samples;
-	u64 count;
-};
-
+#define flac_access(samples, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
+#define flac_access2(samples, nb_channels, channel_index, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
 struct Flac_Decoded_Block
 {
-	Flac_Channel_Samples samples_per_channel[FLAC_MAX_CHANNEL_COUNT];
+	f32 *samples; // interleaved
+	u64 frames_count;
 	u32 channels_count;
-	u64 interchannel_sample_count;
 };
 
 
@@ -116,6 +112,8 @@ struct Flac_Stream
 	
 	Flac_Seek_Point *seek_table;
 	u64 seek_table_size;
+	
+	SRC_STATE *src_ctx;
 };
 
 
@@ -169,7 +167,7 @@ flac_skip_coded_residuals(Bit_Stream *bitstream, u32 block_size, u32 order)
 }
 
 internal void
-flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_samples, u32 block_size, u32 order)
+flac_decode_coded_residuals(Bit_Stream *bitstream, i64 *samples, u32 nb_channels, u32 channel_index, u32 block_size, u32 order)
 {
 	u8 params_bits = 0;
 	u8 escape_code = 0;
@@ -209,7 +207,7 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_s
 			{
 				for (;residual_samples_count--;)
 				{
-					block_samples->samples[sample_index] = bitstream_read_sample_unencoded(bitstream, residual_bits_precision, 0);
+					flac_access(samples, sample_index) = bitstream_read_sample_unencoded(bitstream, residual_bits_precision, 0);
 					sample_index += 1;
 				}
 			}
@@ -233,7 +231,7 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, Flac_Channel_Samples *block_s
 					sample_value = ~sample_value;
 				}
 				
-				block_samples->samples[sample_index] = sample_value;
+				flac_access(samples, sample_index) = sample_value;
 				sample_index += 1;
 			}
 		}
@@ -249,7 +247,7 @@ flac_preprocess_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
-	flac_stream->recent_block.interchannel_sample_count = 0;
+	flac_stream->recent_block.frames_count = 0;
 	flac_stream->remaining_frames_count = 0;
 	
 	if (bitstream_is_empty(bitstream))
@@ -461,7 +459,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 {
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
-	flac_stream->recent_block.interchannel_sample_count = 0;
+	flac_stream->recent_block.frames_count = 0;
 	flac_stream->remaining_frames_count = 0;
 	
 	if (bitstream_is_empty(bitstream))
@@ -660,6 +658,8 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			} break;
 		}
 		
+		// NOTE(fakhri): make sure the sample rate in the file doesn't change
+		assert(sample_rate == streaminfo->sample_rate);
 		nb_channels    = flac_block_channel_count[channels_bits];
 		channel_config = flac_block_channel_config[channels_bits];
 		block_crc = bitstream_read_u8(bitstream);
@@ -667,18 +667,17 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	
 	Flac_Decoded_Block *decoded_block = &flac_stream->recent_block;
 	decoded_block->channels_count = nb_channels;
-	decoded_block->interchannel_sample_count = block_size;
+	decoded_block->frames_count = block_size;
+	decoded_block->samples = m_arena_push_array(&flac_stream->block_arena, f32, block_size * nb_channels);
+	
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	i64 *decoded_samples = m_arena_push_array(scratch.arena, i64, block_size * nb_channels);
 	
 	// NOTE(fakhri): decode subframes
 	for (u32 channel_index = 0;
 		channel_index < nb_channels;
 		channel_index += 1)
 	{
-		Flac_Channel_Samples *block_channel_samples = decoded_block->samples_per_channel + channel_index;
-		block_channel_samples->samples = m_arena_push_array(&flac_stream->block_arena, i64, block_size);
-		block_channel_samples->count = block_size;
-		assert(block_channel_samples->samples);
-		
 		u8 wasted_bits = 0;
 		Flac_Subframe_Type subframe_type = ZERO_STRUCT;
 		
@@ -748,7 +747,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 				
 				for (u32 i = 0; i < block_size; i += 1)
 				{
-					block_channel_samples->samples[i] = sample_value;
+					flac_access(decoded_samples, i) = sample_value;
 				}
 			} break;
 			
@@ -756,7 +755,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			{
 				for (u32 i = 0; i < block_size; i += 1)
 				{
-					block_channel_samples->samples[i] = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
+					flac_access(decoded_samples, i) = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
 				}
 			} break;
 			
@@ -764,30 +763,42 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			{
 				for (u32 i = 0; i < subframe_type.order; i += 1)
 				{
-					block_channel_samples->samples[i] = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
+					flac_access(decoded_samples, i) = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
 				}
 				
-				flac_decode_coded_residuals(bitstream, block_channel_samples, u32(block_size), subframe_type.order);
-				i64 *samples = block_channel_samples->samples;
+				flac_decode_coded_residuals(bitstream, decoded_samples, nb_channels, channel_index, u32(block_size), subframe_type.order);
 				switch (subframe_type.order)
 				{
 					case 0: {
 					} break;
 					case 1: {
 						for (u32 i = subframe_type.order; i < block_size; i += 1)
-							samples[i] += samples[i - 1];
+						{
+							flac_access(decoded_samples, i) += flac_access(decoded_samples, i - 1);
+						}
 					} break;
 					case 2: {
 						for (u32 i = subframe_type.order; i < block_size; i += 1) 
-							samples[i] += 2 * samples[i - 1] - samples[i - 2];
+						{
+							flac_access(decoded_samples, i) += 2 * flac_access(decoded_samples, i - 1) - flac_access(decoded_samples, i - 2);
+						}
 					} break;
 					case 3: {
 						for (u32 i = subframe_type.order; i < block_size; i += 1) 
-							samples[i] += 3 * samples[i - 1] - 3 * samples[i - 2] + samples[i - 3];
+						{
+							flac_access(decoded_samples, i) += (3 * flac_access(decoded_samples, i - 1) - 
+								3 * flac_access(decoded_samples, i - 2) +
+								flac_access(decoded_samples, i - 3));
+						}
 					} break;
 					case 4: {
 						for (u32 i = subframe_type.order; i < block_size; i += 1) 
-							samples[i] += 4 * samples[i - 1] - 6 * samples[i - 2] + 4 * samples[i - 3] - samples[i - 4];
+						{
+							flac_access(decoded_samples, i) += (4 * flac_access(decoded_samples, i - 1) - 
+								6 * flac_access(decoded_samples, i - 2) +
+								4 * flac_access(decoded_samples, i - 3) -
+								flac_access(decoded_samples, i - 4));
+						}
 					} break;
 					default: {
 						invalid_code_path("invalid order");
@@ -799,7 +810,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			{
 				for (u32 i = 0; i < subframe_type.order; i += 1)
 				{
-					block_channel_samples->samples[i] = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
+					flac_access(decoded_samples, i) = bitstream_read_sample_unencoded(bitstream, sample_bit_depth);
 				}
 				
 				u64 predictor_coef_precision_bits = bitstream_read_bits_unsafe(bitstream, 4);
@@ -814,20 +825,19 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 					coefficients[i] = bitstream_read_sample_unencoded(bitstream, u8(predictor_coef_precision_bits));
 				}
 				
-				flac_decode_coded_residuals(bitstream, block_channel_samples, u32(block_size), subframe_type.order);
-				i64 *samples = block_channel_samples->samples;
-				
+				flac_decode_coded_residuals(bitstream, decoded_samples, nb_channels, channel_index, u32(block_size), subframe_type.order);
 				for (u32 i = subframe_type.order; i < block_size; i += 1) 
 				{
 					i64 predictor_value = 0;
 					for (u32 j = 0; j < subframe_type.order; j += 1)
 					{
 						i64 c = coefficients[j];
-						i64 sample_val = samples[i - j - 1];
+						i64 sample_val = flac_access(decoded_samples, i - j - 1);
 						predictor_value += c * sample_val;
 					}
 					predictor_value >>= right_shift;
-					samples[i] += predictor_value;
+					
+					flac_access(decoded_samples, i) += predictor_value;
 				}
 			} break;
 		}
@@ -836,7 +846,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 		{
 			for (u32 i = 0; i < block_size; i += 1)
 			{
-				block_channel_samples->samples[i] <<= wasted_bits;
+				flac_access(decoded_samples, i) <<= wasted_bits;
 			}
 		}
 	}
@@ -848,36 +858,43 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 		{
 			for (u32 i = 0; i < block_size; i += 1)
 			{
-				i64 left = decoded_block->samples_per_channel[0].samples[i]; 
-				i64 side = decoded_block->samples_per_channel[1].samples[i];
+				i64 left = flac_access2(decoded_samples, 2, 0, i);
+				i64 side = flac_access2(decoded_samples, 2, 1, i);
 				
-				decoded_block->samples_per_channel[1].samples[i] = left - side;
+				flac_access2(decoded_samples, 2, 1, i) = left - side;
 			}
 		} break;
 		case Side_Right:
 		{
 			for (u32 i = 0; i < block_size; i += 1)
 			{
-				i64 side  = decoded_block->samples_per_channel[0].samples[i]; 
-				i64 right = decoded_block->samples_per_channel[1].samples[i];
+				i64 side  = flac_access2(decoded_samples, 2, 0, i);
+				i64 right = flac_access2(decoded_samples, 2, 1, i);
 				
-				decoded_block->samples_per_channel[0].samples[i] = side + right;
+				flac_access2(decoded_samples, 2, 0, i) = side + right;
 			}
 		} break;
 		case Mid_Side:
 		{
 			for (u32 i = 0; i < block_size; i += 1)
 			{
-				i64 mid  = decoded_block->samples_per_channel[0].samples[i]; 
-				i64 side = decoded_block->samples_per_channel[1].samples[i];
+				i64 mid  = flac_access2(decoded_samples, 2, 0, i);
+				i64 side = flac_access2(decoded_samples, 2, 1, i);
+				
 				mid = (mid << 1) + (side & 1);
 				
-				decoded_block->samples_per_channel[0].samples[i] = (mid + side) >> 1;
-				decoded_block->samples_per_channel[1].samples[i] = (mid - side) >> 1;
+				flac_access2(decoded_samples, 2, 0, i) = (mid + side) >> 1;
+				flac_access2(decoded_samples, 2, 1, i) = (mid - side) >> 1;
 			}
 		} break;
 		
 		case None: case Left_Right: default: break; // nothing
+	}
+	
+	u64 resample_factor = (1ull << (bits_depth - 1));
+	for (u32 i = 0; i < block_size * nb_channels; i += 1)
+	{
+		decoded_block->samples[i] = decoded_samples[i] / f32(resample_factor);
 	}
 	
 	// NOTE(fakhri): decode footer
@@ -1064,48 +1081,98 @@ struct Decoded_Samples
 };
 
 internal Decoded_Samples
-flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, Memory_Arena *arena)
+flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requested_sample_rate, Memory_Arena *arena)
 {
 	Decoded_Samples result = ZERO_STRUCT;
 	u64 remaining_frames_count = requested_frames_count;
 	result.samples = m_arena_push_array(arena, f32, requested_frames_count * flac_stream->streaminfo.nb_channels);
 	result.channels_count = flac_stream->streaminfo.nb_channels;
 	
-	u64 resample_factor = (1ull << (flac_stream->streaminfo.bits_per_sample - 1));
+	if (!flac_stream->src_ctx)
+	{
+		int error;
+		flac_stream->src_ctx = src_new(SRC_SINC_BEST_QUALITY, int(result.channels_count), &error);
+		assert(flac_stream->src_ctx);
+	}
 	
-	for (;remaining_frames_count != 0;)
+	SRC_STATE *src_ctx = flac_stream->src_ctx;
+	
+	#if 1
+		for (;remaining_frames_count != 0;)
 	{
 		if (flac_stream->remaining_frames_count != 0)
 		{
-			u64 frames_to_copy = MIN(flac_stream->remaining_frames_count, remaining_frames_count);
-			u64 offset = flac_stream->recent_block.interchannel_sample_count - flac_stream->remaining_frames_count;
 			u64 nb_channels = flac_stream->recent_block.channels_count;
-			for (u32 index = 0; index < frames_to_copy; index += 1)
-			{
-				for (u32 c_index = 0; c_index < nb_channels; c_index += 1)
-				{
-					Flac_Channel_Samples *channel_samples = flac_stream->recent_block.samples_per_channel + c_index;
-					u64 output_offset = (index + result.frames_count) * nb_channels + c_index;
-					result.samples[output_offset] = f32(channel_samples->samples[offset + index]) / f32(resample_factor);
-				}
-			}
-			flac_stream->next_sample_number += frames_to_copy;
-			flac_stream->remaining_frames_count -= frames_to_copy;
-			remaining_frames_count -= frames_to_copy;
-			result.frames_count += frames_to_copy;
+			u64 in_offset = (flac_stream->recent_block.frames_count - flac_stream->remaining_frames_count) * nb_channels;
+			f32 *in_samples = flac_stream->recent_block.samples + in_offset;
+			
+			u64 out_offset   = result.frames_count * nb_channels;
+			f32 *out_samples = result.samples + out_offset;
+			
+			SRC_DATA data = {
+				.data_in  = in_samples,
+				.data_out = out_samples,
+				.input_frames  = int(flac_stream->remaining_frames_count),
+				.output_frames = int(remaining_frames_count),
+				.end_of_input = 0,
+				.src_ratio = f64(requested_sample_rate) / f64(flac_stream->streaminfo.sample_rate)
+			};
+			src_process(src_ctx, &data);
+			
+			flac_stream->next_sample_number     += data.input_frames_used;
+			flac_stream->remaining_frames_count -= data.input_frames_used;
+			
+			remaining_frames_count -= data.output_frames_gen;
+			result.frames_count    += data.output_frames_gen;
 		}
-		else {
+		else
+		{
 			m_arena_free_all(&flac_stream->block_arena);
 			flac_decode_one_block(flac_stream);
-			flac_stream->remaining_frames_count = flac_stream->recent_block.interchannel_sample_count;
+			flac_stream->remaining_frames_count = flac_stream->recent_block.frames_count;
 			
-			if (flac_stream->recent_block.interchannel_sample_count == 0) {
+			if (flac_stream->recent_block.frames_count == 0) {
 				// NOTE(fakhri): EOF
 				break;
 			}
 		}
 	}
-	return result;
+	#else
+		for (;remaining_frames_count != 0;)
+	{
+		if (flac_stream->remaining_frames_count != 0)
+		{
+			u64 nb_channels = flac_stream->recent_block.channels_count;
+			u64 in_offset = (flac_stream->recent_block.frames_count - flac_stream->remaining_frames_count) * nb_channels;
+			f32 *in_samples = flac_stream->recent_block.samples + in_offset;
+			
+			u64 out_offset   = result.frames_count * nb_channels;
+			f32 *out_samples = result.samples + out_offset;
+			
+			u64 frames_to_copy = MIN(flac_stream->remaining_frames_count, remaining_frames_count);
+			memory_copy(out_samples, in_samples, frames_to_copy * nb_channels * sizeof(f32));
+			
+			flac_stream->next_sample_number     += frames_to_copy;
+			flac_stream->remaining_frames_count -= frames_to_copy;
+			
+			remaining_frames_count -= frames_to_copy;
+			result.frames_count    += frames_to_copy;
+		}
+		else
+		{
+			m_arena_free_all(&flac_stream->block_arena);
+			flac_decode_one_block(flac_stream);
+			flac_stream->remaining_frames_count = flac_stream->recent_block.frames_count;
+			
+			if (flac_stream->recent_block.frames_count == 0) {
+				// NOTE(fakhri): EOF
+				break;
+			}
+		}
+	}
+	#endif
+		
+		return result;
 }
 
 internal void
@@ -1134,28 +1201,26 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 		flac_stream->bitstream.pos.byte_index += best_seek_point->byte_offset;
 		flac_stream->next_sample_number = best_seek_point->sample_number;
 	}
-	else
+	
+	if (flac_stream->src_ctx)
 	{
-		if (target_sample < flac_stream->next_sample_number)
-		{
-			flac_stream->bitstream.pos = flac_stream->first_block_pos;
-			flac_stream->next_sample_number = 0;
-		}
+		src_delete(flac_stream->src_ctx);
+		flac_stream->src_ctx = 0;
 	}
 	
-	for (;target_sample != flac_stream->next_sample_number;)
+	for (;target_sample > flac_stream->next_sample_number;)
 	{
-		assert(target_sample > flac_stream->next_sample_number);
 		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
 		if (!block_info.success)
 		{
 			break;
 		}
+		
 		if (flac_stream->next_sample_number + block_info.block_size >= target_sample)
 		{
 			Memory_Checkpoint scratch = get_scratch(0, 0);
 			if (target_sample > flac_stream->next_sample_number)
-				flac_read_samples(flac_stream, target_sample - flac_stream->next_sample_number, scratch.arena);
+				flac_read_samples(flac_stream, target_sample - flac_stream->next_sample_number, flac_stream->streaminfo.sample_rate, scratch.arena);
 		}
 		else
 		{

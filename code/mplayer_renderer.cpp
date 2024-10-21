@@ -99,6 +99,26 @@ struct Render_Group
 	Render_Entry_Textured_Rects *textured_rects;
 };
 
+internal M4_Inv
+compute_clip_matrix(V2_F32 pos, V2_F32 dim)
+{
+	M4_Inv result; 
+	M4 proj = m4_ortho3d(-0.5f * dim.width,  0.5f * dim.width,
+		-0.5f * dim.height, 0.5f * dim.height,
+		-100, 100);
+	
+	M4 t_matrix = m4_translate(vec3(-pos.x, -pos.y, 0));
+	M4 view = t_matrix;
+  
+	M4 inv_proj = m4_inv_ortho(proj);
+	M4 inv_view = m4_inv_translate(t_matrix);
+  
+	result.mat = proj * view;
+	result.inv = inv_view * inv_proj;
+	
+	return result;
+}
+
 internal Texture
 reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 {
@@ -219,9 +239,34 @@ render_group_flush(Render_Group *group)
 }
 
 internal void
+render_group_update_config(Render_Group *group, V2_F32 camera_pos, V2_F32 camera_dim, Range2_F32 cull_range)
+{
+	render_group_flush(group);
+	
+	group->config.camera_pos = camera_pos;
+	group->config.camera_dim = camera_dim;
+	group->config.cull_range = cull_range;
+	group->config.proj = compute_clip_matrix(camera_pos, camera_dim);
+}
+
+internal Render_Group
+begin_render_group(Render_Context *render_ctx, V2_F32 camera_pos, V2_F32 camera_dim, Range2_F32 cull_range)
+{
+	Render_Group group = ZERO_STRUCT;
+	group.render_ctx = render_ctx;
+	render_group_update_config(&group, camera_pos, camera_dim, cull_range);
+	return group;
+}
+
+internal void
 push_image(Render_Group *group, V3_F32 pos, V2_F32 dim, Texture texture, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0f, V2_F32 uv_scale = vec2(1, 1), V2_F32 uv_offset = vec2(0, 0))
 {
 	Render_Context *render_ctx = group->render_ctx;
+	
+	if (!is_range_intersect(group->config.cull_range, range_center_dim(pos.xy, dim)))
+	{
+		return;
+	}
 	
 	if (!group->textured_rects)
 	{
@@ -260,28 +305,6 @@ push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1,
 }
 
 
-
-internal M4_Inv
-compute_clip_matrix(V2_F32 pos, V2_F32 dim)
-{
-	M4_Inv result; 
-	M4 proj = m4_ortho3d(-0.5f * dim.width,  0.5f * dim.width,
-		-0.5f * dim.height, 0.5f * dim.height,
-		-100, 100);
-	
-	M4 t_matrix = m4_translate(vec3(-pos.x, -pos.y, 0));
-	M4 view = t_matrix;
-  
-	M4 inv_proj = m4_inv_ortho(proj);
-	M4 inv_view = m4_inv_translate(t_matrix);
-  
-	result.mat = proj * view;
-	result.inv = inv_view * inv_proj;
-	
-	return result;
-}
-
-
 internal void
 push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture texture, Buffer tex_buf)
 {
@@ -295,14 +318,3 @@ push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture textu
 	upload_buffer->count += 1;
 }
 
-
-internal Render_Group
-begin_render_group(Render_Context *render_ctx, V2_F32 camera_pos, V2_F32 camera_dim, Range2_F32 cull_dim = RANGE2_F32_FULL_ZO)
-{
-	Render_Group group = ZERO_STRUCT;
-	group.render_ctx = render_ctx;
-	group.config.camera_pos = camera_pos;
-	group.config.camera_dim = camera_dim;
-	group.config.proj = compute_clip_matrix(camera_pos, camera_dim);
-	return group;
-}

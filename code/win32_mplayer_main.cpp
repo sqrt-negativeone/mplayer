@@ -280,8 +280,7 @@ struct W32_Sound_Output
 	IAudioRenderClient *render_client;
 	u32 buffer_frame_count;
 	REFERENCE_TIME buffer_duration;
-	u32 sample_rate;
-	u16 channels_count;
+	Sound_Config config;
 };
 
 internal W32_Sound_Output
@@ -349,14 +348,14 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 	
 	sound_output.initialized = true;
 	
-	sound_output.enumerator         = enumerator;
-	sound_output.device             = device;
-	sound_output.audio_client       = audio_client;
-	sound_output.render_client      = render_client;
-	sound_output.buffer_frame_count = buffer_frame_count;
-	sound_output.buffer_duration    = (REFERENCE_TIME)((f64)REFTIMES_PER_SEC * buffer_frame_count / sample_rate);
-	sound_output.sample_rate        = sample_rate;
-	sound_output.channels_count     = channels_count;
+	sound_output.enumerator            = enumerator;
+	sound_output.device                = device;
+	sound_output.audio_client          = audio_client;
+	sound_output.render_client         = render_client;
+	sound_output.buffer_frame_count    = buffer_frame_count;
+	sound_output.buffer_duration       = (REFERENCE_TIME)((f64)REFTIMES_PER_SEC * buffer_frame_count / sample_rate);
+	sound_output.config.sample_rate    = sample_rate;
+	sound_output.config.channels_count = channels_count;
 	
 	return sound_output;
 }
@@ -517,8 +516,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				mplayer_initialize(mplayer);
 			}
 			
-			W32_Sound_Output sound_output = w32_init_wasapi(mplayer->flac_stream.streaminfo.sample_rate, 
-				mplayer->flac_stream.streaminfo.nb_channels);
+			u32 sample_rate    = 96000;
+			u16 channels_count = 2;
+			W32_Sound_Output sound_output = w32_init_wasapi(sample_rate, channels_count);
 			assert(sound_output.initialized);
 			
 			
@@ -545,6 +545,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				m_arena_free_all(&mplayer->frame_arena);
 				
 				mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
+				mplayer->input.time += mplayer->input.frame_dt;
 				w32_update_timer(&timer);
 				
 				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
@@ -706,7 +707,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				// NOTE(fakhri): audio
 				{
 					u32 frame_padding_count = 0;
-					u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.sample_rate);
+					u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.config.sample_rate);
 					
 					// See how much buffer space is available.
 					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
@@ -719,8 +720,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 						u8 *data;
 						sound_output.render_client->GetBuffer(frames_to_write, &data);
 						
-						memory_zero(data, frames_to_write * sound_output.channels_count * sizeof(f32));
-						mplayer_get_audio_samples(mplayer, data, frames_to_write);
+						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
+						mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
 						
 						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
 					}

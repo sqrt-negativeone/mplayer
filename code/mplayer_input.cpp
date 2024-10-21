@@ -132,6 +132,7 @@ struct Mplayer_Input_Event
 
 struct Mplayer_Input
 {
+	f32 time;
 	f32 frame_dt;
 	V2_F32 mouse_clip_pos;
 	Mplayer_Input_Event *first_event;
@@ -139,7 +140,6 @@ struct Mplayer_Input
 	
 	Mplayer_Input_Key buttons[Key_COUNT];
 };
-
 
 internal b32
 mplayer_button_clicked(Mplayer_Input_Key button)
