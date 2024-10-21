@@ -324,9 +324,9 @@ draw_text_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, c
 {
 	Memory_Checkpoint scratch = get_scratch(0, 0);
 	va_list args;
-  va_start(args, fmt);
+	va_start(args, fmt);
 	String8 text = str8_fv(scratch.arena, fmt, args);
-  va_end(args);
+	va_end(args);
 	
 	draw_text(group, font, pos, color, text);
 }
@@ -345,9 +345,9 @@ draw_text_centered_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32
 {
 	Memory_Checkpoint scratch = get_scratch(0, 0);
 	va_list args;
-  va_start(args, fmt);
+	va_start(args, fmt);
 	String8 text = str8_fv(scratch.arena, fmt, args);
-  va_end(args);
+	va_end(args);
 	
 	draw_text_centered(group, font, pos, color, text);
 }
