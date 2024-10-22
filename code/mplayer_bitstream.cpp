@@ -178,3 +178,13 @@ bitstream_skip_bits(Bit_Stream *bitstream, u64 bits)
 	
 	bitstream->pos.bits_left -= u8(bits);
 }
+
+internal Buffer
+bitstream_read_buffer(Bit_Stream *bitstream, u64 length)
+{
+	// NOTE(fakhri): make sure we are at byte boundary
+	assert(bitstream->pos.bits_left == 8);
+	Buffer result = make_buffer(bitstream->buffer.data + bitstream->pos.byte_index, length);
+	bitstream_skip_bytes(bitstream, length);
+	return result;
+}

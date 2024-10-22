@@ -327,7 +327,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
     new_wf.cbSize = 0;
 	}
 	
-	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC / 20;
+	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC;
 	res = audio_client->Initialize(
 		AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,

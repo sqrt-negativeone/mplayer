@@ -217,6 +217,10 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_ONE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_RED);
 		}
+		else if (has_flag(texture.flags, TEXTURE_FLAG_RGB_BIT))
+		{
+			format = GL_RGB;
+		}
 		
 		glTexImage2D(GL_TEXTURE_2D,
 			0,

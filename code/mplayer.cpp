@@ -1,4 +1,9 @@
 
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "third_party/stb_image.h"
+
+
 #include "third_party/samplerate.h"
 
 struct Sound_Config
@@ -107,10 +112,12 @@ struct Mplayer_Music_Track
 	String8 path;
 	String8 name;
 	
-	Memory_Checkpoint arena_data_start;
+	Memory_Arena transient_arena;
 	Flac_Stream *flac_stream;
 	b32 file_loaded;
 	Buffer flac_file_buffer;
+	
+	Texture cover_texture;
 };
 
 enum Mplayer_Mode
@@ -141,7 +148,6 @@ struct Mplayer_Context
 	
 	Mplayer_Music_Track *first_music;
 	Mplayer_Music_Track *last_music;
-	Mplayer_Music_Track *music_free_list;
 	u64 music_count;
 	Mplayer_Mode mode;
 	
@@ -156,22 +162,8 @@ internal Mplayer_Music_Track *
 mplayer_make_music_track(Mplayer_Context *mplayer)
 {
 	Mplayer_Music_Track *result = 0;
-	if (mplayer->music_free_list)
-	{
-		result = mplayer->music_free_list;
-		mplayer->music_free_list = result->next;
-	}
-	
-	if (!result)
-	{
-		result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Music_Track);
-	}
-	
+	result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Music_Track);
 	assert(result);
-	
-	m_arena_free_all(&result->arena);
-	result->flac_stream = 0;
-	
 	return result;
 }
 
@@ -199,6 +191,69 @@ mplayer_music_reset(Mplayer_Music_Track *music_track)
 	}
 }
 
+internal Texture
+mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
+{
+	Texture result = ZERO_STRUCT;
+	int width;
+	int height;
+	int channels;
+	u8 *pixels = stbi_load_from_memory(buffer.data, int(buffer.size), &width, &height, &channels, 3);
+	assert(pixels);
+	if (pixels)
+	{
+		result = reserve_texture_handle(mplayer->render_ctx, u16(width), u16(height));
+		#if 1
+			// TODO(fakhri): maybe we should have the channel count be stored in the texure handle?
+			if (channels == 3)
+		{
+			set_flag(result.flags, TEXTURE_FLAG_RGB_BIT);
+		}
+		#endif
+			
+			Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * channels);
+		memory_copy(pixels_buf.data, pixels, pixels_buf.size);
+		
+		push_texture_upload_request(&mplayer->render_ctx->upload_buffer, result, pixels_buf);
+		stbi_image_free(pixels);
+	}
+	return result;
+}
+
+internal void
+mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
+{
+	if (!music_track->file_loaded)
+	{
+		music_track->flac_file_buffer = mplayer->os.load_entire_file(music_track->path, &music_track->transient_arena);
+		music_track->file_loaded = true;
+	}
+	
+	if (!music_track->flac_stream)
+	{
+		music_track->flac_stream = m_arena_push_struct_z(&music_track->transient_arena, Flac_Stream);
+		init_flac_stream(music_track->flac_stream, &music_track->transient_arena, music_track->flac_file_buffer);
+		if (music_track->flac_stream->front_cover)
+		{
+			Flac_Picture *front_cover = music_track->flac_stream->front_cover;
+			music_track->cover_texture = mplayer_load_texture(mplayer, front_cover->buffer);
+		}
+	}
+}
+
+internal void
+mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music)
+{
+	uninit_flac_stream(music->flac_stream);
+	music->file_loaded = false;
+	music->flac_stream = 0;
+	music->flac_file_buffer = ZERO_STRUCT;
+	m_arena_free_all(&music->transient_arena);
+	
+	// TODO(fakhri): delete texture from gpu memory!
+	music->cover_texture = ZERO_STRUCT;
+}
+
 internal void
 mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
 {
@@ -208,21 +263,10 @@ mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_tr
 		
 		if (prev_music)
 		{
-			m_checkpoint_end(prev_music->arena_data_start);
+			mplayer_unload_music_track(mplayer, prev_music);
 		}
 		
-		if (!music_track->file_loaded)
-		{
-			music_track->flac_file_buffer = mplayer->os.load_entire_file(music_track->path, &music_track->arena);
-			music_track->file_loaded = true;
-		}
-		
-		if (!music_track->flac_stream)
-		{
-			music_track->flac_stream = m_arena_push_struct_z(&music_track->arena, Flac_Stream);
-			init_flac_stream(music_track->flac_stream, music_track->flac_file_buffer);
-		}
-		
+		mplayer_load_music_track(mplayer, music_track);
 		mplayer_music_reset(music_track);
 		mplayer->current_music = music_track;
 	}
@@ -713,7 +757,6 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 			}
 			else
 			{
-				
 				if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
 				{
 					Log("file: %.*s", STR8_EXPAND(info.name));
@@ -721,7 +764,6 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					mplayer_push_music_track(mplayer, music_track);
 					music_track->path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
 					music_track->name = push_str8_copy(&music_track->arena, info.name);
-					music_track->arena_data_start = m_checkpoint_begin(&music_track->arena);
 				}
 			}
 		}
@@ -791,12 +833,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		draw_text_centered_f(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), "%d", u32(1.0f / mplayer->input.frame_dt));
 	}
 	
-	if (!is_music_track_still_playing(mplayer->current_music))
+	if (mplayer->current_music && !is_music_track_still_playing(mplayer->current_music))
 	{
-		if (mplayer->current_music)
-		{
-			mplayer_play_music_track(mplayer, mplayer->current_music->next);
-		}
+		mplayer_play_music_track(mplayer, mplayer->current_music->next);
 	}
 	
 	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
@@ -1048,5 +1087,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		{
 			draw_text_centered(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), str8_lit("Lyrics not available"));
 		} break;
+	}
+	
+	if (mplayer->current_music && is_texture_valid(mplayer->current_music->cover_texture))
+	{
+		Texture cover_texture = mplayer->current_music->cover_texture;
+		push_image(&group, vec3(0, 0, 0), vec2(f32(cover_texture.width), f32(cover_texture.height)), cover_texture);
 	}
 }

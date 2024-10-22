@@ -125,8 +125,7 @@ struct Memory_Checkpoint
 	Memory_Arena_Chunk *chunk;
 	u64 old_used_memory;
 	
-	#if LANG_CPP
-		Memory_Checkpoint() = default;
+	Memory_Checkpoint() = default;
 	
 	Memory_Checkpoint(Memory_Arena *arena)
 	{
@@ -137,19 +136,17 @@ struct Memory_Checkpoint
 	
 	~Memory_Checkpoint()
 	{
-		assert(this->arena);
-		for (;this->chunk != this->arena->current_chunk;)
+		assert(arena);
+		for (;chunk != arena->current_chunk;)
 		{
-			m_arena_free_last_chunk(this->arena);
+			m_arena_free_last_chunk(arena);
 		}
 		
-		if (this->chunk)
+		if (chunk)
 		{
-			this->chunk->used_memory = this->old_used_memory;
+			chunk->used_memory = old_used_memory;
 		}
 	}
-	
-	#endif
 };
 
 internal Memory_Checkpoint

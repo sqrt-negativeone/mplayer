@@ -97,11 +97,21 @@ struct Flac_Seek_Point
 	u16 samples_count; // number of samples in the target frame
 };
 
+struct Flac_Picture
+{
+	u32 type;
+	String8 media_type_string;
+	String8 description;
+	V2_I32 dim;
+	u32 color_depth;
+	u32 nb_colors_used;
+	Buffer buffer;
+};
+
 struct Flac_Stream 
 {
 	Bit_Stream bitstream;
 	Flac_Stream_Info streaminfo;
-	Memory_Arena metadata_arena;
 	Memory_Arena block_arena;
 	Flac_Decoded_Block recent_block;
 	u64 remaining_frames_count;
@@ -114,6 +124,8 @@ struct Flac_Stream
 	u64 seek_table_size;
 	
 	SRC_STATE *src_ctx;
+	
+	Flac_Picture *front_cover;
 };
 
 
@@ -906,7 +918,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 }
 
 internal void
-flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
+flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Flac_Stream_Info *streaminfo)
 {
 	Bit_Stream_Pos saved_pos = flac_stream->bitstream.pos;
 	flac_stream->bitstream.pos = flac_stream->first_block_pos;
@@ -915,7 +927,7 @@ flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
 	assert(streaminfo->samples_count);
 	
 	u32 seek_points_count = 100;
-	flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+	flac_stream->seek_table = m_arena_push_array(arena, Flac_Seek_Point, seek_points_count);
 	flac_stream->seek_table_size = seek_points_count;
 	assert(flac_stream->seek_table);
 	
@@ -952,7 +964,18 @@ flac_build_seek_table(Flac_Stream *flac_stream, Flac_Stream_Info *streaminfo)
 }
 
 internal void
-init_flac_stream(Flac_Stream *flac_stream, Buffer data)
+uninit_flac_stream(Flac_Stream *flac_stream)
+{
+	m_arena_free_all(&flac_stream->block_arena);
+	if (flac_stream->src_ctx)
+	{
+		src_delete(flac_stream->src_ctx);
+		flac_stream->src_ctx = 0;
+	}
+}
+
+internal void
+init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 {
 	// NOTE(fakhri): init bitstream
 	{
@@ -1032,7 +1055,7 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 			{
 				// NOTE(fakhri): seektable
 				u64 seek_points_count = md_size / 18;
-				flac_stream->seek_table = m_arena_push_array(&flac_stream->metadata_arena, Flac_Seek_Point, seek_points_count);
+				flac_stream->seek_table = m_arena_push_array(arena, Flac_Seek_Point, seek_points_count);
 				flac_stream->seek_table_size = seek_points_count;
 				assert(flac_stream->seek_table);
 				
@@ -1057,7 +1080,38 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 			case 6:
 			{
 				// NOTE(fakhri): Picture
-				bitstream_skip_bytes(bitstream, md_size);
+				for (;md_size;)
+				{
+					Flac_Picture pic;
+					
+					pic.type = bitstream_read_u32be(bitstream);
+					u32 media_type_string_length = bitstream_read_u32be(bitstream);
+					pic.media_type_string = to_string(bitstream_read_buffer(bitstream, media_type_string_length));
+					
+					u32 description_length = bitstream_read_u32be(bitstream);
+					pic.description = to_string(bitstream_read_buffer(bitstream, description_length));
+					
+					pic.dim.width      = bitstream_read_u32be(bitstream);
+					pic.dim.height     = bitstream_read_u32be(bitstream);
+					pic.color_depth    = bitstream_read_u32be(bitstream);
+					pic.nb_colors_used = bitstream_read_u32be(bitstream);
+					
+					u32 picture_size = bitstream_read_u32be(bitstream);
+					pic.buffer = bitstream_read_buffer(bitstream, picture_size);
+					
+					u32 picture_block_size = 8 * 4 + picture_size + description_length + media_type_string_length;
+					assert(picture_block_size <= md_size);
+					md_size -= 8 * 4 + picture_size + description_length + media_type_string_length;
+					
+					switch(pic.type)
+					{
+						case 3:
+						{
+							flac_stream->front_cover = m_arena_push_struct(arena, Flac_Picture);
+							memory_copy_struct(flac_stream->front_cover, &pic);
+						} break;
+					}
+				}
 			} break;
 			default:
 			{
@@ -1067,6 +1121,12 @@ init_flac_stream(Flac_Stream *flac_stream, Buffer data)
 		}
 	}
 	flac_stream->first_block_pos = bitstream->pos;
+	
+	if (!flac_stream->seek_table)
+	{
+		// TODO(fakhri): build the seek table in another thread?
+		flac_build_seek_table(flac_stream, arena, &flac_stream->streaminfo);
+	}
 	
 	flac_stream->bitstream.pos = flac_stream->first_block_pos;
 	flac_decode_one_block(flac_stream, 1);
@@ -1130,7 +1190,9 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requ
 			flac_decode_one_block(flac_stream);
 			flac_stream->remaining_frames_count = flac_stream->recent_block.frames_count;
 			
-			if (flac_stream->recent_block.frames_count == 0) {
+			if (flac_stream->recent_block.frames_count == 0)
+			{
+				// TODO(fakhri): should we flush the src_ctx?
 				// NOTE(fakhri): EOF
 				break;
 			}
@@ -1143,12 +1205,6 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requ
 internal void
 flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 {
-	if (!flac_stream->seek_table)
-	{
-		// TODO(fakhri): build the seek table in another thread?
-		flac_build_seek_table(flac_stream, &flac_stream->streaminfo);
-	}
-	
 	if (flac_stream->seek_table)
 	{
 		Flac_Seek_Point *best_seek_point = flac_stream->seek_table;

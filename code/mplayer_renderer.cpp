@@ -2,6 +2,7 @@
 enum Texture_Flag
 {
 	TEXTURE_FLAG_GRAY_BIT,
+	TEXTURE_FLAG_RGB_BIT,
 };
 
 union Texture
@@ -318,3 +319,9 @@ push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture textu
 	upload_buffer->count += 1;
 }
 
+internal b32
+is_texture_valid(Texture texure)
+{
+	b32 result = texure.width && texure.height;
+	return result;
+}

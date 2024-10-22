@@ -25,7 +25,11 @@ arena_push_buffer(Memory_Arena *arena, u64 size)
 	return result;
 }
 
-
-
+internal String8
+to_string(Buffer buffer)
+{
+	String8 result = str8(buffer.data, buffer.size);
+	return result;
+}
 
 #endif //MPLAYER_BUFFER_H
