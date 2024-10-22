@@ -200,7 +200,7 @@ mplayer_music_reset(Mplayer_Music_Track *music_track)
 }
 
 internal void
-mplayer_player_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
+mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
 {
 	if (mplayer->current_music != music_track)
 	{
@@ -210,9 +210,31 @@ mplayer_player_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_
 		{
 			m_checkpoint_end(prev_music->arena_data_start);
 		}
+		
+		if (!music_track->file_loaded)
+		{
+			music_track->flac_file_buffer = mplayer->os.load_entire_file(music_track->path, &music_track->arena);
+			music_track->file_loaded = true;
+		}
+		
+		if (!music_track->flac_stream)
+		{
+			music_track->flac_stream = m_arena_push_struct_z(&music_track->arena, Flac_Stream);
+			init_flac_stream(music_track->flac_stream, music_track->flac_file_buffer);
+		}
+		
 		mplayer_music_reset(music_track);
 		mplayer->current_music = music_track;
 	}
+}
+
+internal b32
+is_music_track_still_playing(Mplayer_Music_Track *music_track)
+{
+	b32 result = (music_track && music_track->flac_stream && 
+		!bitstream_is_empty(&music_track->flac_stream->bitstream));
+	
+	return result;
 }
 
 internal void
@@ -769,6 +791,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		draw_text_centered_f(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), "%d", u32(1.0f / mplayer->input.frame_dt));
 	}
 	
+	if (!is_music_track_still_playing(mplayer->current_music))
+	{
+		if (mplayer->current_music)
+		{
+			mplayer_play_music_track(mplayer, mplayer->current_music->next);
+		}
+	}
+	
 	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
 	
 	Range2_F32 available_space = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
@@ -993,19 +1023,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				{
 					bg_color = vec4(0.14f, 0.14f,0.14f, 1);
 					
-					if (!music->file_loaded)
-					{
-						music->flac_file_buffer = mplayer->os.load_entire_file(music->path, &music->arena);
-						music->file_loaded = true;
-					}
-					
-					if (!music->flac_stream)
-					{
-						music->flac_stream = m_arena_push_struct_z(&music->arena, Flac_Stream);
-						init_flac_stream(music->flac_stream, music->flac_file_buffer);
-					}
-					
-					mplayer_player_music_track(mplayer, music);
+					mplayer_play_music_track(mplayer, music);
 					mplayer->play_track = true;
 				}
 				
