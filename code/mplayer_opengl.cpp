@@ -231,6 +231,8 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 			u32(format),
 			GL_UNSIGNED_BYTE,
 			buffer.data);
+		
+		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 }
 

@@ -126,6 +126,7 @@ reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 	Texture texture;
 	assert(render_ctx->textures_count < render_ctx->textures_capacity);
 	
+	texture.flags  = 0;
 	texture.index  = u16(render_ctx->textures_count);
 	texture.width  = width;
 	texture.height = height;
@@ -292,6 +293,14 @@ push_image(Render_Group *group, V3_F32 pos, V2_F32 dim, Texture texture, V4_F32 
 	rect->uv_offset = uv_offset;
 	rect->roundness = roundness;
 }
+
+
+internal void
+push_image(Render_Group *group, V2_F32 pos, V2_F32 dim, Texture texture, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0f, V2_F32 uv_scale = vec2(1, 1), V2_F32 uv_offset = vec2(0, 0))
+{
+	push_image(group, vec3(pos, 0), dim, texture, color, roundness, uv_scale, uv_offset);
+}
+
 
 internal void
 push_rect(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)

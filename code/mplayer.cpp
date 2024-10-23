@@ -203,15 +203,10 @@ mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
 	if (pixels)
 	{
 		result = reserve_texture_handle(mplayer->render_ctx, u16(width), u16(height));
-		#if 1
-			// TODO(fakhri): maybe we should have the channel count be stored in the texure handle?
-			if (channels == 3)
-		{
-			set_flag(result.flags, TEXTURE_FLAG_RGB_BIT);
-		}
-		#endif
-			
-			Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * channels);
+		assert(channels != 4);
+		set_flag(result.flags, TEXTURE_FLAG_RGB_BIT);
+		
+		Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * channels);
 		memory_copy(pixels_buf.data, pixels, pixels_buf.size);
 		
 		push_texture_upload_request(&mplayer->render_ctx->upload_buffer, result, pixels_buf);
@@ -245,10 +240,10 @@ internal void
 mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music)
 {
 	uninit_flac_stream(music->flac_stream);
+	m_arena_free_all(&music->transient_arena);
 	music->file_loaded = false;
 	music->flac_stream = 0;
 	music->flac_file_buffer = ZERO_STRUCT;
-	m_arena_free_all(&music->transient_arena);
 	
 	// TODO(fakhri): delete texture from gpu memory!
 	music->cover_texture = ZERO_STRUCT;
@@ -902,15 +897,22 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		// NOTE(fakhri): horizontal padding
 		cut = range_cut_left_percentage(cut.bottom, 1.0f/3.0f);
 		
-		// NOTE(fakhri): track name
+		// NOTE(fakhri): cover picture and track name
 		{
 			if (mplayer->current_music)
 			{
+				Range2_F32_Cut cut2 = range_cut_left(cut.left, 100);
+				Range2_F32 cover_rect      = cut2.left;
+				Range2_F32 track_name_rect = cut2.right;
+				
+				if (is_texture_valid(mplayer->current_music->cover_texture))
+				{
+					push_image(&group, range_center(cover_rect), range_dim(cover_rect), mplayer->current_music->cover_texture);
+				}
+				
 				// TODO(fakhri): stack of render configs?
-				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, cut.left);
-				
-				draw_text_centered(&group, &mplayer->font, range_center(cut.left), vec4(1, 1, 1, 1), mplayer->current_music->name);
-				
+				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
+				draw_text_centered(&group, &mplayer->font, range_center(track_name_rect), vec4(1, 1, 1, 1), mplayer->current_music->name);
 				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, screen_rect);
 			}
 		}
@@ -1089,9 +1091,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		} break;
 	}
 	
-	if (mplayer->current_music && is_texture_valid(mplayer->current_music->cover_texture))
+	#if 0
+		if (mplayer->current_music && is_texture_valid(mplayer->current_music->cover_texture))
 	{
 		Texture cover_texture = mplayer->current_music->cover_texture;
 		push_image(&group, vec3(0, 0, 0), vec2(f32(cover_texture.width), f32(cover_texture.height)), cover_texture);
 	}
+	#endif
 }
