@@ -1,10 +1,24 @@
 
+struct Rect_Vertex_Data
+{
+	V3_F32 pos;
+	V2_F32 uv;
+	V4_F32 color;
+	
+	// NOTE(fakhri): this is shared per instance
+	V2_F32 rect_center;
+	V2_F32 rect_dim;
+	f32    roundness;
+	i32 textured;
+};
+
 enum Texture_Flag
 {
 	TEXTURE_FLAG_GRAY_BIT,
 	TEXTURE_FLAG_RGB_BIT,
 };
 
+#define NULL_TEXTURE Texture{}
 union Texture
 {
 	u64 compact;
@@ -30,19 +44,6 @@ struct Textures_Upload_Buffer
 	u64 count;
 };
 
-
-struct Textured_Rect
-{
-	Texture texture;
-	V2_F32 uv_scale;
-	V2_F32 uv_offset;
-	
-	f32 roundness;
-	V3_F32 pos;
-	V2_F32 dim;
-	V4_F32 color;
-};
-
 struct Render_Context
 {
 	Memory_Arena *arena;
@@ -55,9 +56,14 @@ struct Render_Context
 	u64 textures_count;
 	u64 textures_capacity;
 	
-	Texture white_texture;
+	Rect_Vertex_Data *vertex_array;
+	u32 max_vertices_count;
+	u32 vertices_count;
 	
-	Textured_Rect *rects;
+	u16 *index_array;
+	u32 max_indices_count;
+	u32 indices_count;
+	
 	u32 max_rects;
 	u32 rects_count;
 };
@@ -88,17 +94,29 @@ struct Render_Config
 
 struct Render_Entry_Textured_Rects
 {
+	Texture texture;
 	Render_Config config;
 	u32 rects_count;
-	u32 rect_start_index;
+	
+	u32 rect_offset;
+	u32 vertex_offset;
+	u32 index_offset;
 };
 
 struct Render_Group
 {
 	Render_Context *render_ctx;
 	Render_Config config;
+	
 	Render_Entry_Textured_Rects *textured_rects;
 };
+
+internal b32
+is_texture_valid(Texture texure)
+{
+	b32 result = texure.width && texure.height;
+	return result;
+}
 
 internal M4_Inv
 compute_clip_matrix(V2_F32 pos, V2_F32 dim)
@@ -151,7 +169,6 @@ init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 	render_ctx->upload_buffer.entries  = m_arena_push_array(arena, Texture_Upload_Entry, 
 		render_ctx->upload_buffer.capacity);
 	
-	render_ctx->white_texture = reserve_texture_handle(render_ctx, 1, 1);
 }
 
 
@@ -193,27 +210,22 @@ compute_draw_region_aspect_ratio_fit(V2_I32 render_dim, V2_I32 window_dim)
 }
 
 
-internal Render_Entry_Header *
-rndr_push_cmd_buffer(Render_Context *render_ctx, u64 size)
-{
-	Render_Entry_Header *result = 0;
-	assert(render_ctx->command_offset + size <= render_ctx->commands.size);
-	if (render_ctx->command_offset + size <= render_ctx->commands.size)
-	{
-		result = (Render_Entry_Header *)(render_ctx->commands.data + render_ctx->command_offset);
-		render_ctx->command_offset += size;
-	}
-	return result;
-}
-
 
 #define rndr_push_cmd(render_ctx, Type) (Type*)__rndr_push_cmd(render_ctx, sizeof(Type), Render_Entry_Kind_##Type)
 internal void *
 __rndr_push_cmd(Render_Context *render_ctx, u64 size, Render_Entry_Kind kind)
 {
 	void *result = 0;
+	
+	size += sizeof(Render_Entry_Header);
+	Render_Entry_Header *header = 0;
+	assert(render_ctx->command_offset + size <= render_ctx->commands.size);
+	if (render_ctx->command_offset + size <= render_ctx->commands.size)
+	{
+		header = (Render_Entry_Header *)(render_ctx->commands.data + render_ctx->command_offset);
+		render_ctx->command_offset += size;
+	}
   
-	Render_Entry_Header *header = rndr_push_cmd_buffer(render_ctx, sizeof(Render_Entry_Header) + size);
 	assert(header);
 	if (header)
 	{
@@ -270,28 +282,95 @@ push_image(Render_Group *group, V3_F32 pos, V2_F32 dim, Texture texture, V4_F32 
 		return;
 	}
 	
+	if (group->textured_rects)
+	{
+		if (!is_texture_valid(group->textured_rects->texture))
+		{
+			group->textured_rects->texture = texture;
+		}
+		else if (is_texture_valid(texture) && (group->textured_rects->texture.compact != texture.compact))
+		{
+			render_group_flush(group);
+		}
+	}
+	
 	if (!group->textured_rects)
 	{
 		group->textured_rects = rndr_push_cmd(render_ctx, Render_Entry_Textured_Rects);
 		group->textured_rects->config = group->config;
-		group->textured_rects->rect_start_index = render_ctx->rects_count;
+		group->textured_rects->texture = texture;
+		group->textured_rects->rect_offset   = render_ctx->rects_count;
+		group->textured_rects->vertex_offset = render_ctx->vertices_count;
+		group->textured_rects->index_offset  = render_ctx->indices_count;
 		group->textured_rects->rects_count = 0;
 	}
 	
-	render_ctx->rects_count += 1;
-	
 	Render_Entry_Textured_Rects *entry = group->textured_rects;
-	u32 rect_index = entry->rect_start_index + entry->rects_count++;
-	assert(rect_index < render_ctx->max_rects);
 	
-	Textured_Rect *rect = render_ctx->rects + rect_index;
-	rect->texture   = texture;
-	rect->pos       = pos;
-	rect->dim       = dim;
-	rect->color     = color;
-	rect->uv_scale  = uv_scale;
-	rect->uv_offset = uv_offset;
-	rect->roundness = roundness;
+	render_ctx->rects_count    += 1;
+	render_ctx->vertices_count += 4;
+	render_ctx->indices_count  += 6;
+	
+	u32 rect_index   = entry->rect_offset   +     entry->rects_count;
+	u32 vertex_index = entry->vertex_offset + 4 * entry->rects_count;
+	u32 index_index  = entry->index_offset  + 6 * entry->rects_count;
+	
+	assert(rect_index   < render_ctx->max_rects);
+	assert(vertex_index < render_ctx->max_vertices_count);
+	assert(index_index  < render_ctx->max_indices_count);
+	entry->rects_count += 1;
+	
+	u32 textured = is_texture_valid(texture);
+	
+	Rect_Vertex_Data *vertex = render_ctx->vertex_array + vertex_index;
+	
+	// NOTE(fakhri): top-left
+	vertex[0].pos   = vec3(pos.x - 0.5f * dim.width, pos.y + 0.5f * dim.height, pos.z);
+	vertex[0].uv    = uv_offset;
+	vertex[0].color = color;
+	vertex[0].rect_center = pos.xy;
+	vertex[0].rect_dim = dim;
+	vertex[0].roundness = roundness;
+	vertex[0].textured = textured;
+	
+	// NOTE(fakhri): bottom-left
+	vertex[1].pos   = vec3(pos.x - 0.5f * dim.width, pos.y - 0.5f * dim.height, pos.z);
+	vertex[1].uv    = vec2(uv_offset.x, uv_offset.y + uv_scale.height);
+	vertex[1].color = color;
+	vertex[1].rect_center = pos.xy;
+	vertex[1].rect_dim = dim;
+	vertex[1].roundness = roundness;
+	vertex[1].textured = textured;
+	
+	// NOTE(fakhri): bottom-right
+	vertex[2].pos   = vec3(pos.x + 0.5f * dim.width, pos.y - 0.5f * dim.height, pos.z);
+	vertex[2].uv    = vec2(uv_offset.x + uv_scale.width, uv_offset.y + uv_scale.height);
+	vertex[2].color = color;
+	vertex[2].rect_center = pos.xy;
+	vertex[2].rect_dim = dim;
+	vertex[2].roundness = roundness;
+	vertex[2].textured = textured;
+	
+	// NOTE(fakhri): top-right
+	vertex[3].pos   = vec3(pos.x + 0.5f * dim.width, pos.y + 0.5f * dim.height, pos.z);
+	vertex[3].uv    = vec2(uv_offset.x + uv_scale.width, uv_offset.y);
+	vertex[3].color = color;
+	vertex[3].rect_center = pos.xy;
+	vertex[3].rect_dim = dim;
+	vertex[3].roundness = roundness;
+	vertex[3].textured = textured;
+	
+	u16 *indices = render_ctx->index_array + index_index;
+	
+	// NOTE(fakhri): first triangle
+	indices[0] = u16(vertex_index + 0);
+	indices[1] = u16(vertex_index + 1);
+	indices[2] = u16(vertex_index + 2);
+	
+	// NOTE(fakhri): second triangle
+	indices[3] = u16(vertex_index + 0);
+	indices[4] = u16(vertex_index + 2);
+	indices[5] = u16(vertex_index + 3);
 }
 
 
@@ -305,13 +384,13 @@ push_image(Render_Group *group, V2_F32 pos, V2_F32 dim, Texture texture, V4_F32 
 internal void
 push_rect(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, pos, dim, group->render_ctx->white_texture, color, roundness);
+	push_image(group, pos, dim, NULL_TEXTURE, color, roundness);
 }
 
 internal void
 push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, vec3(pos, 0), dim, group->render_ctx->white_texture, color, roundness);
+	push_image(group, vec3(pos, 0), dim, NULL_TEXTURE, color, roundness);
 }
 
 
@@ -326,11 +405,4 @@ push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture textu
 	entry->tex_buf = tex_buf;
 	
 	upload_buffer->count += 1;
-}
-
-internal b32
-is_texture_valid(Texture texure)
-{
-	b32 result = texure.width && texure.height;
-	return result;
 }

@@ -2,14 +2,15 @@
 #define GL_VERSION_MAJOR 3
 #define GL_VERSION_MINOR 3
 
-struct GL_Rect_Vertex_Attribute
+struct GL_Rect_Vertex_Data
 {
-	V2_F32 pos, uv;
+	V2_F32 pos;
+	V2_F32 uv;
 };
 
 struct Rect_Shader_Uniforms
 {
-	i32 clip, model, color, uv_offset, uv_scale, rect_dim, rect_cent, roundness;
+	i32 clip, rect_dim, rect_cent, roundness;
 };
 
 struct GL_Textured_Rect_Shader
@@ -26,6 +27,10 @@ struct GL_Textured_Rect_Shader
 #define SET_VERTEX_ATTRIBUTE(T, m, index) \
 glEnableVertexAttribArray(index); \
 glVertexAttribPointer(index, sizeof(member(T, m)) / sizeof(f32), GL_FLOAT, GL_FALSE, sizeof(T), (void*)member_offset(T, m));
+
+#define SET_VERTEX_ATTRIBUTE_INSTANCED(T, m, index) \
+SET_VERTEX_ATTRIBUTE(T, m, index); \
+glVertexAttribDivisor(index, 1);
 
 struct OpenGL
 {
@@ -128,24 +133,14 @@ gl_compile_shader_program(OpenGL *opengl, const char *source_code)
 	return id;
 }
 
+#define STATIC_VERTEX_BUFFERS 0
+
 internal b32
 gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_shader)
 {
-	local_persist GL_Rect_Vertex_Attribute rect_vertices[] = {
-		{{-0.5f, +0.5f}, {0.0, 0.0}}, // up-left
-		{{-0.5f, -0.5f}, {0.0, 1.0}}, // down-left
-		{{+0.5f, -0.5f}, {1.0, 1.0}}, // down-right
-		{{+0.5f, +0.5f}, {1.0, 0.0}}, // up-right
-	};
-  
-	local_persist u32 indices[] = {
-		0, 1, 2,
-		0, 2, 3,
-	};
-  
 	Memory_Checkpoint scratch = begin_scratch(0, 0);
 	// TODO(fakhri): bake the shader into the executable
-	const char *rect_shader_source = (char *)opengl->load_entire_file(str8_lit("data/shaders/rectangle_shader.glsl"), scratch.arena).data;
+	const char *rect_shader_source = (char *)opengl->load_entire_file(str8_lit("data/shaders/rectangle_shader_instanced.glsl"), scratch.arena).data;
 	
 	b32 result = true;
   
@@ -156,32 +151,33 @@ gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_sh
 		goto exit;
 	}
   
+	// TODO(fakhri): do we need to use the program here?
 	glUseProgram(rect_shader->prog_id);
-  
+	
 	glGenVertexArrays(1, &rect_shader->vao);
+	glGenBuffers(1, &rect_shader->vbo);
+	
 	glBindVertexArray(rect_shader->vao);
   
-	glGenBuffers(1, &rect_shader->vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, rect_shader->vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertices), rect_vertices, GL_STATIC_DRAW);
-  
-	SET_VERTEX_ATTRIBUTE(GL_Rect_Vertex_Attribute, pos, 0);
-	SET_VERTEX_ATTRIBUTE(GL_Rect_Vertex_Attribute, uv,  1);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, pos,   0);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, uv,    1);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, color, 2);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, rect_center, 3);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, rect_dim,    4);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, roundness,   5);
+	SET_VERTEX_ATTRIBUTE(Rect_Vertex_Data, textured,    6);
   
 	glGenBuffers(1, &rect_shader->ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rect_shader->ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-  
-	glUseProgram(0);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rect_shader->ebo);
+	
 	glBindVertexArray(0);
+	
+	glUseProgram(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-  
+	
 	rect_shader->uniforms.clip      = glGetUniformLocation(rect_shader->prog_id, "clip");
-	rect_shader->uniforms.model     = glGetUniformLocation(rect_shader->prog_id, "model");
-	rect_shader->uniforms.color     = glGetUniformLocation(rect_shader->prog_id, "color");
-	rect_shader->uniforms.uv_offset = glGetUniformLocation(rect_shader->prog_id, "uv_offset");
-	rect_shader->uniforms.uv_scale  = glGetUniformLocation(rect_shader->prog_id, "uv_scale");
 	rect_shader->uniforms.rect_cent = glGetUniformLocation(rect_shader->prog_id, "rect_cent");
 	rect_shader->uniforms.rect_dim  = glGetUniformLocation(rect_shader->prog_id, "rect_dim");
 	rect_shader->uniforms.roundness = glGetUniformLocation(rect_shader->prog_id, "roundness");
@@ -240,9 +236,13 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 internal void
 init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 {
-	opengl->render_ctx.rects_count = 0;
 	opengl->render_ctx.max_rects   = 5000;
-	opengl->render_ctx.rects = m_arena_push_array(arena, Textured_Rect, opengl->render_ctx.max_rects);
+	opengl->render_ctx.max_vertices_count = 4 * opengl->render_ctx.max_rects;
+	opengl->render_ctx.max_indices_count = 6 * opengl->render_ctx.max_rects;
+	
+	opengl->render_ctx.vertex_array = m_arena_push_array(arena, Rect_Vertex_Data, opengl->render_ctx.max_vertices_count);
+	opengl->render_ctx.index_array  = m_arena_push_array(arena, u16, opengl->render_ctx.max_indices_count);
+	
 	
 	opengl->render_ctx.textures_count = 0;
 	opengl->render_ctx.textures_capacity = 128;
@@ -264,9 +264,6 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	
 	init_renderer(&opengl->render_ctx, arena);
 	
-	u32 white_color = 0xFFFFFFFF;
-	gl_upload_texture(opengl, opengl->render_ctx.white_texture, make_buffer((u8*)&white_color, sizeof(white_color)));
-	
 	gl_compile_textured_rect_shader(opengl, &opengl->rect_shader);
 }
 
@@ -274,7 +271,10 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 internal void
 gl_begin_frame(OpenGL *opengl, V2_I32 window_dim, V2_I32 draw_dim, Range2_I32 draw_region)
 {
+	opengl->render_ctx.vertices_count = 0;
+	opengl->render_ctx.indices_count = 0;
 	opengl->render_ctx.rects_count = 0;
+	
 	opengl->render_ctx.command_offset = 0;
 	opengl->render_ctx.draw_dim       = vec2(draw_dim);
 	opengl->window_dim  = window_dim;
@@ -310,7 +310,6 @@ gl_end_frame(OpenGL *opengl)
 	glClearColor(1, 0, 1, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 	
-	
 	// NOTE(fakhri): process upload requests
 	if (opengl->render_ctx.upload_buffer.count)
 	{
@@ -325,6 +324,20 @@ gl_end_frame(OpenGL *opengl)
 	}
   
 	Render_Context *render_ctx = (Render_Context *)opengl;
+	
+	// NOTE(fakhri): update buffers
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, opengl->rect_shader.vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(Rect_Vertex_Data) * render_ctx->vertices_count, render_ctx->vertex_array, GL_STREAM_DRAW);
+		
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, opengl->rect_shader.ebo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(u16) * render_ctx->indices_count, render_ctx->index_array, GL_STREAM_DRAW);
+		
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	}
+	
+	
 	for (u8 *cmd_ptr = render_ctx->commands.data, *cmds_ptr_end = render_ctx->commands.data + render_ctx->command_offset;
 		cmd_ptr < cmds_ptr_end;)
 	{
@@ -354,7 +367,7 @@ gl_end_frame(OpenGL *opengl)
 				glUseProgram(rect_shader->prog_id);
 				
 				Render_Config config = cmd->config;
-				// TODO(fakhri): culling
+				
 				Range2_F32 cull_range = config.cull_range;
 				cull_range.minp = (config.proj.mat * vec4(cull_range.min_x, cull_range.min_y, 0, 1)).xy;
 				cull_range.maxp = (config.proj.mat * vec4(cull_range.max_x, cull_range.max_y, 0, 1)).xy;
@@ -369,39 +382,34 @@ gl_end_frame(OpenGL *opengl)
 					max_x - min_x,
 					max_y - min_y);
 				
+				glUniformMatrix4fv(rect_shader->uniforms.clip,  1, GL_FALSE, (f32*)&config.proj.mat);
+				
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, 
+					gl_get_texture_handle(opengl, cmd->texture));
+				
+				glBindVertexArray(rect_shader->vao);
+				
+				
+				#if 0
+					u32 index_offset = cmd->index_offset;
 				for (u32 i = 0; i < cmd->rects_count; i += 1)
 				{
-					Textured_Rect *rect = render_ctx->rects + cmd->rect_start_index + i;
+					Textured_Rect *rect = render_ctx->rects + cmd->rect_offset + i;
 					
-					V3_F32 pos = rect->pos;
-					V3_F32 scale = vec3(rect->dim, 0);
-					
-					M4 translation_m = m4_translate(pos);
-					M4 scaling_m     = m4_scale(scale);
-					M4 model = translation_m * scaling_m;
-					
-					glUniformMatrix4fv(rect_shader->uniforms.clip,  1, GL_FALSE, (f32*)&config.proj.mat);
-					glUniformMatrix4fv(rect_shader->uniforms.model, 1, GL_FALSE, (f32*)&model);
-					glUniform4fv(rect_shader->uniforms.color,     1, (f32*)&rect->color);
-					glUniform2fv(rect_shader->uniforms.uv_offset, 1, (f32*)&rect->uv_offset);
-					glUniform2fv(rect_shader->uniforms.uv_scale,  1, (f32*)&rect->uv_scale);
-					
-					glUniform2fv(rect_shader->uniforms.rect_cent,  1, (f32*)&rect->pos);
+					glUniform2fv(rect_shader->uniforms.rect_cent,  1, (f32*)&rect->center);
 					glUniform2fv(rect_shader->uniforms.rect_dim,  1, (f32*)&rect->dim);
 					glUniform1f(rect_shader->uniforms.roundness, rect->roundness);
 					
-					glActiveTexture(GL_TEXTURE0);
-					glBindTexture(GL_TEXTURE_2D, 
-						gl_get_texture_handle(opengl, rect->texture));
-					
-					glBindVertexArray(rect_shader->vao);
-					glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+					glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (void*)(index_offset * sizeof(u16)));
+					index_offset += 6;
+				}
+				#else
+					glDrawElements(GL_TRIANGLES, 6 * cmd->rects_count, GL_UNSIGNED_SHORT, (void*)(cmd->index_offset * sizeof(u16)));
+				#endif
 					
 					glBindVertexArray(0);
-					glBindTexture(GL_TEXTURE_2D, 0);
-					
-				}
-				
+				glBindTexture(GL_TEXTURE_2D, 0);
 				glUseProgram(0);
 			} break;
 			

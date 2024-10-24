@@ -41,6 +41,10 @@ typedef void void_function();
 # define LANG_CPP 1
 #endif
 
+#ifndef DEBUG_BUILD
+# define DEBUG_BUILD 0
+#endif
+
 #ifndef OS_WINDOWS
 # define OS_WINDOWS 0
 #endif

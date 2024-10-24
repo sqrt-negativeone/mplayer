@@ -48,9 +48,11 @@ GLProc(glUniform1i, UNIFORM1I)
 GLProc(glUniform1f, UNIFORM1F)
 GLProc(glUniform2iv, UNIFORM2IV)
 GLProc(glUniform2fv, UNIFORM2FV)
-
+GLProc(glDrawElementsBaseVertex, DRAWELEMENTSBASEVERTEX)
 GLProc(glRenderbufferStorageMultisample, RENDERBUFFERSTORAGEMULTISAMPLE)
 GLProc(glTexImage2DMultisample, TEXIMAGE2DMULTISAMPLE)
+GLProc(glVertexAttribDivisor, VERTEXATTRIBDIVISOR)
+GLProc(glDrawElementsInstanced, DRAWELEMENTSINSTANCED)
 
 #if OS_WINDOWS
 GLProc(glActiveTexture, ACTIVETEXTURE)
