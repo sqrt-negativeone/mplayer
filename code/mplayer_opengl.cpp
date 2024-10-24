@@ -2,12 +2,6 @@
 #define GL_VERSION_MAJOR 3
 #define GL_VERSION_MINOR 3
 
-struct GL_Rect_Vertex_Data
-{
-	V2_F32 pos;
-	V2_F32 uv;
-};
-
 struct Rect_Shader_Uniforms
 {
 	i32 clip, rect_dim, rect_cent, roundness;

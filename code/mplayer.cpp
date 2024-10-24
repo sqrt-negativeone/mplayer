@@ -819,14 +819,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
 	
-	#if 0
-		push_image(&group, vec3(0, 0, 0), vec2(512, 512), mplayer->font.atlas_tex);
-	push_rect(&group, vec3(0, 0, 0),   vec2(200, 200), vec4(1, 0, 0, 1));
-	push_rect(&group, vec3(50, 0, 0), vec2(50, 50), vec4(1, 0, 1, 1));
-	
-	
-	#else
-		// NOTE(fakhri): draw fps
+	// NOTE(fakhri): draw fps
 	{
 		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
 		fps_pos.x -= 20;
@@ -1103,6 +1096,5 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		Texture cover_texture = mplayer->current_music->cover_texture;
 		push_image(&group, vec3(0, 0, 0), vec2(f32(cover_texture.width), f32(cover_texture.height)), cover_texture);
 	}
-	#endif
 	#endif
 }
