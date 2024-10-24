@@ -27,7 +27,7 @@ set compiler_includes= ^
 
 
 if %release_mode% EQU 0 ( rem Debug
-	set compiler_flags=%compiler_flags% /Od
+	set compiler_flags=%compiler_flags% /DDEBUG_BUILD=1 /Od
 ) else ( rem Release
 	set compiler_flags=%compiler_flags% /O2 /MT
 )

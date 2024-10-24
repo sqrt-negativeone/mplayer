@@ -9,11 +9,17 @@ layout (location = 2) in vec4 a_color;
 layout (location = 3) in vec2 a_rect_center;
 layout (location = 4) in vec2 a_rect_dim;
 layout (location = 5) in float a_roundness;
+layout (location = 6) in int  a_textured;
+
+uniform mat4 clip;
 
 out vec4 color;
 out vec2 frag_pos;
 out vec2 tex_uv;
-uniform mat4 clip;
+out vec2  rect_cent;
+out vec2  rect_dim;
+out float roundness; // for round corners
+out float is_textured; // for round corners
 
 void main()
 {
@@ -23,7 +29,11 @@ void main()
   tex_uv = a_uv;
 	frag_pos = a_pos.xy;
 	
-	color = a_color;
+	color     = a_color;
+	rect_cent = a_rect_center;
+	rect_dim  = a_rect_dim;
+	roundness = a_roundness;
+	is_textured  = a_textured;
 }
 
 #endif
@@ -37,9 +47,10 @@ in vec2 tex_uv;
 out vec4 frag_color;
 
 uniform sampler2D tex0;
-uniform vec2  rect_cent;
-uniform vec2  rect_dim;
-uniform float roundness = 0; // for round corners
+in vec2  rect_cent;
+in vec2  rect_dim;
+in float roundness; // for round corners
+in float is_textured; // for round corners
 
 void main()
 {
@@ -56,14 +67,13 @@ void main()
 		}
 	}
 	
-	
-	vec4 sampled_tex_color = texture(tex0, tex_uv);
-	if (sampled_tex_color.a > 0)
+	frag_color = color;
+	if (is_textured != 0)
 	{
-		frag_color = color * sampled_tex_color;
-		
+		frag_color *= texture(tex0, tex_uv);
 	}
-	else
+	
+	if (frag_color.a == 0)
 	{
 		discard;
 	}
