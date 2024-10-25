@@ -1069,13 +1069,22 @@ init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 			} break;
 			case 4:
 			{
+				// TODO(fakhri): make sure we only have one vorbis metadata block
 				// vorbis comment
-				bitstream_skip_bytes(bitstream, md_size);
+				u32 vendor_len = bitstream_read_u32le(bitstream);
+				String8 vendor = to_string(bitstream_read_buffer(bitstream, vendor_len));
+				u32 fields_count = bitstream_read_u32le(bitstream);;;
+				for (u32  i = 0; i < fields_count; i += 1)
+				{
+					u32 field_len = bitstream_read_u32le(bitstream);
+					String8 field = to_string(bitstream_read_buffer(bitstream, field_len));
+					Log("vorbis comment: %.*s", STR8_EXPAND(field));
+				}
 			} break;
 			case 5:
 			{
 				// NOTE(fakhri): cuesheet
-				bitstream_skip_bytes(bitstream, md_size);
+				Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
 			} break;
 			case 6:
 			{

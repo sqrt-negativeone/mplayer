@@ -143,6 +143,23 @@ bitstream_read_u32be(Bit_Stream *bitstream)
 	return result;
 }
 
+internal u32
+bitstream_read_u32le(Bit_Stream *bitstream)
+{
+	Buffer *buffer = &bitstream->buffer;
+	u64 byte_index = bitstream->pos.byte_index;
+	
+	// NOTE(fakhri): make sure we are at byte boundary
+	assert(bitstream->pos.bits_left == 8);
+	u32 result = ((u32(buffer->data[byte_index + 3]) << 24) | 
+		(u32(buffer->data[byte_index + 2]) << 16) |
+		(u32(buffer->data[byte_index + 1]) << 8)  |
+		(u32(buffer->data[byte_index + 0]) << 0));
+	bitstream->pos.byte_index += 4;
+	
+	return result;
+}
+
 internal u64
 bitstream_read_u64be(Bit_Stream *bitstream)
 {
