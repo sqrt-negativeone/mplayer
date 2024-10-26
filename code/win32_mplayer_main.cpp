@@ -14,69 +14,81 @@
 #include "mplayer_base.h"
 #include "mplayer_math.h"
 
-enum Memory_Allocator_Operation
-{
-	Mem_Op_Reserve,
-	Mem_Op_Commit,
-	Mem_Op_Decommit,
-	Mem_Op_Release,
-};
+#include "mplayer.cpp"
 
-typedef void *Allocator_Function(void *user_data, Memory_Allocator_Operation op, void *memory, umem size);
-struct Memory_Allocator
-{
-	Allocator_Function *alloc;
-	void *user_data;
-};
+global Mplayer_OS_Vtable w32_vtable;
 
 internal void *
-sys_memory_allocator(void *user_data, Memory_Allocator_Operation op, void *memory, u64 size)
-{
-	void *result = 0;
-	switch (op)
-	{
-		case Mem_Op_Reserve:
-		{
-			result = VirtualAlloc(0, size, MEM_RESERVE, PAGE_NOACCESS);
-		} break;
-		case Mem_Op_Commit:
-		{
-			result = VirtualAlloc(memory, size, MEM_COMMIT, PAGE_READWRITE);
-		} break;
-		case Mem_Op_Decommit:
-		{
-			VirtualFree(memory, size, MEM_DECOMMIT);
-		} break;
-		case Mem_Op_Release:
-		{
-			VirtualFree(memory, 0, MEM_RELEASE);
-		} break;
-	}
-	return result;
-}
-
-internal void *
-sys_allocate_memory(u64 size)
+w32_allocate_memory(u64 size)
 {
 	void *result = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	return result;
 }
 
 internal void
-sys_deallocate_memory(void *memory)
+w32_deallocate_memory(void *memory)
 {
 	VirtualFree(memory, 0, MEM_RELEASE);
 }
 
-#include "mplayer_memory.cpp"
-#include "mplayer_thread_context.cpp"
-#include "mplayer_string.cpp"
-#include "mplayer_base.cpp"
-#include "mplayer_buffer.h"
+#define File_Open_ReadWrite (make_flag(File_Open_Read) | make_flag(File_Open_Write))
+
+internal File_Handle *
+w32_open_file(String8 path, u32 flags)
+{
+	File_Handle *result = 0;
+	
+	DWORD desired_access = 0;
+	if (has_flag(flags, File_Open_Read))
+	{
+		desired_access |= GENERIC_READ;
+	}
+	
+	if (has_flag(flags, File_Open_Write))
+	{
+		desired_access |= GENERIC_WRITE;
+	}
+	
+	DWORD share_mode = 0;
+	if (!has_flag(flags, File_Open_Write))
+	{
+		share_mode |= FILE_SHARE_READ;
+	}
+	
+	SECURITY_ATTRIBUTES security_attributes = {
+		(DWORD)sizeof(SECURITY_ATTRIBUTES),
+		0,
+		0,
+	};
+	DWORD creation_disposition = OPEN_EXISTING;
+	DWORD flags_and_attributes = 0;
+	HANDLE template_file = 0;
+	
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	String16 cpath16 = str16_from_8(scratch.arena, path);
+	
+	result = CreateFileW((LPCWSTR)cpath16.str,
+		desired_access,
+		share_mode,
+		&security_attributes,
+		creation_disposition,
+		flags_and_attributes,
+		template_file);
+	return result;
+}
 
 internal void
-w32_read_whole_block(HANDLE file, void *data, u64 size)
+w32_close_file(File_Handle *file)
 {
+	CloseHandle((HANDLE)file);
+}
+
+internal Buffer
+w32_read_whole_block(File_Handle *file, void *data, u64 size)
+{
+	Buffer result = ZERO_STRUCT;
+	
+	HANDLE file_handle = (HANDLE)file;
 	u8 *ptr = (u8*)data;
 	u8 *opl = ptr + size;
 	for (;;)
@@ -84,7 +96,11 @@ w32_read_whole_block(HANDLE file, void *data, u64 size)
 		u64 unread = (u64)(opl - ptr);
 		DWORD to_read = (DWORD)(MIN(unread, 0xFFFFFFFF));
 		DWORD did_read = 0;
-		if (!ReadFile(file, ptr, to_read, &did_read, 0))
+		if (!ReadFile(file_handle, ptr, to_read, &did_read, 0))
+		{
+			break;
+		}
+		if (!did_read)
 		{
 			break;
 		}
@@ -94,6 +110,10 @@ w32_read_whole_block(HANDLE file, void *data, u64 size)
 			break;
 		}
 	}
+	
+	result.data = (u8*)data;
+	result.size = ptr - result.data;
+	return result;
 }
 
 
@@ -116,13 +136,7 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	Memory_Checkpoint scratch = get_scratch(&arena, 1);
 	String16 cpath16 = str16_from_8(scratch.arena, file_path);
 	
-	HANDLE file = CreateFileW((LPCWSTR)cpath16.str,
-		desired_access,
-		share_mode,
-		&security_attributes,
-		creation_disposition,
-		flags_and_attributes,
-		template_file);
+	HANDLE file = w32_open_file(file_path, make_flag(File_Open_Read));
 	
 	if(file != INVALID_HANDLE_VALUE)
 	{
@@ -135,13 +149,11 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 			result.data = (u8*)data;
 			result.size = size;
 		}
-		CloseHandle(file);
+		w32_close_file(file);
 	}
 	
 	return result;
 }
-
-#include "mplayer.cpp"
 
 #include "win32_mplayer_renderer_gl.cpp"
 
@@ -477,8 +489,27 @@ w32_file_iter_end(File_Iterator_Handle *it)
   FindClose(win32_it->state);
 }
 
+internal void
+w32_init_os_vtable()
+{
+	w32_vtable = {
+		.file_iter_begin = w32_file_iter_begin,
+		.file_iter_next  = w32_file_iter_next,
+		.file_iter_end   = w32_file_iter_end,
+		.load_entire_file = w32_load_entire_file,
+		.open_file  = w32_open_file,
+		.close_file = w32_close_file,
+		.read_block = w32_read_whole_block,
+		.alloc   = w32_allocate_memory,
+		.dealloc = w32_deallocate_memory,
+	};
+}
+
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
+	w32_init_os_vtable();
+	platform = &w32_vtable;
+	
 	init_thread_context();
 	timeBeginPeriod(1);
 	QueryPerformanceFrequency(&w32_timer_freq);
@@ -511,10 +542,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				
 				mplayer->library_path = str8_lit("f://Music/");
 				
-				mplayer->os.file_iter_begin = w32_file_iter_begin;
-				mplayer->os.file_iter_next  = w32_file_iter_next;
-				mplayer->os.file_iter_end   = w32_file_iter_end;
-				mplayer->os.load_entire_file = w32_load_entire_file;
+				mplayer->os = w32_vtable;
 				mplayer_initialize(mplayer);
 			}
 			

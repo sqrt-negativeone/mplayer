@@ -122,10 +122,10 @@ struct Flac_Stream
 	
 	Flac_Seek_Point *seek_table;
 	u64 seek_table_size;
+	Flac_Picture *front_cover;
+	String8_List vorbis_comments;
 	
 	SRC_STATE *src_ctx;
-	
-	Flac_Picture *front_cover;
 };
 
 
@@ -975,15 +975,8 @@ uninit_flac_stream(Flac_Stream *flac_stream)
 }
 
 internal void
-init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
+flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 {
-	// NOTE(fakhri): init bitstream
-	{
-		flac_stream->bitstream.buffer = data;
-		flac_stream->bitstream.pos.byte_index = 0;
-		flac_stream->bitstream.pos.bits_left  = 8;
-	}
-	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
 	
@@ -1073,11 +1066,12 @@ init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 				// vorbis comment
 				u32 vendor_len = bitstream_read_u32le(bitstream);
 				String8 vendor = to_string(bitstream_read_buffer(bitstream, vendor_len));
-				u32 fields_count = bitstream_read_u32le(bitstream);;;
+				u32 fields_count = bitstream_read_u32le(bitstream);
 				for (u32  i = 0; i < fields_count; i += 1)
 				{
 					u32 field_len = bitstream_read_u32le(bitstream);
 					String8 field = to_string(bitstream_read_buffer(bitstream, field_len));
+					str8_list_push(arena, &flac_stream->vorbis_comments, field);
 					Log("vorbis comment: %.*s", STR8_EXPAND(field));
 				}
 			} break;
@@ -1129,7 +1123,20 @@ init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 			} break;
 		}
 	}
-	flac_stream->first_block_pos = bitstream->pos;
+}
+
+internal void
+init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
+{
+	// NOTE(fakhri): init bitstream
+	{
+		flac_stream->bitstream.buffer = data;
+		flac_stream->bitstream.pos.byte_index = 0;
+		flac_stream->bitstream.pos.bits_left  = 8;
+	}
+	flac_process_metadata(flac_stream, arena);
+	
+	flac_stream->first_block_pos = flac_stream->bitstream.pos;
 	
 	if (!flac_stream->seek_table)
 	{

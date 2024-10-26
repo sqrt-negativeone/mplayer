@@ -2,30 +2,11 @@
 #define M_ARENA_DEFAULT_CAPACITY megabytes(8)
 
 
-struct Memory_Arena_Chunk
-{
-	u64 capacity;
-	u64 used_memory;
-	Memory_Arena_Chunk *prev;
-};
-
-struct Memory_Arena
-{
-	Memory_Arena_Chunk *current_chunk;
-	u64 min_chunk_size;
-};
-
-#define m_arena_push_array(arena, T, count) (T *)m_arena_push(arena, sizeof(T) * (count))
-#define m_arena_push_struct(arena, T) m_arena_push_array(arena, T, 1)
-
-#define m_arena_push_array_z(arena, T, count) (T *)m_arena_push_z(arena, sizeof(T) * (count))
-#define m_arena_push_struct_z(arena, T) m_arena_push_array_z(arena, T, 1)
-
 internal Memory_Arena_Chunk *
 m_arena_make_chunk(u64 capacity)
 {
 	capacity = capacity + sizeof(Memory_Arena_Chunk);
-	void *back_buffer = sys_allocate_memory(capacity);
+	void *back_buffer = platform->alloc(capacity);
 	
 	Memory_Arena_Chunk *arena = (Memory_Arena_Chunk *)back_buffer;
 	arena->capacity    = capacity;
@@ -93,7 +74,7 @@ m_arena_free_last_chunk(Memory_Arena *arena)
 	{
 		Memory_Arena_Chunk *chunk = arena->current_chunk;
 		arena->current_chunk = chunk->prev;
-		sys_deallocate_memory(chunk);
+		platform->dealloc(chunk);
 	}
 }
 
@@ -119,36 +100,6 @@ _m_arena_bootstrap_push(u64 struct_size, u64 offset_to_arena)
 
 
 
-struct Memory_Checkpoint
-{
-	Memory_Arena *arena;
-	Memory_Arena_Chunk *chunk;
-	u64 old_used_memory;
-	
-	Memory_Checkpoint() = default;
-	
-	Memory_Checkpoint(Memory_Arena *arena)
-	{
-		this->arena = arena;
-		this->chunk = arena->current_chunk;
-		this->old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
-	}
-	
-	~Memory_Checkpoint()
-	{
-		assert(arena);
-		for (;chunk != arena->current_chunk;)
-		{
-			m_arena_free_last_chunk(arena);
-		}
-		
-		if (chunk)
-		{
-			chunk->used_memory = old_used_memory;
-		}
-	}
-};
-
 internal Memory_Checkpoint
 m_checkpoint_begin(Memory_Arena *arena)
 {
@@ -171,5 +122,27 @@ m_checkpoint_end(Memory_Checkpoint checkpoint)
 	if (checkpoint.chunk)
 	{
 		checkpoint.chunk->used_memory = checkpoint.old_used_memory;
+	}
+}
+
+
+Memory_Checkpoint::Memory_Checkpoint(Memory_Arena *arena)
+{
+	this->arena = arena;
+	this->chunk = arena->current_chunk;
+	this->old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
+}
+
+Memory_Checkpoint::~Memory_Checkpoint()
+{
+	assert(arena);
+	for (;chunk != arena->current_chunk;)
+	{
+		m_arena_free_last_chunk(arena);
+	}
+	
+	if (chunk)
+	{
+		chunk->used_memory = old_used_memory;
 	}
 }

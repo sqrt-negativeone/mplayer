@@ -1,3 +1,7 @@
+#include "mplayer_memory.h"
+#include "mplayer_string.cpp"
+#include "mplayer_buffer.h"
+#include "mplayer_thread_context.cpp"
 
 #define STBI_SSE2
 #define STB_IMAGE_IMPLEMENTATION
@@ -33,12 +37,49 @@ struct File_Info
 	u64 size;
 };
 
+
+typedef u32 File_Open_Flags;
+enum
+{
+	File_Open_Read,
+	File_Open_Write,
+};
+
+typedef void File_Handle;
+
+typedef void     *Allocate_Memory_Proc(u64 size);
+typedef void      Deallocate_Memory_Proc(void *memory);
 typedef b32       File_Iter_Begin_Proc(File_Iterator_Handle *it, String8 path);
 typedef File_Info File_Iter_Next_Proc (File_Iterator_Handle *it, Memory_Arena *arena);
 typedef void      File_Iter_End_Proc  (File_Iterator_Handle *it);
 
+typedef File_Handle *Open_File_Proc(String8 path, u32 flags);
+typedef void   Close_File_Proc(File_Handle *file);
+typedef Buffer File_Read_block_Proc(File_Handle *file, void *data, u64 size);
+
 typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
+struct Mplayer_OS_Vtable
+{
+	File_Iter_Begin_Proc *file_iter_begin;
+	File_Iter_Next_Proc  *file_iter_next;
+	File_Iter_End_Proc   *file_iter_end;
+	Load_Entire_File     *load_entire_file;
+	Open_File_Proc       *open_file;
+	Close_File_Proc      *close_file;
+	File_Read_block_Proc *read_block;
+	
+	
+	Allocate_Memory_Proc   *alloc;
+	Deallocate_Memory_Proc *dealloc;
+};
+
+global Mplayer_OS_Vtable *platform = 0;
+
+
+#include "mplayer_memory.cpp"
+
+#include "mplayer_base.cpp"
 #include "mplayer_renderer.cpp"
 #include "mplayer_bitstream.cpp"
 #include "mplayer_flac.cpp"
@@ -96,28 +137,56 @@ struct Mplayer_UI
 	f32 hot_dt;
 };
 
-struct Mplayer_OS_Vtable
-{
-	File_Iter_Begin_Proc *file_iter_begin;
-	File_Iter_Next_Proc  *file_iter_next;
-	File_Iter_End_Proc   *file_iter_end;
-	Load_Entire_File *load_entire_file;
-};
-
 struct Mplayer_Music_Track
 {
-	Mplayer_Music_Track *next;
+	Mplayer_Music_Track *artist_next;
+	Mplayer_Music_Track *library_next;
+	Mplayer_Music_Track *album_next;
 	
 	Memory_Arena arena;
 	String8 path;
-	String8 name;
 	
 	Memory_Arena transient_arena;
 	Flac_Stream *flac_stream;
 	b32 file_loaded;
 	Buffer flac_file_buffer;
 	
+	String8 title;
+	String8 album;
+	String8 artist;
+	String8 genre;
+	String8 date;
+	String8 track_number;
+	
 	Texture cover_texture;
+};
+
+struct Mplayer_Album
+{
+	Mplayer_Album *artist_next;
+	Mplayer_Album *library_next;
+	
+	String8 name;
+	u64 hash;
+	
+	Mplayer_Music_Track *first_music;
+	Mplayer_Music_Track *last_music;
+	u32 music_count;
+};
+
+struct Mplayer_Artist
+{
+	Mplayer_Artist *next;
+	String8 name;
+	u64 hash;
+	
+	Mplayer_Album *first_album;
+	Mplayer_Album *last_album;
+	u32 albums_count;
+	
+	Mplayer_Music_Track *first_music;
+	Mplayer_Music_Track *last_music;
+	u32 music_count;
 };
 
 enum Mplayer_Mode
@@ -156,7 +225,98 @@ struct Mplayer_Context
 	f32 music_view_scroll;
 	f32 music_view_scroll_speed;
 	f32 music_view_target_scroll;
+	
+	Mplayer_Artist *first_artist;
+	Mplayer_Artist *last_artist;
+	u32 artists_count;
+	
+	Mplayer_Album *first_album;
+	Mplayer_Album *last_album;
+	u32 albums_count;
 };
+
+internal u64
+str8_hash(String8 string)
+{
+	u64 result = 0;
+	for (u32 i = 0; i < string.len; i += 1)
+	{
+		result = ((result << 5) + result) + string.str[i];
+	}
+	return result;
+}
+
+internal u64
+str8_hash_case_insensitive(String8 string)
+{
+	u64 result = 0;
+	for (u32 i = 0; i < string.len; i += 1)
+	{
+		u8 c = string.str[i];
+		if (c >= 'A' && c < 'Z') c = c - 'A' + 'a';
+		result = ((result << 5) + result) + c;
+	}
+	return result;
+}
+
+internal Mplayer_Album *
+mplayer_find_or_create_album(Mplayer_Context *mplayer, Mplayer_Artist *artist, String8 album_name)
+{
+	u64 hash = str8_hash_case_insensitive(album_name);
+	Mplayer_Album *result = 0;
+	
+	for (Mplayer_Album *album = artist->first_album;
+		album;
+		album = album->artist_next)
+	{
+		if (album->hash == hash && str8_match(album_name, album->name, MatchFlag_CaseInsensitive))
+		{
+			result = album;
+			break;
+		}
+	}
+	
+	if (!result)
+	{
+		result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Album);
+		result->name = str8_copy(&mplayer->main_arena, album_name);
+		result->hash = hash;
+		
+		QueuePush_Next(artist->first_album, artist->last_album, result, artist_next);
+		QueuePush_Next(mplayer->first_album, mplayer->last_album, result, library_next);
+		
+		artist->albums_count += 1;
+		mplayer->albums_count += 1;
+	}
+	return result;
+}
+
+internal Mplayer_Artist *
+mplayer_find_or_create_artist(Mplayer_Context *mplayer, String8 artist_name)
+{
+	u64 hash = str8_hash_case_insensitive(artist_name);
+	Mplayer_Artist *result = 0;
+	for (Mplayer_Artist *artist = mplayer->first_artist;
+		artist;
+		artist = artist->next)
+	{
+		if (artist->hash == hash && str8_match(artist_name, artist->name, MatchFlag_CaseInsensitive))
+		{
+			result = artist;
+			break;
+		}
+	}
+	if (!result)
+	{
+		result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Artist);
+		result->name = str8_copy(&mplayer->main_arena, artist_name);
+		result->hash = hash;
+		
+		QueuePush(mplayer->first_artist, mplayer->last_artist, result);
+		mplayer->artists_count += 1;
+	}
+	return result;
+}
 
 internal Mplayer_Music_Track *
 mplayer_make_music_track(Mplayer_Context *mplayer)
@@ -171,15 +331,7 @@ internal void
 mplayer_push_music_track(Mplayer_Context *mplayer, Mplayer_Music_Track *music_track)
 {
 	mplayer->music_count += 1;
-	if (!mplayer->last_music)
-	{
-		mplayer->last_music = mplayer->first_music = music_track;
-	}
-	else
-	{
-		mplayer->last_music->next = music_track;
-		mplayer->last_music = music_track;
-	}
+	QueuePush_Next(mplayer->first_music, mplayer->last_music, music_track, library_next);
 }
 
 internal void
@@ -702,11 +854,6 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 				// TODO(fakhri): convert to device channel layout
 				assert(channels_count == device_config.channels_count);
 				
-				if (device_config.sample_rate != flac_stream->streaminfo.sample_rate)
-				{
-					
-				}
-				
 				Memory_Checkpoint scratch = get_scratch(0, 0);
 				Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, device_config.sample_rate, scratch.arena);
 				
@@ -757,7 +904,86 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					Mplayer_Music_Track *music_track = mplayer_make_music_track(mplayer);
 					mplayer_push_music_track(mplayer, music_track);
 					music_track->path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(info.name));
-					music_track->name = push_str8_copy(&music_track->arena, info.name);
+					
+					Buffer tmp_file_block = arena_push_buffer(scratch.arena, megabytes(1));
+					File_Handle *file = platform->open_file(music_track->path, make_flag(File_Open_Read));
+					assert(file);
+					if (file)
+					{
+						Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
+						platform->close_file(file);
+						
+						Flac_Stream tmp_flac_stream = ZERO_STRUCT;
+						{
+							tmp_flac_stream.bitstream.buffer = buffer;
+							tmp_flac_stream.bitstream.pos.byte_index = 0;
+							tmp_flac_stream.bitstream.pos.bits_left  = 8;
+						}
+						flac_process_metadata(&tmp_flac_stream, scratch.arena);
+						
+						music_track->album        = str8_lit("***Unkown Album***");
+						music_track->artist       = str8_lit("***Unkown Artist***");
+						music_track->date         = str8_lit("***Unkown Date***");
+						music_track->genre        = str8_lit("***Unkown Gener***");
+						music_track->track_number = str8_lit("-");
+						
+						for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
+							node;
+							node = node->next)
+						{
+							String8 value = ZERO_STRUCT;
+							String8 key = ZERO_STRUCT;
+							for (u32 i = 0; i < node->str.len; i += 1)
+							{
+								if (node->str.str[i] == '=')
+								{
+									key   = prefix8(node->str, i);
+									value = suffix8(node->str, node->str.len - i - 1);
+									break;
+								}
+							}
+							
+							if (false) {}
+							else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+							{
+								music_track->title = str8_copy(&music_track->arena, value);
+							}
+							else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
+							{
+								music_track->album = str8_copy(&music_track->arena, value);
+							}
+							else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
+							{
+								music_track->artist = str8_copy(&music_track->arena, value);
+							}
+							else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
+							{
+								music_track->genre = str8_copy(&music_track->arena, value);
+							}
+							else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
+							{
+								music_track->date = str8_copy(&music_track->arena, value);
+							}
+							else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
+							{
+								music_track->track_number = str8_copy(&music_track->arena, value);
+							}
+						}
+					}
+					
+					if (!music_track->title.len)
+					{
+						music_track->title = str8_copy(&music_track->arena, info.name);
+					}
+					
+					Mplayer_Artist *artist = mplayer_find_or_create_artist(mplayer, music_track->artist);
+					QueuePush_Next(artist->first_music, artist->last_music, music_track, artist_next);
+					artist->music_count += 1;
+					
+					Mplayer_Album *album = mplayer_find_or_create_album(mplayer, artist, music_track->album);
+					QueuePush_Next(album->first_music, album->last_music, music_track, album_next);
+					album->music_count += 1;
+					
 				}
 			}
 		}
@@ -827,9 +1053,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		draw_text_centered_f(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), "%d", u32(1.0f / mplayer->input.frame_dt));
 	}
 	
-	if (mplayer->current_music && !is_music_track_still_playing(mplayer->current_music))
+	if (mplayer->current_music && !is_music_track_still_playing(mplayer->current_music) && mplayer->current_music->library_next)
 	{
-		mplayer_play_music_track(mplayer, mplayer->current_music->next);
+		mplayer_play_music_track(mplayer, mplayer->current_music->library_next);
 	}
 	
 	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
@@ -911,7 +1137,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				
 				// TODO(fakhri): stack of render configs?
 				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
-				draw_text_centered(&group, &mplayer->font, range_center(track_name_rect), vec4(1, 1, 1, 1), mplayer->current_music->name);
+				draw_text_centered(&group, &mplayer->font, range_center(track_name_rect), vec4(1, 1, 1, 1), mplayer->current_music->title);
 				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, screen_rect);
 			}
 		}
@@ -1027,7 +1253,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			
 			Mplayer_Music_Track *music = mplayer->first_music;
 			// NOTE(fakhri): skip until the first visible option 
-			for (music = mplayer->first_music; music; music = music->next)
+			for (music = mplayer->first_music; music; music = music->library_next)
 			{
 				Range2_F32 music_rect = range_center_dim(music_option_pos, music_option_dim);
 				if (is_range_intersect(music_rect, available_space))
@@ -1037,7 +1263,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				music_option_pos.y -= music_option_dim.height;
 			}
 			
-			for (; music; music = music->next)
+			for (; music; music = music->library_next)
 			{
 				Range2_F32 music_rect = range_center_dim(music_option_pos, music_option_dim);
 				if (!is_range_intersect(music_rect, available_space))
@@ -1073,11 +1299,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				
 				Range2_F32_Cut cut = range_cut_left(music_rect, 20); // horizontal padding
 				
-				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, music->name);
+				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, music->title);
 				cut = range_cut_left(cut.right, name_dim.width);
 				
 				Range2_F32 name_rect = cut.left;
-				draw_text_centered(&group, &mplayer->font, range_center(name_rect), vec4(1, 1, 1, 1), music->name);
+				draw_text_centered(&group, &mplayer->font, range_center(name_rect), vec4(1, 1, 1, 1), music->title);
 				
 				music_option_pos.y -= music_option_dim.height;
 			}
