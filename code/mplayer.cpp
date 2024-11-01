@@ -190,7 +190,13 @@ struct Mplayer_Item
 
 enum Mplayer_Mode
 {
-	MODE_Library,
+	Artist_Library,
+	Album_Library,
+	Music_Library,
+	
+	Artist_Albums,
+	Album_Tracks,
+	
 	MODE_Lyrics,
 };
 
@@ -233,6 +239,7 @@ struct Mplayer_Context
 	
 	Mplayer_Item *current_music;
 	Mplayer_Item *selected_artist;
+	Mplayer_Item *selected_album;
 	
 	Mplayer_Filter_Kind filter_kind;
 	
@@ -416,6 +423,7 @@ mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Item *music)
 internal void
 mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 {
+	if (!music_track) return;
 	assert(music_track->kind == Item_Kind_Track);
 	if (mplayer->current_music != music_track)
 	{
@@ -429,6 +437,7 @@ mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 		mplayer_load_music_track(mplayer, music_track);
 		mplayer_music_reset(music_track);
 		mplayer->current_music = music_track;
+		mplayer->play_track = true;
 	}
 }
 
@@ -852,6 +861,17 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u64 id
 internal Mplayer_Item *
 ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items, V2_F32 option_dim, Range2_F32 available_space, Mplayer_Items_Links next_link, V2_F32 padding = vec2(0, 0))
 {
+	for (Mplayer_Input_Event *event = mplayer->input.first_event; event; event = event->next)
+	{
+		if (event->consumed) continue;
+		if (event->kind == Event_Kind_Mouse_Wheel)
+		{
+			event->consumed = true;
+			
+			mplayer->view_target_scroll -= 3.0f * event->scroll.y;
+		}
+	}
+	
 	Mplayer_Item *selected_item = 0;
 	
 	V2_F32 available_space_dim = range_dim(available_space);
@@ -906,6 +926,10 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 		
 		// TODO(fakhri): better id
 		Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, int_from_ptr(item), range_center(visible_range), range_dim(visible_range));
+		if (item == mplayer->current_music)
+		{
+			bg_color = vec4(0.f, 0.f,0.f, 1);
+		}
 		
 		if (interaction.hover)
 		{
@@ -926,12 +950,26 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 				push_rect(ui->group, option_pos, option_dim, bg_color);
 				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->artist);
 				
-				Range2_F32_Cut cut = range_cut_bottom(item_rect, 10); // padding
-				cut = range_cut_bottom(cut.top, 30);
+				Range2_F32_Cut cut = range_cut_top(item_rect, 10); // padding
+				cut = range_cut_top(cut.bottom, 30);
 				
-				Range2_F32 artist_image_rect = cut.top;
-				Range2_F32 artist_name_rect = cut.bottom;
+				Range2_F32 artist_name_rect = cut.top;
+				Range2_F32 artist_image_rect = cut.bottom;
 				draw_text_centered(ui->group, &mplayer->font, range_center(artist_name_rect), vec4(1, 1, 1, 1), item->artist);
+				
+			} break;
+			
+			case Item_Kind_Album:
+			{
+				push_rect(ui->group, option_pos, option_dim, bg_color);
+				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->album);
+				
+				Range2_F32_Cut cut = range_cut_top(item_rect, 10); // padding
+				cut = range_cut_top(cut.bottom, 30);
+				
+				Range2_F32 album_name_rect = cut.top;
+				Range2_F32 album_image_rect = cut.bottom;
+				draw_text_centered(ui->group, &mplayer->font, range_center(album_name_rect), vec4(1, 1, 1, 1), item->album);
 				
 			} break;
 			
@@ -948,11 +986,6 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 				
 				Range2_F32 name_rect = cut.left;
 				draw_text_centered(ui->group, &mplayer->font, range_center(name_rect), vec4(1, 1, 1, 1), item->title);
-				
-			} break;
-			
-			case Item_Kind_Album:
-			{
 				
 			} break;
 		}
@@ -1135,7 +1168,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	mplayer->play_track = 0;
 	mplayer->volume = 1.0f;
 	
-	mplayer->filter_kind = Filter_Song;
+	mplayer->filter_kind = Filter_Artist;
 	mplayer_load_library(mplayer, mplayer->library_path);
 }
 
@@ -1326,7 +1359,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			cut = range_cut_top(cut.bottom, 20);
 			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Library"), range_center(cut.top)).clicked)
 			{
-				mplayer->mode = MODE_Library;
+				mplayer->mode = Artist_Library;
 			}
 		}
 		
@@ -1341,87 +1374,117 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		}
 	}
 	
+	
 	switch (mplayer->mode)
 	{
-		case MODE_Library:
+		case Artist_Library:
 		{
-			available_space = range_cut_top(available_space, 65).bottom;
+			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			Range2_F32 library_header = cut.top;
+			available_space = cut.bottom;
 			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
-			
 			V2_F32 available_space_dim = range_dim(available_space);
-			for (Mplayer_Input_Event *event = mplayer->input.first_event; event; event = event->next)
+			
+			Mplayer_Item *selected_artist = ui_items_list(mplayer, &mplayer->ui, mplayer->artists, 
+				vec2(250, 300), available_space, Links_Library, vec2(10, 10));
+			if (selected_artist)
 			{
-				if (event->consumed) continue;
-				if (event->kind == Event_Kind_Mouse_Wheel)
-				{
-					event->consumed = true;
-					
-					mplayer->view_target_scroll -= 3.0f * event->scroll.y;
-				}
+				mplayer->mode = Artist_Albums;
+				mplayer->selected_artist = selected_artist;
 			}
 			
-			if (mplayer->selected_artist)
+		} break;
+		case Artist_Albums:
+		{
+			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			Range2_F32 library_header = cut.top;
+			available_space = cut.bottom;
+			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
+			V2_F32 available_space_dim = range_dim(available_space);
+			
+			assert(mplayer->selected_artist);
+			Mplayer_Item *selected_album = ui_items_list(mplayer, &mplayer->ui, mplayer->selected_artist->albums, 
+				vec2(250, 300), available_space, Links_Artist, vec2(10, 10));
+			if (selected_album)
 			{
-				
-			}
-			else
-			{
-				switch (mplayer->filter_kind)
-				{
-					case Filter_Song:
-					{
-						Mplayer_Item *selected_track = ui_items_list(mplayer, &mplayer->ui, mplayer->tracks, 
-							vec2(available_space_dim.width, 50), available_space, Links_Library);
-						if (selected_track)
-						{
-							mplayer_play_music_track(mplayer, selected_track);
-							mplayer->play_track = true;
-						}
-					} break;
-					
-					case Filter_Artist:
-					{
-						Mplayer_Item *selected_artist = ui_items_list(mplayer, &mplayer->ui, mplayer->artists, 
-							vec2(250, 300), available_space, Links_Library, vec2(10, 10));
-						if (selected_artist)
-						{
-							mplayer->selected_artist = selected_artist;
-						}
-					} break;
-					
-					case Filter_Album:
-					{
-						
-					} break;
-					
-				}
+				mplayer->mode = Album_Tracks;
+				mplayer->selected_album = selected_album;
 			}
 			
+		} break;
+		
+		case Album_Tracks:
+		{
+			Range2_F32_Cut cut = range_cut_top(available_space, 65);
 			
-			// NOTE(fakhri): animate scroll
+			Range2_F32 library_header = cut.top;
+			available_space = cut.bottom;
+			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
+			V2_F32 available_space_dim = range_dim(available_space);
+			
+			assert(mplayer->selected_album);
+			Mplayer_Item *selected_track = ui_items_list(mplayer, &mplayer->ui, mplayer->selected_album->tracks, 
+				vec2(available_space_dim.width, 50), available_space, Links_Album);
+			mplayer_play_music_track(mplayer, selected_track);
+		} break;
+		
+		
+		case Album_Library:
+		{
+			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			Range2_F32 library_header = cut.top;
+			available_space = cut.bottom;
+			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
+			V2_F32 available_space_dim = range_dim(available_space);
+			
+			Mplayer_Item *selected_album = ui_items_list(mplayer, &mplayer->ui, mplayer->albums, 
+				vec2(250, 300), available_space, Links_Artist, vec2(10, 10));
+			if (selected_album)
 			{
-				f32 dt = mplayer->input.frame_dt;
-				f32 current_scroll = mplayer->view_scroll;
-				f32 target_scroll  = mplayer->view_target_scroll;
-				f32 scroll_speed  = mplayer->view_scroll_speed;
-				
-				f32 freq = 5.0f;
-				f32 zeta = 1.f;
-				
-				f32 K1 = zeta / (PI32 * freq);
-				f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
-				
-				f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
-				mplayer->view_scroll_speed += dt * scroll_accel;
-				mplayer->view_scroll += dt * mplayer->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
+				mplayer->mode = Album_Tracks;
+				mplayer->selected_album = selected_album;
 			}
 			
+		} break;
+		case Music_Library:
+		{
+			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			Range2_F32 library_header = cut.top;
+			available_space = cut.bottom;
+			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
+			V2_F32 available_space_dim = range_dim(available_space);
+			
+			Mplayer_Item *selected_track = ui_items_list(mplayer, &mplayer->ui, mplayer->tracks, 
+				vec2(available_space_dim.width, 50), available_space, Links_Album);
+			mplayer_play_music_track(mplayer, selected_track);
 		} break;
 		
 		case MODE_Lyrics:
 		{
 			draw_text_centered(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), str8_lit("Lyrics not available"));
 		} break;
+	}
+	
+	// NOTE(fakhri): animate scroll
+	{
+		f32 dt = mplayer->input.frame_dt;
+		f32 current_scroll = mplayer->view_scroll;
+		f32 target_scroll  = mplayer->view_target_scroll;
+		f32 scroll_speed  = mplayer->view_scroll_speed;
+		
+		f32 freq = 5.0f;
+		f32 zeta = 1.f;
+		
+		f32 K1 = zeta / (PI32 * freq);
+		f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
+		
+		f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
+		mplayer->view_scroll_speed += dt * scroll_accel;
+		mplayer->view_scroll += dt * mplayer->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
 	}
 	
 	#if 0
