@@ -1145,6 +1145,41 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 	}
 }
 
+internal String8
+mplayer_attempt_find_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *arena, String8 dir)
+{
+	String8 result = ZERO_STRUCT;
+	Memory_Checkpoint scratch = begin_scratch(&arena, 1);
+	File_Iterator_Handle *it = m_arena_push_struct(scratch.arena, File_Iterator_Handle);
+	if (mplayer->os.file_iter_begin(it, dir))
+	{
+		for (;;)
+		{
+			Memory_Checkpoint tmp_mem = m_checkpoint_begin(scratch.arena);
+			File_Info info = mplayer->os.file_iter_next(it, tmp_mem.arena);
+			if (!has_flag(info.flags, FileFlag_Valid))
+			{
+				break;
+			}
+			
+			if (!has_flag(info.flags, FileFlag_Directory))
+			{
+				if (str8_ends_with(info.name, str8_lit(".jpg"), MatchFlag_CaseInsensitive)  ||
+					str8_ends_with(info.name, str8_lit(".jpeg"), MatchFlag_CaseInsensitive) ||
+					str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)
+				)
+				{
+					result = str8_copy(arena, info.name);
+					break;
+				}
+			}
+		}
+		
+		mplayer->os.file_iter_end(it);
+	}
+	return result;
+}
+
 internal void
 mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 {
@@ -1265,8 +1300,14 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					{
 						// TODO(fakhri): check if we got an image in the current directory, if we do, use that as the cover image,
 						// if we don't have an image in the current directory check if the current track has a cover image and use that
-						
-						if (tmp_flac_stream.front_cover)
+						String8 cover_file_name = mplayer_attempt_find_image_in_dir(mplayer, scratch.arena, library_path);
+						if (cover_file_name.len)
+						{
+							String8 cover_file_path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(cover_file_name));
+							album->texture_data = platform->load_entire_file(cover_file_path, &album->arena);
+							album->texture = ZERO_STRUCT;
+						}
+						else if (tmp_flac_stream.front_cover)
 						{
 							Flac_Picture *front_cover = tmp_flac_stream.front_cover;
 							album->texture_data = clone_buffer(&album->arena, front_cover->buffer);
