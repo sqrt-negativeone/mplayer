@@ -25,6 +25,17 @@ arena_push_buffer(Memory_Arena *arena, u64 size)
 	return result;
 }
 
+internal Buffer
+clone_buffer(Memory_Arena *arena, Buffer buffer)
+{
+	Buffer result = arena_push_buffer(arena, buffer.size);
+	if (result.size)
+	{
+		memory_copy(result.data, buffer.data, result.size);
+	}
+	return result;
+}
+
 internal String8
 to_string(Buffer buffer)
 {

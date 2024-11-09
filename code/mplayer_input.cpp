@@ -93,6 +93,8 @@ enum Mplayer_Input_Key_Kind
   Key_LeftMouse,
   Key_MiddleMouse,
   Key_RightMouse,
+  Key_Mouse_M4,
+  Key_Mouse_M5,
   
 	Key_COUNT,
 };

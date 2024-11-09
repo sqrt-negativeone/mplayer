@@ -168,6 +168,10 @@ struct Mplayer_Item
 	Memory_Arena arena;
 	String8 path;
 	
+	// NOTE(fakhri): for cover and artist picture if we have it
+	Buffer texture_data;
+	Texture texture;
+	
 	Memory_Arena transient_arena;
 	Flac_Stream *flac_stream;
 	b32 file_loaded;
@@ -182,29 +186,30 @@ struct Mplayer_Item
 	
 	u64 hash;
 	
-	Texture cover_texture;
-	
+	Mplayer_Item *album_ref;
+	Mplayer_Item *artist_ref;
 	Mplayer_Items_List tracks;
 	Mplayer_Items_List albums;
 };
 
 enum Mplayer_Mode
 {
-	Artist_Library,
-	Album_Library,
-	Music_Library,
+	MODE_Music_Library,
+	MODE_Artist_Library,
+	MODE_Album_Library,
 	
-	Artist_Albums,
-	Album_Tracks,
+	MODE_Artist_Albums,
+	MODE_Album_Tracks,
 	
 	MODE_Lyrics,
 };
 
-enum Mplayer_Filter_Kind
+struct Mplayer_Mode_Stack
 {
-	Filter_Song,
-	Filter_Artist,
-	Filter_Album,
+	Mplayer_Mode_Stack *next;
+	Mplayer_Mode_Stack *prev;
+	Mplayer_Mode mode;
+	Mplayer_Item *item;
 };
 
 struct Mplayer_Context
@@ -218,8 +223,10 @@ struct Mplayer_Context
 	b32 play_track;
 	
 	Mplayer_Font timestamp_font;
+	Mplayer_Font header_label_font;
 	Mplayer_Font font;
 	Mplayer_Font debug_font;
+	Mplayer_Font big_debug_font;
 	f32 volume;
 	f32 seek_percentage;
 	
@@ -227,7 +234,10 @@ struct Mplayer_Context
 	
 	Mplayer_OS_Vtable os;
 	
-	Mplayer_Mode mode;
+	Mplayer_Mode_Stack *mode_stack;
+	Mplayer_Mode_Stack *mode_stack_free_list_first;
+	Mplayer_Mode_Stack *mode_stack_free_list_last;
+	// Mplayer_Mode mode;
 	
 	f32 view_scroll;
 	f32 view_scroll_speed;
@@ -241,8 +251,7 @@ struct Mplayer_Context
 	Mplayer_Item *selected_artist;
 	Mplayer_Item *selected_album;
 	
-	Mplayer_Filter_Kind filter_kind;
-	
+	f32 track_name_hover_t;
 };
 
 internal u64
@@ -291,11 +300,13 @@ mplayer_find_or_create_album(Mplayer_Context *mplayer, Mplayer_Item *artist, Str
 	{
 		result = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Item);
 		result->album = str8_copy(&mplayer->main_arena, album_name);
+		result->artist = str8_copy(&mplayer->main_arena, artist->artist);
 		result->hash = hash;
 		
 		QueuePush_Next(artist->albums.first, artist->albums.last, result, next_links[Links_Artist]);
 		QueuePush_Next(mplayer->albums.first, mplayer->albums.last, result, next_links[Links_Library]);
 		
+		result->artist_ref = artist;
 		artist->albums.count += 1;
 		mplayer->albums.count += 1;
 	}
@@ -401,7 +412,7 @@ mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 		if (music_track->flac_stream->front_cover)
 		{
 			Flac_Picture *front_cover = music_track->flac_stream->front_cover;
-			music_track->cover_texture = mplayer_load_texture(mplayer, front_cover->buffer);
+			music_track->texture = mplayer_load_texture(mplayer, front_cover->buffer);
 		}
 	}
 }
@@ -417,7 +428,7 @@ mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Item *music)
 	music->flac_file_buffer = ZERO_STRUCT;
 	
 	// TODO(fakhri): delete texture from gpu memory!
-	music->cover_texture = ZERO_STRUCT;
+	music->texture = ZERO_STRUCT;
 }
 
 internal void
@@ -583,18 +594,77 @@ font_compute_text_dim(Mplayer_Font *font, String8 text)
 	return result;
 }
 
-internal void
-draw_text(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, String8 text)
+enum Text_Render_Flags
 {
+	Text_Render_Flag_Centered,
+	Text_Render_Flag_Limit_Width,
+	Text_Render_Flag_Underline,
+};
+
+#define Text_Render_Flag_Centered_Bit    make_flag(Text_Render_Flag_Centered)
+#define Text_Render_Flag_Limit_Width_Bit make_flag(Text_Render_Flag_Limit_Width)
+#define Text_Render_Flag_Underline_Bit   make_flag(Text_Render_Flag_Underline)
+
+struct Fancy_String8
+{
+	String8 text;
+	f32 max_width;
+	f32 underline_thickness;
+};
+
+#define fancy_str8_lit(str) fancy_str8(str8_lit(str))
+
+internal Fancy_String8
+fancy_str8(String8 text, f32 max_width = 0, f32 underline_thickness = 0)
+{
+	Fancy_String8 result = ZERO_STRUCT;
+	result.text = text;
+	result.max_width = max_width;
+	result.underline_thickness = underline_thickness;
+	return result;
+}
+
+internal V3_F32
+draw_text(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, Fancy_String8 string, u32 flags = 0)
+{
+	f32 current_width = 0;
+	b32 width_overflow = 0;
+	
+	f32 max_width = string.max_width;
+	V2_F32 text_dim = font_compute_text_dim(font, string.text);
+	
+	if (has_flag(flags, Text_Render_Flag_Limit_Width))
+	{
+		if (text_dim.width > max_width)
+		{
+			text_dim.width = max_width;
+			width_overflow = 1;
+			Mplayer_Glyph glyph = font_get_glyph_from_char(font, '.');
+			max_width -= 3 * glyph.dim.width;
+			max_width = MAX(max_width, 0.0f);
+		}
+	}
+	
+	if (has_flag(flags, Text_Render_Flag_Centered))
+	{
+		pos.x -= 0.5f * text_dim.width;
+		pos.y -= 0.25f * text_dim.height;
+	}
+	
+	
 	// NOTE(fakhri): render the text
 	V3_F32 text_pt = vec3(pos, 0);
 	for (u32 offset = 0;
-		offset < text.len;
+		offset < string.text.len;
 		offset += 1)
 	{
-		u8 ch = text.str[offset];
+		u8 ch = string.text.str[offset];
 		// TODO(fakhri): utf8 support
 		Mplayer_Glyph glyph = font_get_glyph_from_char(font, ch);
+		if (has_flag(flags, Text_Render_Flag_Limit_Width) && current_width + glyph.dim.width > max_width)
+		{
+			break;
+		}
 		V3_F32 glyph_p = vec3(text_pt.xy + (glyph.offset), 0);
 		push_image(group, 
 			glyph_p, 
@@ -605,41 +675,39 @@ draw_text(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, Str
 			glyph.uv_scale, 
 			glyph.uv_offset);
 		
+		if (has_flag(flags, Text_Render_Flag_Underline))
+		{
+			V2_F32 underline_dim = vec2(glyph.advance + 0.25f * glyph.dim.width, string.underline_thickness);
+			V3_F32 underline_pos = vec3(glyph_p.x, text_pt.y - 5.0f, text_pt.z);
+			push_rect(group, underline_pos, underline_dim, color);
+		}
 		text_pt.x += glyph.advance;
 	}
-}
-
-internal void
-draw_text_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, const char *fmt, ...)
-{
-	Memory_Checkpoint scratch = get_scratch(0, 0);
-	va_list args;
-	va_start(args, fmt);
-	String8 text = str8_fv(scratch.arena, fmt, args);
-	va_end(args);
 	
-	draw_text(group, font, pos, color, text);
+	if (width_overflow)
+	{
+		draw_text(group, font, text_pt.xy, color, fancy_str8_lit("..."));
+	}
+	
+	return text_pt;
 }
 
 internal void
-draw_text_centered(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, String8 text)
+draw_text_left_side_fixed_width(Render_Group *group, Mplayer_Font *font, Range2_F32 range, V4_F32 color, String8 text, b32 should_underline = 0, f32 underline_thickness = 0)
 {
 	V2_F32 text_dim = font_compute_text_dim(font, text);
-	pos.x -= 0.5f * text_dim.width;
-	pos.y -= 0.25f * text_dim.height;
-	draw_text(group, font, pos, color, text);
-}
-
-internal void
-draw_text_centered_f(Render_Group *group, Mplayer_Font *font, V2_F32 pos, V4_F32 color, const char *fmt, ...)
-{
-	Memory_Checkpoint scratch = get_scratch(0, 0);
-	va_list args;
-	va_start(args, fmt);
-	String8 text = str8_fv(scratch.arena, fmt, args);
-	va_end(args);
 	
-	draw_text_centered(group, font, pos, color, text);
+	u32 flags = Text_Render_Flag_Limit_Width_Bit;
+	if (should_underline)
+	{
+		flags |= Text_Render_Flag_Underline_Bit;
+	}
+	
+	Fancy_String8 string = fancy_str8(text, range_dim(range).width, underline_thickness);
+	draw_text(group, font, 
+		vec2(range.min_x, range_center(range).y - 0.25f * text_dim.height), 
+		color, 
+		string, flags);
 }
 
 internal void
@@ -854,7 +922,7 @@ _ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u64 id
 	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
 	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
 	push_rect(ui->group, pos, final_button_dim, button_bg_color);
-	draw_text_centered(ui->group, font, pos, text_color, text);
+	draw_text(ui->group, font, pos, text_color, fancy_str8(text), Text_Render_Flag_Centered_Bit);
 	return interaction;
 }
 
@@ -868,7 +936,7 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 		{
 			event->consumed = true;
 			
-			mplayer->view_target_scroll -= 3.0f * event->scroll.y;
+			mplayer->view_target_scroll -= event->scroll.y;
 		}
 	}
 	
@@ -924,29 +992,24 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 			break;
 		}
 		
-		// TODO(fakhri): better id
-		Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, int_from_ptr(item), range_center(visible_range), range_dim(visible_range));
-		if (item == mplayer->current_music)
-		{
-			bg_color = vec4(0.f, 0.f,0.f, 1);
-		}
-		
-		if (interaction.hover)
-		{
-			bg_color = vec4(0.2f, 0.2f,0.2f, 1);
-		}
-		
-		if (interaction.pressed)
-		{
-			bg_color = vec4(0.14f, 0.14f,0.14f, 1);
-			
-			selected_item = item;
-		}
-		
 		switch (item->kind)
 		{
 			case Item_Kind_Artist:
 			{
+				// TODO(fakhri): better id
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, int_from_ptr(item), range_center(visible_range), range_dim(visible_range));
+				
+				if (interaction.hover)
+				{
+					bg_color = vec4(0.2f, 0.2f,0.2f, 1);
+				}
+				
+				if (interaction.pressed)
+				{
+					bg_color = vec4(0.14f, 0.14f,0.14f, 1);
+					selected_item = item;
+				}
+				
 				push_rect(ui->group, option_pos, option_dim, bg_color);
 				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->artist);
 				
@@ -955,13 +1018,41 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 				
 				Range2_F32 artist_name_rect = cut.top;
 				Range2_F32 artist_image_rect = cut.bottom;
-				draw_text_centered(ui->group, &mplayer->font, range_center(artist_name_rect), vec4(1, 1, 1, 1), item->artist);
+				draw_text(ui->group, &mplayer->font, range_center(artist_name_rect), vec4(1, 1, 1, 1), fancy_str8(item->artist), Text_Render_Flag_Centered_Bit);
 				
 			} break;
 			
 			case Item_Kind_Album:
 			{
-				push_rect(ui->group, option_pos, option_dim, bg_color);
+				bg_color = vec4(1, 1, 1, 0.35f);
+				
+				// TODO(fakhri): better id
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, int_from_ptr(item), range_center(visible_range), range_dim(visible_range));
+				
+				if (interaction.hover)
+				{
+					bg_color.a = 0.80f;
+				}
+				
+				if (interaction.pressed)
+				{
+					bg_color.a = 0;
+					selected_item = item;
+				}
+				
+				if (!is_texture_valid(item->texture))
+				{
+					push_rect(ui->group, option_pos, option_dim, bg_color);
+					if (item->texture_data.size)
+					{
+						item->texture = mplayer_load_texture(mplayer, item->texture_data);
+					}
+				}
+				else
+				{
+					push_image(ui->group, option_pos, option_dim, item->texture, bg_color);
+				}
+				
 				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->album);
 				
 				Range2_F32_Cut cut = range_cut_top(item_rect, 10); // padding
@@ -969,24 +1060,40 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 				
 				Range2_F32 album_name_rect = cut.top;
 				Range2_F32 album_image_rect = cut.bottom;
-				draw_text_centered(ui->group, &mplayer->font, range_center(album_name_rect), vec4(1, 1, 1, 1), item->album);
+				draw_text(ui->group, &mplayer->font, range_center(album_name_rect), vec4(1, 1, 1, 1), fancy_str8(item->album), Text_Render_Flag_Centered_Bit);
 				
 			} break;
 			
 			case Item_Kind_Track:
 			{
+				// TODO(fakhri): better id
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, int_from_ptr(item), range_center(visible_range), range_dim(visible_range));
+				if (item == mplayer->current_music)
+				{
+					bg_color = vec4(0.f, 0.f,0.f, 1);
+				}
+				
+				if (interaction.hover)
+				{
+					bg_color = vec4(0.2f, 0.2f,0.2f, 1);
+				}
+				
+				if (interaction.pressed)
+				{
+					bg_color = vec4(0.14f, 0.14f,0.14f, 1);
+					selected_item = item;
+				}
+				
 				// NOTE(fakhri): background
 				push_rect(ui->group, option_pos, option_dim, bg_color);
-				draw_outline(ui->group, option_pos, option_dim, 1, vec4(0, 0, 0, 1));
 				
 				Range2_F32_Cut cut = range_cut_left(item_rect, 20); // horizontal padding
 				
-				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->title);
-				cut = range_cut_left(cut.right, name_dim.width);
-				
+				cut = range_cut_left(cut.right, 500);
 				Range2_F32 name_rect = cut.left;
-				draw_text_centered(ui->group, &mplayer->font, range_center(name_rect), vec4(1, 1, 1, 1), item->title);
+				draw_text(ui->group, &mplayer->font, vec2(name_rect.min_x, range_center(name_rect).y), vec4(1, 1, 1, 1), fancy_str8(item->title, range_dim(name_rect).width), Text_Render_Flag_Limit_Width_Bit);
 				
+				draw_outline(ui->group, option_pos, option_dim, 1, vec4(0, 0, 0, 1));
 			} break;
 		}
 		
@@ -1074,13 +1181,14 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					
 					Buffer tmp_file_block = arena_push_buffer(scratch.arena, megabytes(1));
 					File_Handle *file = platform->open_file(music_track->path, make_flag(File_Open_Read));
+					Flac_Stream tmp_flac_stream = ZERO_STRUCT;
 					assert(file);
 					if (file)
 					{
 						Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
 						platform->close_file(file);
 						
-						Flac_Stream tmp_flac_stream = ZERO_STRUCT;
+						// NOTE(fakhri): init flac stream
 						{
 							tmp_flac_stream.bitstream.buffer = buffer;
 							tmp_flac_stream.bitstream.pos.byte_index = 0;
@@ -1146,11 +1254,25 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					Mplayer_Item *artist = mplayer_find_or_create_artist(mplayer, music_track->artist);
 					QueuePush_Next(artist->tracks.first, artist->tracks.last, music_track, next_links[Links_Artist]);
 					artist->tracks.count += 1;
+					music_track->artist_ref = artist;
 					
 					Mplayer_Item *album = mplayer_find_or_create_album(mplayer, artist, music_track->album);
 					QueuePush_Next(album->tracks.first, album->tracks.last, music_track, next_links[Links_Album]);
 					album->tracks.count += 1;
 					
+					music_track->album_ref = album;
+					if (!album->texture_data.size)
+					{
+						// TODO(fakhri): check if we got an image in the current directory, if we do, use that as the cover image,
+						// if we don't have an image in the current directory check if the current track has a cover image and use that
+						
+						if (tmp_flac_stream.front_cover)
+						{
+							Flac_Picture *front_cover = tmp_flac_stream.front_cover;
+							album->texture_data = clone_buffer(&album->arena, front_cover->buffer);
+							album->texture = ZERO_STRUCT;
+						}
+					}
 				}
 			}
 		}
@@ -1160,16 +1282,121 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 }
 
 internal void
+mplayer_change_previous_mode(Mplayer_Context *mplayer)
+{
+	if (mplayer->mode_stack && mplayer->mode_stack->prev)
+	{
+		mplayer->mode_stack = mplayer->mode_stack->prev;
+		switch(mplayer->mode_stack->mode)
+		{
+			case MODE_Music_Library: break;
+			case MODE_Artist_Library: break;
+			case MODE_Album_Library: break;
+			
+			case MODE_Artist_Albums:
+			{
+				assert(mplayer->mode_stack->item);
+				assert(mplayer->mode_stack->item->kind == Item_Kind_Artist);
+				
+				mplayer->selected_artist = mplayer->mode_stack->item;
+			} break;
+			case MODE_Album_Tracks:
+			{
+				assert(mplayer->mode_stack->item);
+				assert(mplayer->mode_stack->item->kind == Item_Kind_Album);
+				
+				mplayer->selected_album = mplayer->mode_stack->item;
+			} break;
+			
+			case MODE_Lyrics: break;
+		}
+	}
+}
+
+internal void
+mplayer_change_next_mode(Mplayer_Context *mplayer)
+{
+	if (mplayer->mode_stack && mplayer->mode_stack->next)
+	{
+		mplayer->mode_stack = mplayer->mode_stack->next;
+		
+		switch(mplayer->mode_stack->mode)
+		{
+			case MODE_Music_Library: break;
+			case MODE_Artist_Library: break;
+			case MODE_Album_Library: break;
+			
+			case MODE_Artist_Albums:
+			{
+				assert(mplayer->mode_stack->item);
+				assert(mplayer->mode_stack->item->kind == Item_Kind_Artist);
+				
+				mplayer->selected_artist = mplayer->mode_stack->item;
+			} break;
+			case MODE_Album_Tracks:
+			{
+				assert(mplayer->mode_stack->item);
+				assert(mplayer->mode_stack->item->kind == Item_Kind_Album);
+				
+				mplayer->selected_album = mplayer->mode_stack->item;
+			} break;
+			
+			case MODE_Lyrics: break;
+		}
+	}
+}
+
+internal void
+mplayer_change_mode(Mplayer_Context *mplayer, Mplayer_Mode new_mode, Mplayer_Item *item)
+{
+	if (mplayer->mode_stack && mplayer->mode_stack->next)
+	{
+		QueuePush(mplayer->mode_stack_free_list_first, mplayer->mode_stack_free_list_last, mplayer->mode_stack->next);
+		mplayer->mode_stack->next = 0;
+	}
+	
+	Mplayer_Mode_Stack *new_mode_node = 0;
+	if (mplayer->mode_stack_free_list_first)
+	{
+		new_mode_node = mplayer->mode_stack_free_list_first;
+		QueuePop(mplayer->mode_stack_free_list_first, mplayer->mode_stack_free_list_last);
+	}
+	
+	if (!new_mode_node)
+	{
+		new_mode_node = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Mode_Stack);
+	}
+	
+	new_mode_node->mode = new_mode;
+	new_mode_node->item = item;
+	
+	new_mode_node->prev = mplayer->mode_stack;
+	if (mplayer->mode_stack)
+	{
+		mplayer->mode_stack->next = new_mode_node;
+	}
+	mplayer->mode_stack = new_mode_node;
+	
+	mplayer->view_target_scroll = 0;
+	mplayer->view_scroll = 0;
+	
+	mplayer->ui.active_widget_id = 0;
+	mplayer->ui.hot_widget_id = 0;
+}
+
+internal void
 mplayer_initialize(Mplayer_Context *mplayer)
 {
-	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 30);
+	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 20);
 	load_font(mplayer, &mplayer->debug_font, str8_lit("data/fonts/arial.ttf"), 20);
+	load_font(mplayer, &mplayer->big_debug_font, str8_lit("data/fonts/arial.ttf"), 50);
 	load_font(mplayer, &mplayer->timestamp_font, str8_lit("data/fonts/arial.ttf"), 20);
+	load_font(mplayer, &mplayer->header_label_font, str8_lit("data/fonts/arial.ttf"), 40);
 	mplayer->play_track = 0;
 	mplayer->volume = 1.0f;
 	
-	mplayer->filter_kind = Filter_Artist;
 	mplayer_load_library(mplayer, mplayer->library_path);
+	mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
 }
 
 struct Mplayer_Timestamp
@@ -1218,12 +1445,25 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
 		fps_pos.x -= 20;
 		fps_pos.y -= 15;
-		draw_text_centered_f(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), "%d", u32(1.0f / mplayer->input.frame_dt));
+		Memory_Checkpoint scratch = get_scratch(0, 0);
+		draw_text(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), 
+			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
+			Text_Render_Flag_Centered_Bit);
 	}
 	
 	if (mplayer->current_music && !is_music_track_still_playing(mplayer->current_music) && mplayer->current_music->next_links[Links_Library])
 	{
 		mplayer_play_music_track(mplayer, mplayer->current_music->next_links[Links_Library]);
+	}
+	
+	if (mplayer_button_clicked(&mplayer->input, Key_Mouse_M4))
+	{
+		mplayer_change_previous_mode(mplayer);
+	}
+	
+	if (mplayer_button_clicked(&mplayer->input, Key_Mouse_M5))
+	{
+		mplayer_change_next_mode(mplayer);
 	}
 	
 	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
@@ -1237,7 +1477,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		Range2_F32_Cut cut = range_cut_bottom(available_space, 125);
 		available_space = cut.top;
 		
-		push_rect(&group, range_center(cut.bottom), range_dim(cut.bottom), vec4(0.05f, 0.05f, 0.05f, 1.0f));
+		V4_F32 track_control_bg_color = vec4(0.05f, 0.05f, 0.05f, 1.0f);
+		push_rect(&group, range_center(cut.bottom), range_dim(cut.bottom), track_control_bg_color);
 		
 		// NOTE(fakhri): padding
 		cut = range_cut_top(cut.bottom, 10);
@@ -1255,7 +1496,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				Range2_F32 timestamp_rect = range_cut_right(cut2.left, 100).right;
 				Mplayer_Timestamp current_timestamp = ZERO_STRUCT;
 				if (current_music) current_timestamp = flac_get_current_timestap(current_music->flac_stream);
-				draw_text_centered_f(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
+				
+				Memory_Checkpoint scratch = get_scratch(0, 0);
+				String8 timestamp_string = str8_f(scratch.arena, "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
+				draw_text(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), 
+					fancy_str8(timestamp_string),
+					Text_Render_Flag_Centered_Bit);
 			}
 			
 			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
@@ -1299,14 +1545,56 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				Range2_F32 cover_rect      = cut2.left;
 				Range2_F32 track_name_rect = cut2.right;
 				
-				if (is_texture_valid(mplayer->current_music->cover_texture))
+				if (is_texture_valid(mplayer->current_music->texture))
 				{
-					push_image(&group, range_center(cover_rect), range_dim(cover_rect), mplayer->current_music->cover_texture);
+					push_image(&group, range_center(cover_rect), range_dim(cover_rect), mplayer->current_music->texture);
 				}
 				
 				// TODO(fakhri): stack of render configs?
 				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
-				draw_text_centered(&group, &mplayer->font, range_center(track_name_rect), vec4(1, 1, 1, 1), mplayer->current_music->title);
+				
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, __LINE__, range_center(track_name_rect), range_dim(track_name_rect));
+				V4_F32 title_rect_color = track_control_bg_color;
+				if (interaction.hover)
+				{
+					title_rect_color = vec4(0.1f, 0.1f, 0.1f, 1.0f);
+				}
+				
+				if (interaction.pressed)
+				{
+					title_rect_color = vec4(0.0f, 0.f, 0.f, 1.0f);
+				}
+				
+				if (interaction.clicked)
+				{
+					if (mplayer->current_music->album_ref)
+					{
+						mplayer->selected_album = mplayer->current_music->album_ref;
+						mplayer_change_mode(mplayer, MODE_Album_Tracks, mplayer->selected_album);
+					}
+				}
+				
+				V2_F32 track_name_center = range_center(track_name_rect); 
+				V2_F32 track_name_dim = range_dim(track_name_rect); 
+				push_rect(&group, track_name_center, track_name_dim, title_rect_color);
+				
+				V2_F32 text_pos = vec2(5 + track_name_rect.min_x, track_name_center.y);
+				f32 text_width = font_compute_text_dim(&mplayer->font, mplayer->current_music->title).width;
+				
+				if (interaction.hover && text_width > track_name_dim.width)
+				{
+					mplayer->track_name_hover_t += mplayer->input.frame_dt;
+					
+					text_pos.x -= 10 * PI32 * mplayer->track_name_hover_t;
+					draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(mplayer->current_music->title));
+					text_pos.x += text_width + 10;
+				}
+				else
+				{
+					mplayer->track_name_hover_t = 0;
+				}
+				
+				draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(mplayer->current_music->title));
 				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, screen_rect);
 			}
 		}
@@ -1357,29 +1645,70 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		cut = range_cut_top(cut.left, 30);
 		{
 			cut = range_cut_top(cut.bottom, 20);
-			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Library"), range_center(cut.top)).clicked)
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Songs"), range_center(cut.top)).clicked)
 			{
-				mplayer->mode = Artist_Library;
+				if (mplayer->mode_stack->mode != MODE_Music_Library)
+					mplayer_change_mode(mplayer, MODE_Music_Library, 0);
+			}
+		}
+		
+		// NOTE(fakhri): Library button  
+		cut = range_cut_top(cut.bottom, 20);
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Artists"), range_center(cut.top)).clicked)
+			{
+				if (mplayer->mode_stack->mode != MODE_Artist_Library)
+					mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
+			}
+		}
+		
+		// NOTE(fakhri): Library button  
+		cut = range_cut_top(cut.bottom, 20);
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Album"), range_center(cut.top)).clicked)
+			{
+				if (mplayer->mode_stack->mode != MODE_Album_Library)
+					mplayer_change_mode(mplayer, MODE_Album_Library, 0);
 			}
 		}
 		
 		// NOTE(fakhri):  button  
-		cut = range_cut_top(cut.bottom, 30);
+		cut = range_cut_top(cut.bottom, 20);
 		{
 			cut = range_cut_top(cut.bottom, 20);
 			if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Lyrics"), range_center(cut.top)).clicked)
 			{
-				mplayer->mode = MODE_Lyrics;
+				mplayer_change_mode(mplayer, MODE_Lyrics, 0);
 			}
 		}
 	}
 	
 	
-	switch (mplayer->mode)
+	// TODO(fakhri): buttons to play all artist songs
+	// TODO(fakhri): search bar
+	
+	V4_F32 header_bg_color = vec4(0.05f, 0.05f, 0.05f, 1.0f);
+	switch (mplayer->mode_stack->mode)
 	{
-		case Artist_Library:
+		case MODE_Artist_Library:
 		{
 			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			// NOTE(fakhri): header
+			{
+				Range2_F32 header = cut.top;
+				push_rect(&group, range_center(header), range_dim(header), header_bg_color);
+				
+				String8 artist_label = str8_lit("Artists");
+				f32 artist_label_width = font_compute_text_dim(&mplayer->header_label_font, artist_label).width;
+				Range2_F32_Cut cut2 = range_cut_left(header, 50); // padding
+				cut2 = range_cut_left(cut2.right, artist_label_width + 10);
+				
+				Range2_F32 label_rect = cut2.left;
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(artist_label), Text_Render_Flag_Centered_Bit);
+			}
 			
 			Range2_F32 library_header = cut.top;
 			available_space = cut.bottom;
@@ -1387,53 +1716,178 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			V2_F32 available_space_dim = range_dim(available_space);
 			
 			Mplayer_Item *selected_artist = ui_items_list(mplayer, &mplayer->ui, mplayer->artists, 
-				vec2(250, 300), available_space, Links_Library, vec2(10, 10));
+				vec2(350, 300), available_space, Links_Library, vec2(10, 10));
 			if (selected_artist)
 			{
-				mplayer->mode = Artist_Albums;
 				mplayer->selected_artist = selected_artist;
+				mplayer_change_mode(mplayer, MODE_Artist_Albums, selected_artist);
 			}
 			
 		} break;
-		case Artist_Albums:
+		case MODE_Artist_Albums:
 		{
-			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			assert(mplayer->selected_artist);
+			
+			f32 header_height = 65;
+			Range2_F32_Cut cut = range_cut_top(available_space, header_height);
+			
+			// NOTE(fakhri): header
+			{
+				Range2_F32 header = cut.top;
+				push_rect(&group, range_center(header), range_dim(header), header_bg_color);
+				Range2_F32_Cut cut2 = range_cut_left(header, 50); // padding
+				
+				cut2 = range_cut_left(cut2.right, 500);
+				draw_text_left_side_fixed_width(&group, &mplayer->header_label_font, cut2.left, vec4(1, 1, 1, 1), mplayer->selected_artist->artist);
+			}
 			
 			Range2_F32 library_header = cut.top;
 			available_space = cut.bottom;
 			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
 			V2_F32 available_space_dim = range_dim(available_space);
 			
-			assert(mplayer->selected_artist);
 			Mplayer_Item *selected_album = ui_items_list(mplayer, &mplayer->ui, mplayer->selected_artist->albums, 
-				vec2(250, 300), available_space, Links_Artist, vec2(10, 10));
+				vec2(350, 300), available_space, Links_Artist, vec2(10, 10));
 			if (selected_album)
 			{
-				mplayer->mode = Album_Tracks;
 				mplayer->selected_album = selected_album;
+				mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album);
 			}
-			
 		} break;
 		
-		case Album_Tracks:
+		case MODE_Album_Tracks:
 		{
-			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			assert(mplayer->selected_album);
+			f32 header_height = 200;
+			Range2_F32_Cut cut = range_cut_top(available_space, header_height);
 			
-			Range2_F32 library_header = cut.top;
+			// NOTE(fakhri): header
+			{
+				Range2_F32 header = cut.top;
+				push_rect(&group, range_center(header), range_dim(header), header_bg_color);
+				Range2_F32_Cut cut2 = range_cut_left(header, 10); // padding
+				
+				// NOTE(fakhri): album cover
+				{
+					cut2 = range_cut_left(cut2.right, header_height);
+					Range2_F32 cover_rect = cut2.left;
+					
+					if (!is_texture_valid(mplayer->selected_album->texture))
+					{
+						push_rect(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), vec4(0.2f, 0.2f, 0.2f, 1.0f), 10);
+						if (mplayer->selected_album->texture_data.size)
+						{
+							mplayer->selected_album->texture = mplayer_load_texture(mplayer, mplayer->selected_album->texture_data);
+						}
+					}
+					else
+					{
+						push_image(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), mplayer->selected_album->texture, vec4(1,1,1,1), 10);
+					}
+				}
+				
+				// NOTE(fakhri): Album information region
+				{
+					cut2 = range_cut_left(cut2.right, 500); // info region
+					Range2_F32 info_region = cut2.left;
+					
+					Range2_F32_Cut cut3 = range_cut_top(info_region, 30); // padding
+					
+					// NOTE(fakhri): "Album" label
+					{
+						cut3 = range_cut_top(cut3.bottom, 20);
+						draw_text_left_side_fixed_width(&group, &mplayer->font, cut3.top, vec4(1, 1, 1, 1), str8_lit("Album"));
+					}
+					
+					cut3 = range_cut_top(cut3.bottom, 30); // padding
+					// NOTE(fakhri): album name
+					{
+						cut3 = range_cut_top(cut3.bottom, 20); // Album name
+						draw_text_left_side_fixed_width(&group, &mplayer->header_label_font, cut3.top, vec4(1, 1, 1, 1), mplayer->selected_album->album);
+					}
+					
+					cut3 = range_cut_top(cut3.bottom, 20); // padding
+					// NOTE(fakhri): artist name
+					{
+						Mplayer_Font *artist_name_font = &mplayer->font;
+						
+						cut3 = range_cut_top(cut3.bottom, 30); // Album name
+						
+						V4_F32 text_color = vec4(0.4f, 0.4f, 0.4f, 1);
+						b32 should_underline = 0;
+						f32 underline_thickness = 0;
+						
+						String8 artist_name = mplayer->selected_album->artist;
+						
+						// NOTE(fakhri): artist button
+						{
+							V2_F32 artist_name_dim = font_compute_text_dim(artist_name_font, artist_name);
+							
+							V2_F32 button_dim = range_dim(cut3.top);
+							button_dim.width = MIN(button_dim.width, artist_name_dim.width);
+							
+							V2_F32 button_pos = vec2(cut3.top.min_x + 0.5f * button_dim.width, range_center(cut3.top).y - 0.25f * artist_name_dim.height);
+							
+							Mplayer_UI_Interaction interaction = ui_widget_interaction(&mplayer->ui, button_pos, button_dim);
+							
+							if (interaction.hover)
+							{
+								should_underline = 1;
+								text_color = vec4(0.6f, 0.6f, 0.6f, 1);
+								
+								underline_thickness = 2.0f;
+							}
+							
+							if (interaction.pressed)
+							{
+								text_color = vec4(1, 1, 1, 1);
+							}
+							
+							if (interaction.clicked)
+							{
+								assert(mplayer->selected_album->artist_ref);
+								mplayer->selected_artist = mplayer->selected_album->artist_ref;
+								mplayer_change_mode(mplayer, MODE_Artist_Albums, mplayer->selected_album->artist_ref);
+							}
+						}
+						
+						draw_text_left_side_fixed_width(&group, artist_name_font, cut3.top, text_color, artist_name, should_underline, underline_thickness);
+						
+					}
+					
+				}
+			}
+			
 			available_space = cut.bottom;
 			render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, available_space);
 			V2_F32 available_space_dim = range_dim(available_space);
 			
-			assert(mplayer->selected_album);
+			
 			Mplayer_Item *selected_track = ui_items_list(mplayer, &mplayer->ui, mplayer->selected_album->tracks, 
 				vec2(available_space_dim.width, 50), available_space, Links_Album);
 			mplayer_play_music_track(mplayer, selected_track);
 		} break;
 		
 		
-		case Album_Library:
+		case MODE_Album_Library:
 		{
 			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			// NOTE(fakhri): header
+			{
+				Range2_F32 header = cut.top;
+				push_rect(&group, range_center(header), range_dim(header), header_bg_color);
+				
+				String8 album_label = str8_lit("Albums");
+				f32 album_label_width = font_compute_text_dim(&mplayer->header_label_font, album_label).width;
+				Range2_F32_Cut cut2 = range_cut_left(header, 50); // padding
+				cut2 = range_cut_left(cut2.right, album_label_width + 10);
+				
+				Range2_F32 label_rect = cut2.left;
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(album_label), Text_Render_Flag_Centered_Bit);
+				
+				// TODO(fakhri): display the number of albums and tracks the selected artist have
+			}
 			
 			Range2_F32 library_header = cut.top;
 			available_space = cut.bottom;
@@ -1441,17 +1895,31 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			V2_F32 available_space_dim = range_dim(available_space);
 			
 			Mplayer_Item *selected_album = ui_items_list(mplayer, &mplayer->ui, mplayer->albums, 
-				vec2(250, 300), available_space, Links_Artist, vec2(10, 10));
+				vec2(350, 300), available_space, Links_Library, vec2(10, 10));
 			if (selected_album)
 			{
-				mplayer->mode = Album_Tracks;
 				mplayer->selected_album = selected_album;
+				mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album);
 			}
 			
 		} break;
-		case Music_Library:
+		case MODE_Music_Library:
 		{
 			Range2_F32_Cut cut = range_cut_top(available_space, 65);
+			
+			// NOTE(fakhri): header
+			{
+				Range2_F32 header = cut.top;
+				push_rect(&group, range_center(header), range_dim(header), header_bg_color);
+				
+				String8 songs_label = str8_lit("Songs");
+				f32 songs_label_width = font_compute_text_dim(&mplayer->header_label_font, songs_label).width;
+				Range2_F32_Cut cut2 = range_cut_left(header, 50); // padding
+				cut2 = range_cut_left(cut2.right, songs_label_width + 10);
+				
+				Range2_F32 label_rect = cut2.left;
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(songs_label), Text_Render_Flag_Centered_Bit);
+			}
 			
 			Range2_F32 library_header = cut.top;
 			available_space = cut.bottom;
@@ -1459,13 +1927,13 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			V2_F32 available_space_dim = range_dim(available_space);
 			
 			Mplayer_Item *selected_track = ui_items_list(mplayer, &mplayer->ui, mplayer->tracks, 
-				vec2(available_space_dim.width, 50), available_space, Links_Album);
+				vec2(available_space_dim.width, 50), available_space, Links_Library);
 			mplayer_play_music_track(mplayer, selected_track);
 		} break;
 		
 		case MODE_Lyrics:
 		{
-			draw_text_centered(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), str8_lit("Lyrics not available"));
+			draw_text(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), fancy_str8_lit("Lyrics not available"), Text_Render_Flag_Centered_Bit);
 		} break;
 	}
 	
@@ -1486,12 +1954,4 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		mplayer->view_scroll_speed += dt * scroll_accel;
 		mplayer->view_scroll += dt * mplayer->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
 	}
-	
-	#if 0
-		if (mplayer->current_music && is_texture_valid(mplayer->current_music->cover_texture))
-	{
-		Texture cover_texture = mplayer->current_music->cover_texture;
-		push_image(&group, vec3(0, 0, 0), vec2(f32(cover_texture.width), f32(cover_texture.height)), cover_texture);
-	}
-	#endif
 }

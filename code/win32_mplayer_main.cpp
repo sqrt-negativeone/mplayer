@@ -695,6 +695,30 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								
 								mplayer->input.mouse_clip_pos = mouse_clip_pos;
 							} break;
+							
+							case WM_XBUTTONDOWN: fallthrough;
+							case WM_XBUTTONUP:
+							{
+								b32 is_down = b32(msg.message == WM_XBUTTONDOWN);
+								switch(HIWORD(msg.wParam))
+								{
+									case XBUTTON1:
+									{
+										event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
+										event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
+										event->key = Key_Mouse_M4;
+										mplayer->input.buttons[Key_Mouse_M4].is_down = is_down;
+									} break;
+									case XBUTTON2:
+									{
+										event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
+										event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
+										event->key = Key_Mouse_M5;
+										mplayer->input.buttons[Key_Mouse_M5].is_down = is_down;
+									} break;
+									
+								}
+							} break;
 						}
 						
 						if (event != 0)

@@ -165,7 +165,7 @@ init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 	render_ctx->command_offset = 0;
 	
 	render_ctx->upload_buffer.count    = 0;
-	render_ctx->upload_buffer.capacity = 64;
+	render_ctx->upload_buffer.capacity = 1024;
 	render_ctx->upload_buffer.entries  = m_arena_push_array(arena, Texture_Upload_Entry, 
 		render_ctx->upload_buffer.capacity);
 	

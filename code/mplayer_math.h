@@ -51,7 +51,16 @@ union V4_F32
 		}; 
 		f32 w;
 	};
-	struct {f32 r, g, b, a;};
+	struct {V2_F32 rg; V2_F32 ba;};
+	struct 
+	{
+		union
+		{
+			V3_F32 rgb; 
+			struct {f32 r, g, b;};
+		}; 
+		f32 a;
+	};
 	f32 elements[4];
 	
 	#if USE_SSE
