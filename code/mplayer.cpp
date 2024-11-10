@@ -377,16 +377,12 @@ mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
 	int width;
 	int height;
 	int channels;
-	// TODO(fakhri): figure out why some cover pictures are loaded offseted?
-	u8 *pixels = stbi_load_from_memory(buffer.data, int(buffer.size), &width, &height, &channels, 0);
+	u8 *pixels = stbi_load_from_memory(buffer.data, int(buffer.size), &width, &height, &channels, 4);
 	assert(pixels);
 	if (pixels)
 	{
 		result = reserve_texture_handle(mplayer->render_ctx, u16(width), u16(height));
-		assert(channels != 4);
-		set_flag(result.flags, TEXTURE_FLAG_RGB_BIT);
-		
-		Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * channels);
+		Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * 4);
 		memory_copy(pixels_buf.data, pixels, pixels_buf.size);
 		
 		push_texture_upload_request(&mplayer->render_ctx->upload_buffer, result, pixels_buf);
