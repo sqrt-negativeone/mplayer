@@ -159,6 +159,16 @@ enum Mplayer_Items_Links
 	Links_Count,
 };
 
+
+struct Mplayer_Item_Image
+{
+	b32 in_disk;
+	String8 path;
+	// NOTE(fakhri): for cover and artist picture if we have it
+	Buffer texture_data;
+	Texture texture;
+};
+
 struct Mplayer_Item
 {
 	Mplayer_Item *next_links[Links_Count];
@@ -168,9 +178,7 @@ struct Mplayer_Item
 	Memory_Arena arena;
 	String8 path;
 	
-	// NOTE(fakhri): for cover and artist picture if we have it
-	Buffer texture_data;
-	Texture texture;
+	Mplayer_Item_Image image;
 	
 	Memory_Arena transient_arena;
 	Flac_Stream *flac_stream;
@@ -252,6 +260,10 @@ struct Mplayer_Context
 	Mplayer_Item *selected_album;
 	
 	f32 track_name_hover_t;
+	
+	// TODO(fakhri): pick a good number for this
+	Mplayer_Item_Image images[1024];
+	u32 images_count;
 };
 
 internal u64
@@ -371,7 +383,7 @@ mplayer_music_reset(Mplayer_Item *music_track)
 }
 
 internal Texture
-mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
+_mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
 {
 	Texture result = ZERO_STRUCT;
 	int width;
@@ -391,6 +403,73 @@ mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
 	return result;
 }
 
+internal b32
+mplayer_is_valid_image(Mplayer_Item_Image image)
+{
+	b32 result = (image.in_disk && image.path.len) || is_valid(image.texture_data);
+	return result;
+}
+
+internal b32
+mplayer_item_image_ready(Mplayer_Item *item)
+{
+	b32 result = item->image.texture.state == Texture_State_Loaded;
+	return result;
+}
+
+internal void
+mplayer_load_item_image(Mplayer_Context *mplayer, Mplayer_Item *item)
+{
+	Mplayer_Item_Image *image = &item->image;
+	if (!is_texture_valid(image->texture))
+	{
+		image->texture = reserve_texture_handle(mplayer->render_ctx);
+	}
+	
+	if (image->texture.state == Texture_State_Unloaded)
+	{
+		image->texture.state = Texture_State_Loading;
+		
+		// TODO(fakhri): do this in a worker thread
+		if (!is_valid(image->texture_data) && image->in_disk)
+		{
+			image->texture_data = platform->load_entire_file(image->path, &item->transient_arena);
+		}
+		
+		if (is_valid(image->texture_data))
+		{
+			int req_channels = 4;
+			int width, height, channels;
+			u8 *pixels = stbi_load_from_memory(image->texture_data.data, int(image->texture_data.size), &width, &height, &channels, req_channels);
+			assert(pixels);
+			if (pixels)
+			{
+				image->texture.width  = u16(width);
+				image->texture.height = u16(height);
+				Buffer pixels_buf = make_buffer_copy(&mplayer->frame_arena, pixels, width * height * req_channels); 
+				push_texture_upload_request(&mplayer->render_ctx->upload_buffer, image->texture, pixels_buf);
+				stbi_image_free(pixels);
+			}
+		}
+		image->texture.state = Texture_State_Loaded;
+	}
+	
+}
+
+internal void
+mpalyer_draw_item_image(Render_Group *group, Mplayer_Context *mplayer, Mplayer_Item *item, V2_F32 pos, V2_F32 dim, V4_F32 solid_color = vec4(1,1,1,1), V4_F32 image_color = vec4(1,1,1,1), f32 roundness = 0.0f)
+{
+	mplayer_load_item_image(mplayer, item);
+	if (mplayer_item_image_ready(item))
+	{
+		push_image(group, pos, dim, item->image.texture, image_color, roundness);
+	}
+	else
+	{
+		push_rect(group, pos, dim, solid_color, roundness);
+	}
+}
+
 internal void
 mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 {
@@ -401,14 +480,16 @@ mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 		music_track->file_loaded = true;
 	}
 	
+	music_track->image.in_disk = false;
 	if (!music_track->flac_stream)
 	{
 		music_track->flac_stream = m_arena_push_struct_z(&music_track->transient_arena, Flac_Stream);
 		init_flac_stream(music_track->flac_stream, &music_track->transient_arena, music_track->flac_file_buffer);
+		
 		if (music_track->flac_stream->front_cover)
 		{
-			Flac_Picture *front_cover = music_track->flac_stream->front_cover;
-			music_track->texture = mplayer_load_texture(mplayer, front_cover->buffer);
+			music_track->image.texture_data = music_track->flac_stream->front_cover->buffer;
+			music_track->image.texture.state = Texture_State_Invalid;
 		}
 	}
 }
@@ -424,7 +505,7 @@ mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Item *music)
 	music->flac_file_buffer = ZERO_STRUCT;
 	
 	// TODO(fakhri): delete texture from gpu memory!
-	music->texture = ZERO_STRUCT;
+	music->image = ZERO_STRUCT;
 }
 
 internal void
@@ -1036,18 +1117,7 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 					selected_item = item;
 				}
 				
-				if (!is_texture_valid(item->texture))
-				{
-					push_rect(ui->group, option_pos, option_dim, bg_color);
-					if (item->texture_data.size)
-					{
-						item->texture = mplayer_load_texture(mplayer, item->texture_data);
-					}
-				}
-				else
-				{
-					push_image(ui->group, option_pos, option_dim, item->texture, bg_color);
-				}
+				mpalyer_draw_item_image(ui->group, mplayer, item, option_pos, option_dim, bg_color, bg_color);
 				
 				V2_F32 name_dim = font_compute_text_dim(&mplayer->font, item->album);
 				
@@ -1142,7 +1212,7 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 }
 
 internal String8
-mplayer_attempt_find_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *arena, String8 dir)
+mplayer_attempt_find_cover_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *arena, String8 dir)
 {
 	String8 result = ZERO_STRUCT;
 	Memory_Checkpoint scratch = begin_scratch(&arena, 1);
@@ -1165,7 +1235,7 @@ mplayer_attempt_find_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *arena,
 					str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)
 				)
 				{
-					result = str8_copy(arena, info.name);
+					result = str8_f(arena, "%.*s/%.*s", STR8_EXPAND(dir), STR8_EXPAND(info.name));
 					break;
 				}
 			}
@@ -1282,6 +1352,8 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 						music_track->title = str8_copy(&music_track->arena, info.name);
 					}
 					
+					// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
+					
 					Mplayer_Item *artist = mplayer_find_or_create_artist(mplayer, music_track->artist);
 					QueuePush_Next(artist->tracks.first, artist->tracks.last, music_track, next_links[Links_Artist]);
 					artist->tracks.count += 1;
@@ -1292,22 +1364,25 @@ mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 					album->tracks.count += 1;
 					
 					music_track->album_ref = album;
-					if (!album->texture_data.size)
+					
+					if (!album->image.texture_data.size)
 					{
-						// TODO(fakhri): check if we got an image in the current directory, if we do, use that as the cover image,
-						// if we don't have an image in the current directory check if the current track has a cover image and use that
-						String8 cover_file_name = mplayer_attempt_find_image_in_dir(mplayer, scratch.arena, library_path);
-						if (cover_file_name.len)
-						{
-							String8 cover_file_path = str8_f(&music_track->arena, "%.*s/%.*s", STR8_EXPAND(library_path), STR8_EXPAND(cover_file_name));
-							album->texture_data = platform->load_entire_file(cover_file_path, &album->arena);
-							album->texture = ZERO_STRUCT;
-						}
-						else if (tmp_flac_stream.front_cover)
+						album->image.texture = ZERO_STRUCT;
+						if (tmp_flac_stream.front_cover)
 						{
 							Flac_Picture *front_cover = tmp_flac_stream.front_cover;
-							album->texture_data = clone_buffer(&album->arena, front_cover->buffer);
-							album->texture = ZERO_STRUCT;
+							
+							album->image.in_disk = false;
+							album->image.texture_data = clone_buffer(&album->arena, front_cover->buffer);
+						}
+						else
+						{
+							String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(mplayer, &album->arena, library_path);
+							if (cover_file_path.len)
+							{
+								album->image.in_disk = true;
+								album->image.path = cover_file_path;
+							}
 						}
 					}
 				}
@@ -1576,19 +1651,30 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		
 		// NOTE(fakhri): cover picture and track name
 		{
-			if (mplayer->current_music)
+			if (current_music)
 			{
 				Range2_F32_Cut cut2 = range_cut_left(cut.left, 100);
 				Range2_F32 cover_rect      = cut2.left;
 				Range2_F32 track_name_rect = cut2.right;
 				
-				if (is_texture_valid(mplayer->current_music->texture))
+				if (mplayer_is_valid_image(current_music->image))
+				{
+					mpalyer_draw_item_image(&group, mplayer, current_music, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
+				}
+				else if (current_music->album_ref && mplayer_is_valid_image(current_music->album_ref->image))
+				{
+					mpalyer_draw_item_image(&group, mplayer, current_music->album_ref, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
+				}
+				
+				#if 0				
+					if (is_texture_valid(mplayer->current_music->texture))
 				{
 					push_image(&group, range_center(cover_rect), range_dim(cover_rect), mplayer->current_music->texture);
 				}
-				
-				// TODO(fakhri): stack of render configs?
-				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
+				#endif
+					
+					// TODO(fakhri): stack of render configs?
+					render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
 				
 				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, __LINE__, range_center(track_name_rect), range_dim(track_name_rect));
 				V4_F32 title_rect_color = track_control_bg_color;
@@ -1809,7 +1895,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					cut2 = range_cut_left(cut2.right, header_height);
 					Range2_F32 cover_rect = cut2.left;
 					
-					if (!is_texture_valid(mplayer->selected_album->texture))
+					mpalyer_draw_item_image(&group, mplayer, mplayer->selected_album, 
+						range_center(cover_rect), 0.9f * range_dim(cover_rect), vec4(0.2f, 0.2f, 0.2f, 1.0f), vec4(1,1,1,1), 10);
+					#if 0
+						if (!is_texture_valid(mplayer->selected_album->texture))
 					{
 						push_rect(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), vec4(0.2f, 0.2f, 0.2f, 1.0f), 10);
 						if (mplayer->selected_album->texture_data.size)
@@ -1819,8 +1908,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					}
 					else
 					{
-						push_image(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), mplayer->selected_album->texture, vec4(1,1,1,1), 10);
+						push_image(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), mplayer->selected_album->texture, , 10);
 					}
+					#endif
 				}
 				
 				// NOTE(fakhri): Album information region

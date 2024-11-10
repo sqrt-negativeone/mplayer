@@ -18,13 +18,22 @@ enum Texture_Flag
 	TEXTURE_FLAG_RGB_BIT,
 };
 
+enum Texture_State
+{
+	Texture_State_Invalid,
+	Texture_State_Unloaded,
+	Texture_State_Loading,
+	Texture_State_Loaded,
+};
+
 #define NULL_TEXTURE Texture{}
 union Texture
 {
 	u64 compact;
 	struct
 	{
-		u16 flags;
+		u8 state;
+		u8 flags;
 		u16 index;
 		u16 width;
 		u16 height;
@@ -114,7 +123,7 @@ struct Render_Group
 internal b32
 is_texture_valid(Texture texure)
 {
-	b32 result = texure.width && texure.height;
+	b32 result = texure.state != Texture_State_Invalid;
 	return result;
 }
 
@@ -141,15 +150,23 @@ compute_clip_matrix(V2_F32 pos, V2_F32 dim)
 internal Texture
 reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 {
-	Texture texture;
+	Texture texture = ZERO_STRUCT;
 	assert(render_ctx->textures_count < render_ctx->textures_capacity);
 	
 	texture.flags  = 0;
+	texture.state  = Texture_State_Unloaded;
 	texture.index  = u16(render_ctx->textures_count);
 	texture.width  = width;
 	texture.height = height;
 	render_ctx->textures_count += 1;
 	
+	return texture;
+}
+
+internal Texture
+reserve_texture_handle(Render_Context *render_ctx)
+{
+	Texture texture = reserve_texture_handle(render_ctx, 0, 0);
 	return texture;
 }
 

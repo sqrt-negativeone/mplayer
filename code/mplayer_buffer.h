@@ -25,6 +25,20 @@ arena_push_buffer(Memory_Arena *arena, u64 size)
 	return result;
 }
 
+internal String8
+to_string(Buffer buffer)
+{
+	String8 result = str8(buffer.data, buffer.size);
+	return result;
+}
+
+internal b32
+is_valid(Buffer buffer)
+{
+	b32 result = buffer.size != 0;
+	return result;
+}
+
 internal Buffer
 clone_buffer(Memory_Arena *arena, Buffer buffer)
 {
@@ -36,10 +50,10 @@ clone_buffer(Memory_Arena *arena, Buffer buffer)
 	return result;
 }
 
-internal String8
-to_string(Buffer buffer)
+internal Buffer
+make_buffer_copy(Memory_Arena *arena, u8 *data, u64 size)
 {
-	String8 result = str8(buffer.data, buffer.size);
+	Buffer result = clone_buffer(arena, make_buffer(data, size));
 	return result;
 }
 
