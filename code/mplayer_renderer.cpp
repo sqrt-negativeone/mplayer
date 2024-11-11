@@ -44,13 +44,25 @@ struct Texture_Upload_Entry
 {
 	Texture texture;
 	Buffer tex_buf;
+	b32 should_free;
 };
 
 struct Textures_Upload_Buffer
 {
 	Texture_Upload_Entry *entries;
 	u64 capacity;
-	u64 count;
+	
+	volatile u64 head;
+	volatile u64 tail;
+	volatile u64 claimed_head;
+};
+
+struct Upload_Texture_To_GPU_Data
+{
+	Upload_Texture_To_GPU_Data *next;
+	struct Render_Context *render_ctx;
+	Texture *texture;
+	Buffer texture_data;
 };
 
 struct Render_Context
@@ -75,6 +87,9 @@ struct Render_Context
 	
 	u32 max_rects;
 	u32 rects_count;
+	
+	Work_Proc *upload_texture_to_gpu_work;
+	Upload_Texture_To_GPU_Data *free_texture_upload_data;
 };
 
 enum Render_Entry_Kind
@@ -119,6 +134,43 @@ struct Render_Group
 	
 	Render_Entry_Textured_Rects *textured_rects;
 };
+
+internal Upload_Texture_To_GPU_Data *
+make_texure_upload_data(Render_Context *render_ctx, Texture *texture, Buffer texture_data)
+{
+	Upload_Texture_To_GPU_Data *result = 0;
+	
+	// NOTE(fakhri): reuse upload data if it exist
+	for (;;)
+	{
+		result = render_ctx->free_texture_upload_data;
+		
+		if (render_ctx->free_texture_upload_data)
+		{
+			if (platform->atomic_compare_and_exchange_pointer((volatile Address *)&render_ctx->free_texture_upload_data, result, result->next))
+			{
+				break;
+			}
+		}
+		else
+		{
+			result = 0;
+			break;
+		}
+	}
+	
+	if (!result)
+	{
+		result = m_arena_push_struct_z(render_ctx->arena, Upload_Texture_To_GPU_Data);
+	}
+	
+	assert(result);
+	result->render_ctx = render_ctx;
+	result->texture = texture;
+	result->texture_data = texture_data;
+	
+	return result;
+}
 
 internal b32
 is_texture_valid(Texture texure)
@@ -181,7 +233,9 @@ init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 	render_ctx->commands = arena_push_buffer(arena, megabytes(16));
 	render_ctx->command_offset = 0;
 	
-	render_ctx->upload_buffer.count    = 0;
+	render_ctx->upload_buffer.head    = 0;
+	render_ctx->upload_buffer.claimed_head = 0;
+	render_ctx->upload_buffer.tail    = 0;
 	render_ctx->upload_buffer.capacity = 1024;
 	render_ctx->upload_buffer.entries  = m_arena_push_array(arena, Texture_Upload_Entry, 
 		render_ctx->upload_buffer.capacity);
@@ -412,14 +466,18 @@ push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1,
 
 
 internal void
-push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture texture, Buffer tex_buf)
+push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture texture, Buffer tex_buf, b32 should_free)
 {
 	assert(upload_buffer);
-	assert(upload_buffer->count < upload_buffer->capacity);
 	
-	Texture_Upload_Entry *entry = upload_buffer->entries + upload_buffer->count;
+	u64 claimed_head = platform->atomic_increment64((volatile i64 *)&upload_buffer->claimed_head);
+	assert(claimed_head - upload_buffer->tail < upload_buffer->capacity);
+	
+	u64 entry_index = claimed_head % upload_buffer->capacity;
+	Texture_Upload_Entry *entry = upload_buffer->entries + entry_index;
 	entry->texture = texture;
 	entry->tex_buf = tex_buf;
+	entry->should_free = should_free;
 	
-	upload_buffer->count += 1;
+	while (!platform->atomic_compare_and_exchange64((volatile i64 *)&upload_buffer->head, claimed_head, claimed_head + 1));
 }

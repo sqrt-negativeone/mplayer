@@ -7,6 +7,7 @@
 #include <Objbase.h>
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
+#define CompletePreviousWritesBeforeFutureWrites() MemoryBarrier(); __faststorefence()
 
 #undef near
 #undef far
@@ -17,6 +18,35 @@
 #include "mplayer.cpp"
 
 global Mplayer_OS_Vtable w32_vtable;
+
+internal i64
+w32_atomic_increment64(volatile i64 *addend)
+{
+	i64 old_val = InterlockedIncrement64(addend) - 1;
+	return old_val;
+}
+
+internal i64
+w32_atomic_decrement64(volatile i64 *addend)
+{
+	i64 old_val = InterlockedDecrement64(addend) + 1;
+	return old_val;
+}
+
+internal b32
+w32_atomic_compare_and_exchange64(i64 volatile *dst, i64 expect, i64 exchange)
+{
+  b32 result = (InterlockedCompareExchange64(dst, exchange, expect) == expect);
+  return result;
+}
+
+internal b32
+w32_atomic_compare_and_exchange_pointer(Address volatile *dst, Address expect, Address exchange)
+{
+  b32 result = (InterlockedCompareExchangePointer(dst, exchange, expect) == expect);
+  return result;
+}
+
 
 internal void *
 w32_allocate_memory(u64 size)
@@ -489,21 +519,133 @@ w32_file_iter_end(File_Iterator_Handle *it)
   FindClose(win32_it->state);
 }
 
+
+// NOTE(fakhri): single producer multiple consumers
+struct Work_Queue
+{
+	Work_Entry entries[1024];
+	volatile u64 head; // push to head
+	volatile u64 tail; // pop from tail
+	
+	HANDLE semaphore;
+};
+
+global Work_Queue g_w32_queue;
+
+// NOTE(fakhri): single producer
+internal b32
+w32_push_work_sp(Work_Proc *work, void *input)
+{
+	b32 result = 0;
+	
+	if (g_w32_queue.head - g_w32_queue.tail < array_count(g_w32_queue.entries))
+	{
+		result = true;
+		
+		u64 entry_index = g_w32_queue.head % array_count(g_w32_queue.entries);
+		g_w32_queue.entries[entry_index].work = work;
+		g_w32_queue.entries[entry_index].input = input;
+		
+		CompletePreviousWritesBeforeFutureWrites();
+		g_w32_queue.head += 1;
+		
+		ReleaseSemaphore(g_w32_queue.semaphore, 1, 0);
+	}
+	return result;
+}
+
+struct Next_Work
+{
+	Work_Entry entry;
+	b32 valid;
+};
+
+internal Next_Work
+w32_get_next_work()
+{
+	Next_Work result = ZERO_STRUCT;
+	for (;;)
+	{
+		u64 read_tail = g_w32_queue.tail;
+		if (g_w32_queue.tail != g_w32_queue.head)
+		{
+			u64 entry_index = read_tail % array_count(g_w32_queue.entries);
+			Work_Entry entry = g_w32_queue.entries[entry_index];
+			
+			if (w32_atomic_compare_and_exchange64((volatile LONG64 *)&g_w32_queue.tail, read_tail, read_tail + 1))
+			{
+				result.valid = true;
+				result.entry = entry;
+				break;
+			}
+		}
+		else
+		{
+			// NOTE(fakhri): empty
+			break;
+		}
+	}
+	return result;
+}
+
+internal b32
+w32_do_next_work()
+{
+	b32 result = 0;
+	Next_Work next_work = w32_get_next_work();
+	if (next_work.valid)
+	{
+		result = true;
+		assert(next_work.entry.work);
+		next_work.entry.work(next_work.entry.input);
+	}
+	return result;
+}
+
+struct Worker_Thread_Context
+{
+	u32 id;
+};
+
+
+DWORD WINAPI 
+w32_worker_thread_main(void *parameter)
+{
+	init_thread_context();
+	Worker_Thread_Context *work_ctx = (Worker_Thread_Context*)parameter;
+	
+	for (;;)
+	{
+		if (!w32_do_next_work())
+		{
+			WaitForSingleObject(g_w32_queue.semaphore, INFINITE);
+		}
+	}
+}
+
 internal void
 w32_init_os_vtable()
 {
 	w32_vtable = {
-		.file_iter_begin = w32_file_iter_begin,
-		.file_iter_next  = w32_file_iter_next,
-		.file_iter_end   = w32_file_iter_end,
+		.file_iter_begin  = w32_file_iter_begin,
+		.file_iter_next   = w32_file_iter_next,
+		.file_iter_end    = w32_file_iter_end,
 		.load_entire_file = w32_load_entire_file,
-		.open_file  = w32_open_file,
-		.close_file = w32_close_file,
-		.read_block = w32_read_whole_block,
-		.alloc   = w32_allocate_memory,
-		.dealloc = w32_deallocate_memory,
+		.open_file        = w32_open_file,
+		.close_file       = w32_close_file,
+		.read_block       = w32_read_whole_block,
+		.push_work        = w32_push_work_sp,
+		.do_next_work     = w32_do_next_work,
+		.alloc            = w32_allocate_memory,
+		.dealloc          = w32_deallocate_memory,
+		.atomic_increment64 = w32_atomic_increment64,
+		.atomic_decrement64 = w32_atomic_decrement64,
+		.atomic_compare_and_exchange64       = w32_atomic_compare_and_exchange64,
+		.atomic_compare_and_exchange_pointer = w32_atomic_compare_and_exchange_pointer,
 	};
 }
+
+global Worker_Thread_Context g_worker_threads[64];
 
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
@@ -513,6 +655,24 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	init_thread_context();
 	timeBeginPeriod(1);
 	QueryPerformanceFrequency(&w32_timer_freq);
+	
+	DWORD cpu_count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+	g_w32_queue.semaphore = CreateSemaphoreA(0, 0, cpu_count - 1, 0);
+	
+	// NOTE(fakhri): worker threads
+	for (u32 thread_index = 0; thread_index < cpu_count - 1; thread_index += 1)
+	{
+		Worker_Thread_Context *worker_thread_ctx = g_worker_threads + thread_index;
+		worker_thread_ctx->id = thread_index + 1;
+		
+		HANDLE thread_handle = CreateThread(0,
+			0,
+			w32_worker_thread_main,
+			(void*)worker_thread_ctx,
+			0,
+			0);
+		CloseHandle(thread_handle);
+	}
 	
 	WNDCLASSA wc = ZERO_STRUCT;
 	{

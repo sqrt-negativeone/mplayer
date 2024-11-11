@@ -21,6 +21,7 @@ typedef float  f32;
 typedef double f64;
 typedef int32_t b32;
 typedef size_t umem;
+typedef void *Address;
 typedef void void_function();
 
 #define internal      static

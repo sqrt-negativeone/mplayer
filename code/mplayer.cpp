@@ -10,6 +10,19 @@
 
 #include "third_party/samplerate.h"
 
+
+typedef void Work_Proc(void *data);
+struct Work_Entry
+{
+	Work_Proc *work;
+	void *input;
+};
+
+#define WORK_SIG(name) void name(void *input)
+
+typedef b32 Push_Work_Proc(Work_Proc *work, void *input);
+typedef b32 Do_Next_Work_Proc();
+
 struct Sound_Config
 {
 	u32 sample_rate;
@@ -47,6 +60,11 @@ enum
 
 typedef void File_Handle;
 
+typedef i64 Atomic_Increment64_Proc(volatile i64 *addend);
+typedef i64 Atomic_Decrement64_Proc(volatile i64 *addend);
+typedef b32 Atomic_Compare_And_Exchange64_Proc(i64 volatile *dst, i64 expect, i64 exchange);
+typedef b32 Atomic_Compare_And_Exchange_Pointer_Proc(Address volatile *dst, Address expect, Address exchange);
+
 typedef void     *Allocate_Memory_Proc(u64 size);
 typedef void      Deallocate_Memory_Proc(void *memory);
 typedef b32       File_Iter_Begin_Proc(File_Iterator_Handle *it, String8 path);
@@ -69,9 +87,16 @@ struct Mplayer_OS_Vtable
 	Close_File_Proc      *close_file;
 	File_Read_block_Proc *read_block;
 	
+	Push_Work_Proc    *push_work;
+	Do_Next_Work_Proc *do_next_work;
 	
 	Allocate_Memory_Proc   *alloc;
 	Deallocate_Memory_Proc *dealloc;
+	
+	Atomic_Increment64_Proc *atomic_increment64;
+	Atomic_Decrement64_Proc *atomic_decrement64;
+	Atomic_Compare_And_Exchange64_Proc *atomic_compare_and_exchange64;
+	Atomic_Compare_And_Exchange_Pointer_Proc *atomic_compare_and_exchange_pointer;
 };
 
 global Mplayer_OS_Vtable *platform = 0;
@@ -382,27 +407,6 @@ mplayer_music_reset(Mplayer_Item *music_track)
 	}
 }
 
-internal Texture
-_mplayer_load_texture(Mplayer_Context *mplayer, Buffer buffer)
-{
-	Texture result = ZERO_STRUCT;
-	int width;
-	int height;
-	int channels;
-	u8 *pixels = stbi_load_from_memory(buffer.data, int(buffer.size), &width, &height, &channels, 4);
-	assert(pixels);
-	if (pixels)
-	{
-		result = reserve_texture_handle(mplayer->render_ctx, u16(width), u16(height));
-		Buffer pixels_buf = arena_push_buffer(&mplayer->frame_arena, width * height * 4);
-		memory_copy(pixels_buf.data, pixels, pixels_buf.size);
-		
-		push_texture_upload_request(&mplayer->render_ctx->upload_buffer, result, pixels_buf);
-		stbi_image_free(pixels);
-	}
-	return result;
-}
-
 internal b32
 mplayer_is_valid_image(Mplayer_Item_Image image)
 {
@@ -429,8 +433,6 @@ mplayer_load_item_image(Mplayer_Context *mplayer, Mplayer_Item *item)
 	if (image->texture.state == Texture_State_Unloaded)
 	{
 		image->texture.state = Texture_State_Loading;
-		
-		// TODO(fakhri): do this in a worker thread
 		if (!is_valid(image->texture_data) && image->in_disk)
 		{
 			image->texture_data = platform->load_entire_file(image->path, &item->transient_arena);
@@ -438,20 +440,9 @@ mplayer_load_item_image(Mplayer_Context *mplayer, Mplayer_Item *item)
 		
 		if (is_valid(image->texture_data))
 		{
-			int req_channels = 4;
-			int width, height, channels;
-			u8 *pixels = stbi_load_from_memory(image->texture_data.data, int(image->texture_data.size), &width, &height, &channels, req_channels);
-			assert(pixels);
-			if (pixels)
-			{
-				image->texture.width  = u16(width);
-				image->texture.height = u16(height);
-				Buffer pixels_buf = make_buffer_copy(&mplayer->frame_arena, pixels, width * height * req_channels); 
-				push_texture_upload_request(&mplayer->render_ctx->upload_buffer, image->texture, pixels_buf);
-				stbi_image_free(pixels);
-			}
+			platform->push_work(mplayer->render_ctx->upload_texture_to_gpu_work, 
+				make_texure_upload_data(mplayer->render_ctx, &image->texture, image->texture_data));
 		}
-		image->texture.state = Texture_State_Loaded;
 	}
 	
 }
@@ -627,7 +618,7 @@ load_font(Mplayer_Context *mplayer, Mplayer_Font *font, String8 font_path, f32 f
 	font->pixels_buf = pixels_buf;
 	font->atlas_tex = reserve_texture_handle(mplayer->render_ctx, (u16)atlas_dim.width, (u16)atlas_dim.height);
 	set_flag(font->atlas_tex.flags, TEXTURE_FLAG_GRAY_BIT);
-	push_texture_upload_request(&mplayer->render_ctx->upload_buffer, font->atlas_tex, pixels_buf);
+	push_texture_upload_request(&mplayer->render_ctx->upload_buffer, font->atlas_tex, pixels_buf, 0);
 }
 
 internal Mplayer_Glyph
@@ -1666,15 +1657,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					mpalyer_draw_item_image(&group, mplayer, current_music->album_ref, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
 				}
 				
-				#if 0				
-					if (is_texture_valid(mplayer->current_music->texture))
-				{
-					push_image(&group, range_center(cover_rect), range_dim(cover_rect), mplayer->current_music->texture);
-				}
-				#endif
-					
-					// TODO(fakhri): stack of render configs?
-					render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
+				// TODO(fakhri): stack of render configs?
+				render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, track_name_rect);
 				
 				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, __LINE__, range_center(track_name_rect), range_dim(track_name_rect));
 				V4_F32 title_rect_color = track_control_bg_color;
@@ -1897,20 +1881,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					mpalyer_draw_item_image(&group, mplayer, mplayer->selected_album, 
 						range_center(cover_rect), 0.9f * range_dim(cover_rect), vec4(0.2f, 0.2f, 0.2f, 1.0f), vec4(1,1,1,1), 10);
-					#if 0
-						if (!is_texture_valid(mplayer->selected_album->texture))
-					{
-						push_rect(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), vec4(0.2f, 0.2f, 0.2f, 1.0f), 10);
-						if (mplayer->selected_album->texture_data.size)
-						{
-							mplayer->selected_album->texture = mplayer_load_texture(mplayer, mplayer->selected_album->texture_data);
-						}
-					}
-					else
-					{
-						push_image(&group, range_center(cover_rect), 0.9f * range_dim(cover_rect), mplayer->selected_album->texture, , 10);
-					}
-					#endif
 				}
 				
 				// NOTE(fakhri): Album information region

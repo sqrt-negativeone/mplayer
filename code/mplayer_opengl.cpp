@@ -226,6 +226,49 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 	}
 }
 
+WORK_SIG(upload_texture_to_gpu_work)
+{
+	assert(input);
+	Upload_Texture_To_GPU_Data *upload_data = (Upload_Texture_To_GPU_Data *)input;
+	
+	Render_Context *render_ctx = upload_data->render_ctx;
+	Texture *texture           = upload_data->texture;
+	Buffer texture_data        = upload_data->texture_data;
+	
+	Textures_Upload_Buffer *upload_buffer = &render_ctx->upload_buffer;
+	if (texture->state == Texture_State_Loading)
+	{
+		int req_channels = 4;
+		int width, height, channels;
+		u8 *pixels = stbi_load_from_memory(texture_data.data, int(texture_data.size), &width, &height, &channels, req_channels);
+		assert(pixels);
+		if (pixels)
+		{
+			texture->width  = u16(width);
+			texture->height = u16(height);
+			
+			Buffer pixels_buf = make_buffer(pixels, width * height * req_channels); 
+			push_texture_upload_request(upload_buffer, *texture, pixels_buf, 1);
+			
+			#if 0
+				stbi_image_free(pixels);
+			#endif
+		}
+		
+		CompletePreviousWritesBeforeFutureWrites();
+		texture->state = Texture_State_Loaded;
+	}
+	
+	for (;;)
+	{
+		upload_data->next = render_ctx->free_texture_upload_data;
+		
+		if (platform->atomic_compare_and_exchange_pointer((volatile Address *)&render_ctx->free_texture_upload_data, upload_data->next, upload_data))
+		{
+			break;
+		}
+	}
+}
 
 internal void
 init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
@@ -237,6 +280,8 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	opengl->render_ctx.vertex_array = m_arena_push_array(arena, Rect_Vertex_Data, opengl->render_ctx.max_vertices_count);
 	opengl->render_ctx.index_array  = m_arena_push_array(arena, u16, opengl->render_ctx.max_indices_count);
 	
+	
+	opengl->render_ctx.upload_texture_to_gpu_work = upload_texture_to_gpu_work;
 	
 	opengl->render_ctx.textures_count = 0;
 	opengl->render_ctx.textures_capacity = 128;
@@ -260,6 +305,7 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	
 	gl_compile_textured_rect_shader(opengl, &opengl->rect_shader);
 }
+
 
 
 internal void
@@ -305,16 +351,14 @@ gl_end_frame(OpenGL *opengl)
 	glClear(GL_COLOR_BUFFER_BIT);
 	
 	// NOTE(fakhri): process upload requests
-	if (opengl->render_ctx.upload_buffer.count)
+	while (opengl->render_ctx.upload_buffer.tail < opengl->render_ctx.upload_buffer.head)
 	{
-		for (u32 i = 0;
-			i < opengl->render_ctx.upload_buffer.count;
-			i += 1)
-		{
-			Texture_Upload_Entry *entry = opengl->render_ctx.upload_buffer.entries + i;
-			gl_upload_texture(opengl, entry->texture, entry->tex_buf);
-		}
-		opengl->render_ctx.upload_buffer.count = 0;
+		u64 entry_index = opengl->render_ctx.upload_buffer.tail % opengl->render_ctx.upload_buffer.capacity;
+		Texture_Upload_Entry entry = opengl->render_ctx.upload_buffer.entries[entry_index];
+		platform->atomic_increment64((volatile i64 *)&opengl->render_ctx.upload_buffer.tail);
+		gl_upload_texture(opengl, entry.texture, entry.tex_buf);
+		if (entry.should_free)
+			free(entry.tex_buf.data);
 	}
   
 	Render_Context *render_ctx = (Render_Context *)opengl;
