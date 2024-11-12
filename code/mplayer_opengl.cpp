@@ -284,7 +284,9 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	opengl->render_ctx.upload_texture_to_gpu_work = upload_texture_to_gpu_work;
 	
 	opengl->render_ctx.textures_count = 0;
-	opengl->render_ctx.textures_capacity = 128;
+	
+	// TODO(fakhri): should we use a texture array instead of individual textures?
+	opengl->render_ctx.textures_capacity = 4096;
 	opengl->textures2d_array = m_arena_push_array(arena, u32, opengl->render_ctx.textures_capacity);
 	assert(opengl->textures2d_array);
 	
