@@ -243,6 +243,10 @@ struct Mplayer_Mode_Stack
 	Mplayer_Mode_Stack *prev;
 	Mplayer_Mode mode;
 	Mplayer_Item *item;
+	
+	f32 view_target_scroll;
+	f32 view_scroll_speed;
+	f32 view_scroll;
 };
 
 struct Mplayer_Context
@@ -271,10 +275,6 @@ struct Mplayer_Context
 	Mplayer_Mode_Stack *mode_stack_free_list_first;
 	Mplayer_Mode_Stack *mode_stack_free_list_last;
 	// Mplayer_Mode mode;
-	
-	f32 view_scroll;
-	f32 view_scroll_speed;
-	f32 view_target_scroll;
 	
 	Mplayer_Items_List artists;
 	Mplayer_Items_List albums;
@@ -1004,7 +1004,7 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 		{
 			event->consumed = true;
 			
-			mplayer->view_target_scroll -= event->scroll.y;
+			mplayer->mode_stack->view_target_scroll -= event->scroll.y;
 		}
 	}
 	
@@ -1020,10 +1020,10 @@ ui_items_list(Mplayer_Context *mplayer, Mplayer_UI *ui, Mplayer_Items_List items
 	
 	u32 rows_count = items.count / options_per_row + !!(items.count % options_per_row);
 	
-	mplayer->view_target_scroll = CLAMP(0, mplayer->view_target_scroll, rows_count - 1);
+	mplayer->mode_stack->view_target_scroll = CLAMP(0, mplayer->mode_stack->view_target_scroll, rows_count - 1);
 	
 	V2_F32 option_pos = option_start_pos;
-	option_pos.y += mplayer->view_scroll * (option_dim.height + padding.height);
+	option_pos.y += mplayer->mode_stack->view_scroll * (option_dim.height + padding.height);
 	
 	Mplayer_Item *item = items.first;
 	
@@ -1390,6 +1390,7 @@ mplayer_change_previous_mode(Mplayer_Context *mplayer)
 	if (mplayer->mode_stack && mplayer->mode_stack->prev)
 	{
 		mplayer->mode_stack = mplayer->mode_stack->prev;
+		
 		switch(mplayer->mode_stack->mode)
 		{
 			case MODE_Music_Library: break;
@@ -1480,8 +1481,8 @@ mplayer_change_mode(Mplayer_Context *mplayer, Mplayer_Mode new_mode, Mplayer_Ite
 	}
 	mplayer->mode_stack = new_mode_node;
 	
-	mplayer->view_target_scroll = 0;
-	mplayer->view_scroll = 0;
+	mplayer->mode_stack->view_target_scroll = 0;
+	mplayer->mode_stack->view_scroll = 0;
 	
 	mplayer->ui.active_widget_id = 0;
 	mplayer->ui.hot_widget_id = 0;
@@ -2035,11 +2036,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	}
 	
 	// NOTE(fakhri): animate scroll
+	if (mplayer->mode_stack)
 	{
 		f32 dt = mplayer->input.frame_dt;
-		f32 current_scroll = mplayer->view_scroll;
-		f32 target_scroll  = mplayer->view_target_scroll;
-		f32 scroll_speed  = mplayer->view_scroll_speed;
+		f32 current_scroll = mplayer->mode_stack->view_scroll;
+		f32 target_scroll  = mplayer->mode_stack->view_target_scroll;
+		f32 scroll_speed  = mplayer->mode_stack->view_scroll_speed;
 		
 		f32 freq = 5.0f;
 		f32 zeta = 1.f;
@@ -2048,7 +2050,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
 		
 		f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
-		mplayer->view_scroll_speed += dt * scroll_accel;
-		mplayer->view_scroll += dt * mplayer->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
+		mplayer->mode_stack->view_scroll_speed += dt * scroll_accel;
+		mplayer->mode_stack->view_scroll += dt * mplayer->mode_stack->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
 	}
 }
