@@ -223,6 +223,8 @@ struct Mplayer_Item
 	Mplayer_Item *artist_ref;
 	Mplayer_Items_List tracks;
 	Mplayer_Items_List albums;
+	
+	Seek_Table_Work_Data build_seektable_work_data;
 };
 
 enum Mplayer_Mode
@@ -476,6 +478,12 @@ mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 	{
 		music_track->flac_stream = m_arena_push_struct_z(&music_track->transient_arena, Flac_Stream);
 		init_flac_stream(music_track->flac_stream, &music_track->transient_arena, music_track->flac_file_buffer);
+		if (!music_track->flac_stream->seek_table)
+		{
+			// TODO(fakhri): build the seek table in another thread?
+			flac_build_seek_table(music_track->flac_stream, &music_track->transient_arena, &music_track->build_seektable_work_data);
+		}
+		
 		
 		if (music_track->flac_stream->front_cover)
 		{
@@ -489,6 +497,10 @@ internal void
 mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Item *music)
 {
 	assert(music->kind == Item_Kind_Track);
+	for (;music->build_seektable_work_data.running;)
+	{
+		platform->do_next_work();
+	}
 	uninit_flac_stream(music->flac_stream);
 	m_arena_free_all(&music->transient_arena);
 	music->file_loaded = false;

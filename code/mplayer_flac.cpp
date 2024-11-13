@@ -108,6 +108,20 @@ struct Flac_Picture
 	Buffer buffer;
 };
 
+
+struct Seek_Table_Work_Data
+{
+	volatile b32 running;
+	u32 seek_points_count;
+	Flac_Seek_Point *seek_table;
+	struct Flac_Stream *flac_stream;
+	u64 samples_count;
+	u64 first_block_offset;
+	Bit_Stream bitstream;
+	u8 nb_channels;
+	u8 bits_per_sample;
+};
+
 struct Flac_Stream 
 {
 	Bit_Stream bitstream;
@@ -251,23 +265,18 @@ flac_decode_coded_residuals(Bit_Stream *bitstream, i64 *samples, u32 nb_channels
 }
 
 internal Flac_Block_Info
-flac_preprocess_block(Flac_Stream *flac_stream, b32 first_block = 0)
+flac_preprocess_block(Bit_Stream *bitstream, u8 nb_channels, u8 bits_per_sample, b32 first_block = 0)
 {
 	Flac_Block_Info block_info = ZERO_STRUCT;
-	block_info.start_pos = flac_stream->bitstream.pos;
+	block_info.start_pos = bitstream->pos;
 	assert(block_info.start_pos.bits_left == 8); // byte boundary
-	
-	Bit_Stream *bitstream = &flac_stream->bitstream;
-	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
-	flac_stream->recent_block.frames_count = 0;
-	flac_stream->remaining_frames_count = 0;
 	
 	if (bitstream_is_empty(bitstream))
 	{
 		return block_info;
 	}
 	
-	block_info.nb_channels = streaminfo->nb_channels;
+	block_info.nb_channels = nb_channels;
 	
 	// NOTE(fakhri): decode header
 	{
@@ -284,7 +293,7 @@ flac_preprocess_block(Flac_Stream *flac_stream, b32 first_block = 0)
 		
 		if (bit_depth_bits == 0)
 		{
-			block_info.bits_depth = streaminfo->bits_per_sample;
+			block_info.bits_depth = bits_per_sample;
 		}
 		else
 		{
@@ -917,31 +926,31 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	return;
 }
 
-internal void
-flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Flac_Stream_Info *streaminfo)
+
+WORK_SIG(flac_build_seek_table_threaded)
 {
-	Bit_Stream_Pos saved_pos = flac_stream->bitstream.pos;
-	flac_stream->bitstream.pos = flac_stream->first_block_pos;
+	Seek_Table_Work_Data *build_seektable_work_data = (Seek_Table_Work_Data *)input;
 	
-	// NOTE(fakhri): assume we always have the samples count
-	assert(streaminfo->samples_count);
+	Flac_Seek_Point *seek_table = build_seektable_work_data->seek_table;
+	u32 seek_points_count       = build_seektable_work_data->seek_points_count;
+	Bit_Stream bitstream        = build_seektable_work_data->bitstream;
+	u8 nb_channels              = build_seektable_work_data->nb_channels;
+	u8 bits_per_sample          = build_seektable_work_data->bits_per_sample;
+	u64 first_block_offset      = build_seektable_work_data->first_block_offset;
+	u64 samples_count           = build_seektable_work_data->samples_count;
+	Flac_Stream *flac_stream    = build_seektable_work_data->flac_stream;
 	
-	u32 seek_points_count = 100;
-	flac_stream->seek_table = m_arena_push_array(arena, Flac_Seek_Point, seek_points_count);
-	flac_stream->seek_table_size = seek_points_count;
-	assert(flac_stream->seek_table);
-	
-	u64 samples_resolution = streaminfo->samples_count / seek_points_count; // 1% resolution
+	u64 samples_resolution = samples_count / seek_points_count; // 1% resolution
 	
 	u64 next_seek_sample = 0;
-	Flac_Seek_Point *curr_seek_point = flac_stream->seek_table;
-	Flac_Seek_Point *opl_seek_point  = flac_stream->seek_table + flac_stream->seek_table_size;
+	Flac_Seek_Point *curr_seek_point = seek_table;
+	Flac_Seek_Point *opl_seek_point  = seek_table + seek_points_count;
 	
 	u64 current_sample_number = 0;
 	// NOTE(fakhri): build custom seek table
 	for (;curr_seek_point != opl_seek_point;)
 	{
-		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
+		Flac_Block_Info block_info = flac_preprocess_block(&bitstream, nb_channels, bits_per_sample);
 		if (!block_info.success)
 		{
 			break;
@@ -960,7 +969,44 @@ flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Flac_Stream
 		current_sample_number += block_info.block_size;
 	}
 	
-	flac_stream->bitstream.pos = saved_pos;
+	
+	flac_stream->seek_table      = seek_table;
+	CompletePreviousWritesBeforeFutureWrites();
+	flac_stream->seek_table_size = seek_points_count;
+	
+	CompletePreviousWritesBeforeFutureWrites();
+	build_seektable_work_data->running = false;
+}
+
+
+internal void
+flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Seek_Table_Work_Data *seektable_work_data)
+{
+	Bit_Stream bitstream = flac_stream->bitstream;
+	bitstream.pos = flac_stream->first_block_pos;
+	
+	flac_stream->seek_table_size = 0;
+	u64 samples_count = flac_stream->streaminfo.samples_count;
+	
+	// NOTE(fakhri): assume we always have the samples count
+	assert(samples_count);
+	
+	
+	u32 seek_points_count = 100;
+	Flac_Seek_Point *seek_table = m_arena_push_array(arena, Flac_Seek_Point, seek_points_count);
+	assert(seek_table);
+	
+	seektable_work_data->seek_table         = seek_table;
+	seektable_work_data->seek_points_count  = seek_points_count;
+	seektable_work_data->bitstream          = bitstream;
+	seektable_work_data->nb_channels        = flac_stream->streaminfo.nb_channels;
+	seektable_work_data->bits_per_sample    = flac_stream->streaminfo.bits_per_sample;
+	seektable_work_data->first_block_offset = flac_stream->first_block_pos.byte_index;
+	seektable_work_data->samples_count      = samples_count;
+	seektable_work_data->flac_stream        = flac_stream;
+	seektable_work_data->running            = true;
+	
+	platform->push_work(flac_build_seek_table_threaded, seektable_work_data);
 }
 
 internal void
@@ -1138,12 +1184,6 @@ init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 	
 	flac_stream->first_block_pos = flac_stream->bitstream.pos;
 	
-	if (!flac_stream->seek_table)
-	{
-		// TODO(fakhri): build the seek table in another thread?
-		flac_build_seek_table(flac_stream, arena, &flac_stream->streaminfo);
-	}
-	
 	flac_stream->bitstream.pos = flac_stream->first_block_pos;
 	flac_decode_one_block(flac_stream, 1);
 	return;
@@ -1247,7 +1287,7 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 	
 	for (;target_sample > flac_stream->next_sample_number;)
 	{
-		Flac_Block_Info block_info = flac_preprocess_block(flac_stream);
+		Flac_Block_Info block_info = flac_preprocess_block(&flac_stream->bitstream, flac_stream->streaminfo.nb_channels, flac_stream->streaminfo.bits_per_sample);;
 		if (!block_info.success)
 		{
 			break;
