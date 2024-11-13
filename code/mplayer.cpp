@@ -480,7 +480,6 @@ mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Item *music_track)
 		init_flac_stream(music_track->flac_stream, &music_track->transient_arena, music_track->flac_file_buffer);
 		if (!music_track->flac_stream->seek_table)
 		{
-			// TODO(fakhri): build the seek table in another thread?
 			flac_build_seek_table(music_track->flac_stream, &music_track->transient_arena, &music_track->build_seektable_work_data);
 		}
 		
