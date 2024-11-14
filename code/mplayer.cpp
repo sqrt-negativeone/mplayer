@@ -496,6 +496,7 @@ internal void
 mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Item *music)
 {
 	assert(music->kind == Item_Kind_Track);
+	music->build_seektable_work_data.cancel_req = 1;
 	for (;music->build_seektable_work_data.running;)
 	{
 		platform->do_next_work();
@@ -1248,6 +1249,7 @@ mplayer_attempt_find_cover_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *
 	return result;
 }
 
+
 internal void
 mplayer_load_library(Mplayer_Context *mplayer, String8 library_path)
 {
@@ -1554,17 +1556,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	M4_Inv proj = group.config.proj;
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
-	
-	// NOTE(fakhri): draw fps
-	{
-		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
-		fps_pos.x -= 20;
-		fps_pos.y -= 15;
-		Memory_Checkpoint scratch = get_scratch(0, 0);
-		draw_text(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), 
-			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
-			Text_Render_Flag_Centered_Bit);
-	}
 	
 	if (mplayer->current_music && !is_music_track_still_playing(mplayer->current_music) && mplayer->current_music->next_links[Links_Library])
 	{
@@ -2064,4 +2055,18 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		mplayer->mode_stack->view_scroll_speed += dt * scroll_accel;
 		mplayer->mode_stack->view_scroll += dt * mplayer->mode_stack->view_scroll_speed + 0.5f * SQUARE(dt) * scroll_accel;
 	}
+	
+	
+	// NOTE(fakhri): draw fps
+	{
+		render_group_update_config(&group, group.config.camera_pos, group.config.camera_dim, screen_rect);
+		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
+		fps_pos.x -= 20;
+		fps_pos.y -= 15;
+		Memory_Checkpoint scratch = get_scratch(0, 0);
+		draw_text(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), 
+			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
+			Text_Render_Flag_Centered_Bit);
+	}
+	
 }

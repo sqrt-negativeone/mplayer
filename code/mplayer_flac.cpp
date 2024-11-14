@@ -111,6 +111,7 @@ struct Flac_Picture
 
 struct Seek_Table_Work_Data
 {
+	volatile b32 cancel_req;
 	volatile b32 running;
 	u32 seek_points_count;
 	Flac_Seek_Point *seek_table;
@@ -948,7 +949,7 @@ WORK_SIG(flac_build_seek_table_threaded)
 	
 	u64 current_sample_number = 0;
 	// NOTE(fakhri): build custom seek table
-	for (;curr_seek_point != opl_seek_point;)
+	for (;curr_seek_point != opl_seek_point && !build_seektable_work_data->cancel_req;)
 	{
 		Flac_Block_Info block_info = flac_preprocess_block(&bitstream, nb_channels, bits_per_sample);
 		if (!block_info.success)
@@ -1005,6 +1006,7 @@ flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Seek_Table_
 	seektable_work_data->samples_count      = samples_count;
 	seektable_work_data->flac_stream        = flac_stream;
 	seektable_work_data->running            = true;
+	seektable_work_data->cancel_req         = false;
 	
 	platform->push_work(flac_build_seek_table_threaded, seektable_work_data);
 }

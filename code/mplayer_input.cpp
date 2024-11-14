@@ -112,6 +112,7 @@ enum Mplayer_Input_Event_Kind
 	Event_Kind_Release,
 	Event_Kind_Text,
 	Event_Kind_Mouse_Wheel,
+	Event_Kind_Mouse_Move,
 };
 
 enum Mplayer_Key_Modifier_Flag

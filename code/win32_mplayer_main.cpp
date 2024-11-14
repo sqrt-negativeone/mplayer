@@ -607,7 +607,6 @@ struct Worker_Thread_Context
 	u32 id;
 };
 
-
 DWORD WINAPI 
 w32_worker_thread_main(void *parameter)
 {
@@ -622,6 +621,174 @@ w32_worker_thread_main(void *parameter)
 		}
 	}
 }
+
+struct W32_Event_Queue
+{
+	Mplayer_Input_Event events[1024];
+	
+	volatile u64 head;
+	volatile u64 tail;
+};
+
+global W32_Event_Queue w32_event_queue;
+
+DWORD WINAPI 
+w32_main_thread(void *parameter)
+{
+	HINSTANCE hInstance = GetModuleHandleA(0);
+	init_thread_context();
+	
+	HWND window = FindWindowA(W32_CLASS_NAME, W32_WINDOW_NAME);
+	
+	if (window)
+	{
+		HDC wdc = GetDC(window);
+		
+		W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
+		Mplayer_Context *mplayer = (Mplayer_Context *)_m_arena_bootstrap_push(gigabytes(1), member_offset(Mplayer_Context, main_arena));
+		{
+			mplayer->render_ctx  = (Render_Context*)w32_renderer;
+			
+			mplayer->library_path = str8_lit("f://Music/");
+			
+			mplayer->os = w32_vtable;
+			mplayer_initialize(mplayer);
+		}
+		
+		u32 sample_rate    = 96000;
+		u16 channels_count = 2;
+		W32_Sound_Output sound_output = w32_init_wasapi(sample_rate, channels_count);
+		assert(sound_output.initialized);
+		
+		
+		// NOTE(fakhri): Find refresh rate
+		f32 refresh_rate = 60.0f;
+		{
+			DEVMODEW device_mode;
+			if (EnumDisplaySettingsW(0, ENUM_CURRENT_SETTINGS, &device_mode))
+			{
+				refresh_rate = f32(device_mode.dmDisplayFrequency);
+			}
+		}
+		f32 target_fps = refresh_rate;
+		
+		W32_Timer timer;
+		w32_update_timer(&timer);
+		
+		ShowWindow(window, SW_SHOWNORMAL);
+		UpdateWindow(window);
+		
+		b32 running = true;
+		for (;running;)
+		{
+			m_arena_free_all(&mplayer->frame_arena);
+			
+			mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
+			mplayer->input.time += mplayer->input.frame_dt;
+			w32_update_timer(&timer);
+			
+			for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
+			{
+				mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
+			}
+			
+			V2_I32 window_dim;
+			{
+				RECT client_rect;
+				GetClientRect(window, &client_rect);
+				window_dim.x = client_rect.right - client_rect.left;
+				window_dim.y = client_rect.bottom - client_rect.top;
+			}
+			
+			V2_I32 draw_dim = window_dim;
+			Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
+			
+			mplayer->input.first_event = 0;
+			mplayer->input.last_event = 0;
+			for (;w32_event_queue.head != w32_event_queue.tail;)
+			{
+				Mplayer_Input_Event _event = w32_event_queue.events[w32_event_queue.tail % array_count(w32_event_queue.events)];
+				CompletePreviousWritesBeforeFutureWrites();
+				platform->atomic_increment64((volatile i64*)&w32_event_queue.tail);
+				
+				switch(_event.kind)
+				{
+					case Event_Kind_Press: fallthrough;
+					case Event_Kind_Release:
+					{
+						mplayer->input.buttons[_event.key].is_down = (_event.kind == Event_Kind_Press);
+					} break;
+					case Event_Kind_Mouse_Move:
+					{
+						f32 mouse_x = _event.pos.x;
+						f32 mouse_y = _event.pos.y;
+						mouse_y = f32(window_dim.y - 1) - mouse_y;
+						
+						V2_F32 mouse_clip_pos;
+						mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
+						mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
+						
+						mplayer->input.mouse_clip_pos = mouse_clip_pos;
+					} break;
+					
+					case Event_Kind_Null: fallthrough;
+					case Event_Kind_Text: fallthrough;
+					case Event_Kind_Mouse_Wheel: fallthrough;
+					
+					default: break;
+				}
+				
+				Mplayer_Input_Event *event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
+				memory_copy_struct(event, &_event);
+				push_input_event(&mplayer->input, event);
+			}
+			
+			if (global_request_quit)
+			{
+				break;
+			}
+			
+			w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
+			mplayer_update_and_render(mplayer);
+			w32_gl_render_end(w32_renderer);
+			
+			// NOTE(fakhri): audio
+			{
+				u32 max_ms_lag = 100;
+				u32 max_lag_sample_count = max_ms_lag * sound_output.config.sample_rate / 1000;
+				
+				u32 frame_padding_count = 0;
+				u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.config.sample_rate);
+				
+				// See how much buffer space is available.
+				sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
+				if (frame_padding_count < max_lag_sample_count)
+				{
+					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
+					u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
+					
+					if (frames_to_write)
+					{
+						u32 flags = 0;
+						u8 *data;
+						sound_output.render_client->GetBuffer(frames_to_write, &data);
+						
+						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
+						mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
+						
+						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
+					}
+				}
+			}
+			
+			running = !(global_request_quit);
+		}
+		
+	}
+	
+	ExitProcess(0);
+}
+
 
 internal void
 w32_init_os_vtable()
@@ -657,10 +824,11 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	QueryPerformanceFrequency(&w32_timer_freq);
 	
 	DWORD cpu_count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-	g_w32_queue.semaphore = CreateSemaphoreA(0, 0, cpu_count - 1, 0);
+	u32 workers_count = cpu_count - 2;
+	g_w32_queue.semaphore = CreateSemaphoreA(0, 0, workers_count, 0);
 	
 	// NOTE(fakhri): worker threads
-	for (u32 thread_index = 0; thread_index < cpu_count - 1; thread_index += 1)
+	for (u32 thread_index = 0; thread_index < workers_count; thread_index += 1)
 	{
 		Worker_Thread_Context *worker_thread_ctx = g_worker_threads + thread_index;
 		worker_thread_ctx->id = thread_index + 1;
@@ -694,80 +862,32 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 		if (window)
 		{
 			HDC wdc = GetDC(window);
-			W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
 			
-			Mplayer_Context *mplayer = (Mplayer_Context *)_m_arena_bootstrap_push(gigabytes(1), member_offset(Mplayer_Context, main_arena));
+			HANDLE thread_handle = CreateThread(0,
+				0,
+				w32_main_thread,
+				0,
+				0,
+				0);
+			CloseHandle(thread_handle);
+			
+			for (;;)
 			{
-				mplayer->render_ctx  = (Render_Context*)w32_renderer;
-				
-				mplayer->library_path = str8_lit("f://Music/");
-				
-				mplayer->os = w32_vtable;
-				mplayer_initialize(mplayer);
-			}
-			
-			u32 sample_rate    = 96000;
-			u16 channels_count = 2;
-			W32_Sound_Output sound_output = w32_init_wasapi(sample_rate, channels_count);
-			assert(sound_output.initialized);
-			
-			
-			// NOTE(fakhri): Find refresh rate
-			f32 refresh_rate = 60.0f;
-			{
-				DEVMODEW device_mode;
-				if (EnumDisplaySettingsW(0, ENUM_CURRENT_SETTINGS, &device_mode))
-				{
-					refresh_rate = f32(device_mode.dmDisplayFrequency);
-				}
-			}
-			f32 target_fps = refresh_rate;
-			
-			ShowWindow(window, nShowCmd);
-			UpdateWindow(window);
-			
-			W32_Timer timer;
-			w32_update_timer(&timer);
-			
-			b32 running = true;
-			for (;running;)
-			{
-				m_arena_free_all(&mplayer->frame_arena);
-				
-				mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
-				mplayer->input.time += mplayer->input.frame_dt;
-				w32_update_timer(&timer);
-				
-				for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
-				{
-					mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
-				}
-				
-				V2_I32 window_dim;
-				{
-					RECT client_rect;
-					GetClientRect(window, &client_rect);
-					window_dim.x = client_rect.right - client_rect.left;
-					window_dim.y = client_rect.bottom - client_rect.top;
-				}
-				
-				V2_I32 draw_dim = window_dim;
-				Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
-				
 				b32 request_close = false;
+				
+				WaitMessage();
+				
 				// NOTE(fakhri): process pending event
 				{
-					mplayer->input.first_event = 0;
-					mplayer->input.last_event = 0;
 					MSG msg;
 					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
 					{
-						Mplayer_Input_Event *event = 0;
+						Mplayer_Input_Event event = ZERO_STRUCT;
 						switch (msg.message)
 						{
 							case WM_CLOSE:
 							{
-								request_close = true;
+								global_request_quit = true;
 							} break;
 							
 							case WM_SYSKEYDOWN: fallthrough;
@@ -781,12 +901,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								b32 was_down = (msg.lParam & (1 << 30)) != 0;
 								b32 is_down = (msg.lParam & (1 << 31)) == 0;
 								
-								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-								
-								event->kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
-								event->key = w32_resolve_vk_code(vk_code);
-								
-								mplayer->input.buttons[event->key].is_down = b32(is_down);
+								event.kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
+								event.key = w32_resolve_vk_code(vk_code);
 							} break;
 							
 							
@@ -797,10 +913,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								
 								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
 								{
-									event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-									
-									event->kind = Event_Kind_Text;
-									event->text_character = char_input;
+									event.kind = Event_Kind_Text;
+									event.text_character = char_input;
 								}
 							} break;
 							
@@ -808,52 +922,42 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event->key = Key_MiddleMouse;
-								mplayer->input.buttons[Key_MiddleMouse].is_down = is_down;
+								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event.key = Key_MiddleMouse;
 							} break;
 							
 							case WM_LBUTTONDOWN: fallthrough;
 							case WM_LBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event->key = Key_LeftMouse;
-								mplayer->input.buttons[Key_LeftMouse].is_down = is_down;
+								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event.key = Key_LeftMouse;
 							} break;
 							
 							case WM_RBUTTONDOWN: fallthrough;
 							case WM_RBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-								event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event->key = Key_RightMouse;
-								mplayer->input.buttons[Key_RightMouse].is_down = is_down;
+								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
+								event.key = Key_RightMouse;
 							} break;
 							
 							case WM_MOUSEWHEEL:
 							{
 								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
-								event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-								event->kind = Event_Kind_Mouse_Wheel;
-								event->scroll.x = 0;
-								event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;
+								event.kind = Event_Kind_Mouse_Wheel;
+								event.scroll.x = 0;
+								event.scroll.y = f32(wheel_delta) / WHEEL_DELTA;
 							} break;
 							
 							case WM_MOUSEMOVE:
 							{
 								f32 mouse_x = f32(GET_X_LPARAM(msg.lParam)); 
 								f32 mouse_y = f32(GET_Y_LPARAM(msg.lParam)); 
-								mouse_y = f32(window_dim.y - 1) - mouse_y;
 								
-								V2_F32 mouse_clip_pos;
-								mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
-								mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
-								
-								mplayer->input.mouse_clip_pos = mouse_clip_pos;
+								event.kind = Event_Kind_Mouse_Move;
+								event.pos.x = mouse_x;
+								event.pos.y = mouse_y;
 							} break;
 							
 							case WM_XBUTTONDOWN: fallthrough;
@@ -864,44 +968,47 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								{
 									case XBUTTON1:
 									{
-										event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-										event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
-										event->key = Key_Mouse_M4;
-										mplayer->input.buttons[Key_Mouse_M4].is_down = is_down;
+										event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
+										event.key = Key_Mouse_M4;
 									} break;
 									case XBUTTON2:
 									{
-										event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-										event->kind = is_down? Event_Kind_Press: Event_Kind_Release;
-										event->key = Key_Mouse_M5;
-										mplayer->input.buttons[Key_Mouse_M5].is_down = is_down;
+										event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
+										event.key = Key_Mouse_M5;
 									} break;
 									
 								}
 							} break;
 						}
 						
-						if (event != 0)
+						if (event.kind)
 						{
-							if (event->kind != Event_Kind_Text)
+							if (event.kind != Event_Kind_Text)
 							{
 								if ((u16(GetKeyState(VK_SHIFT)) & 0x8000) != 0)
 								{
-									set_flag(event->modifiers, Modifier_Shift);
+									set_flag(event.modifiers, Modifier_Shift);
 								}
 								
 								if ((u16(GetKeyState(VK_CONTROL)) & 0x8000) != 0)
 								{
-									set_flag(event->modifiers, Modifier_Ctrl);
+									set_flag(event.modifiers, Modifier_Ctrl);
 								}
 								
 								if ((u16(GetKeyState(VK_MENU)) & 0x8000) != 0)
 								{
-									set_flag(event->modifiers, Modifier_Alt);
+									set_flag(event.modifiers, Modifier_Alt);
 								}
 							}
 							
-							push_input_event(&mplayer->input, event);
+							for (;w32_event_queue.head - w32_event_queue.tail == array_count(w32_event_queue.events);)
+							{
+								_mm_pause();
+							}
+							
+							w32_event_queue.events[w32_event_queue.head % array_count(w32_event_queue.events)] = event;
+							CompletePreviousWritesBeforeFutureWrites();
+							platform->atomic_increment64((volatile i64*)&w32_event_queue.head);
 						}
 						
 						TranslateMessage(&msg);
@@ -909,45 +1016,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 					}
 				}
 				
-				if (global_request_quit)
-				{
-					break;
-				}
-				
-				w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
-				mplayer_update_and_render(mplayer);
-				w32_gl_render_end(w32_renderer);
-				
-				// NOTE(fakhri): audio
-				{
-					u32 max_ms_lag = 100;
-					u32 max_lag_sample_count = max_ms_lag * sound_output.config.sample_rate / 1000;
-					
-					u32 frame_padding_count = 0;
-					u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.config.sample_rate);
-					
-					// See how much buffer space is available.
-					sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
-					if (frame_padding_count < max_lag_sample_count)
-					{
-						u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
-						u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
-						
-						if (frames_to_write)
-						{
-							u32 flags = 0;
-							u8 *data;
-							sound_output.render_client->GetBuffer(frames_to_write, &data);
-							
-							memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
-							mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
-							
-							sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
-						}
-					}
-				}
-				
-				running = !(request_close || global_request_quit);
 			}
 			
 		}
