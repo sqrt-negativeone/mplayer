@@ -64,6 +64,20 @@ typedef void void_function();
 # define assert_break *((u32*)0) = (u32)0xdeadbeef
 #endif
 
+#if LANG_CPP
+# if OS_WINDOWS
+#  define exported extern "C" __declspec(dllexport)
+# else
+#  define exported extern "C"
+# endif
+#else
+# if OS_WINDOWS
+#  define exported __declspec(dllexport)
+# else
+#  define exported
+# endif
+#endif
+
 #define assert(cond) do {if (!(cond)) { assert_break; }} while(0)
 #define invalid_default_case default: invalid_code_path()
 #define invalid_code_path(...) assert(!"invalid code path!!")
@@ -82,6 +96,7 @@ typedef void void_function();
 
 #define memory_set(p, v, len) memset(p, v, len)
 #define memory_copy(dst, src, sz) memcpy(dst, src, sz)
+#define memory_move(dst, src, sz) memmove(dst, src, sz)
 #define memory_zero(p, s) memory_set(p, 0, s)
 
 #define memory_copy_array(d, s) assert(sizeof(d) >= sizeof(s)); memory_copy(d, s, sizeof(s))
@@ -161,4 +176,16 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 #define Log_Error   (1<<1)
 
 internal void _debug_log(i32 flags, const char *file, int line, const char *format, ...);
+
+#if OS_WINDOWS
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+#undef near
+#undef far
+
+#define CompletePreviousWritesBeforeFutureWrites() MemoryBarrier(); __faststorefence()
+#endif
+
 #endif //MPLAYER_BASE_H

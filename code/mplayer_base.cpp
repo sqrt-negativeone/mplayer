@@ -1,5 +1,4 @@
 
-
  internal void
 _debug_log(i32 flags, const char *file, int line, const char *format, ...)
 {

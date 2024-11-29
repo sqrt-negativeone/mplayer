@@ -1,48 +1,4 @@
 
-#define FLAC_MAX_CHANNEL_COUNT 8
-
-struct Flac_Stream_Info
-{
-	u16 min_block_size; // 16 bits
-	u16 max_block_size; // 16 bits
-	u32 min_frame_size; // 24 bits
-	u32 max_frame_size; // 24 bits
-	u32 sample_rate;    // 20 bits
-	u8 nb_channels;     // 3 bits
-	u8 bits_per_sample; // 5 bits
-	u64 samples_count;  // 36 bits
-};
-
-
-enum Flac_Block_Strategy
-{
-	Fixed_Size    = 0,
-	Variable_Size = 1,
-};
-
-enum Flac_Stereo_Channel_Config
-{
-	None,
-	Left_Right,
-	Left_Side,
-	Side_Right,
-	Mid_Side
-};
-
-enum Flac_Subframe_Kind
-{
-	Subframe_Constant,
-	Subframe_Verbatim,
-	Subframe_Fixed_Prediction,
-	Subframe_Linear_Prediction,
-};
-
-struct Flac_Subframe_Type
-{
-	Flac_Subframe_Kind kind;
-	u8 order;
-};
-
 global u32 flac_sample_rates[] = {
 	88200, 176400, 192000, 8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000,
 };
@@ -62,86 +18,8 @@ global i16 flac_bits_depth[] = {
 
 #define flac_access(samples, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
 #define flac_access2(samples, nb_channels, channel_index, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
-struct Flac_Decoded_Block
-{
-	f32 *samples; // interleaved
-	u64 frames_count;
-	u32 channels_count;
-};
 
 
-struct Flac_Subframe_Info
-{
-	Bit_Stream_Pos samples_start_pos;
-	Flac_Subframe_Type subframe_type;
-	u8 wasted_bits;
-};
-
-struct Flac_Block_Info
-{
-	b32 success;
-	Flac_Stereo_Channel_Config channel_config;
-	u8 nb_channels;
-	u8 bits_depth;
-	
-	Flac_Block_Strategy block_strat;
-	u64 block_size;
-	Bit_Stream_Pos start_pos;
-	Flac_Subframe_Info subframes_info[FLAC_MAX_CHANNEL_COUNT];
-};
-
-struct Flac_Seek_Point
-{
-	u64 sample_number; // sample number of the first sample in the target frame
-	u64 byte_offset;   // offset from the first byte of the first frame header to the first byte of the taret frame's header
-	u16 samples_count; // number of samples in the target frame
-};
-
-struct Flac_Picture
-{
-	u32 type;
-	String8 media_type_string;
-	String8 description;
-	V2_I32 dim;
-	u32 color_depth;
-	u32 nb_colors_used;
-	Buffer buffer;
-};
-
-
-struct Seek_Table_Work_Data
-{
-	volatile b32 cancel_req;
-	volatile b32 running;
-	u32 seek_points_count;
-	Flac_Seek_Point *seek_table;
-	struct Flac_Stream *flac_stream;
-	u64 samples_count;
-	u64 first_block_offset;
-	Bit_Stream bitstream;
-	u8 nb_channels;
-	u8 bits_per_sample;
-};
-
-struct Flac_Stream 
-{
-	Bit_Stream bitstream;
-	Flac_Stream_Info streaminfo;
-	Memory_Arena block_arena;
-	Flac_Decoded_Block recent_block;
-	u64 remaining_frames_count;
-	
-	Bit_Stream_Pos first_block_pos;
-	b32 fixed_blocks;
-	u64 next_sample_number;
-	
-	Flac_Seek_Point *seek_table;
-	u64 seek_table_size;
-	Flac_Picture *front_cover;
-	String8_List vorbis_comments;
-	
-	SRC_STATE *src_ctx;
-};
 
 
 internal void
@@ -1046,6 +924,7 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 		
 		// NOTE(fakhri): big endian
 		u32 md_size = bitstream_read_u24be(bitstream);
+		if (md_size == 0) break;
 		
 		assert(md_type != 127);
 		if (md_blocks_count == 1)
@@ -1060,9 +939,11 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			case 0:
 			{
 				// NOTE(fakhri): streaminfo block
-				assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
-				
-				streaminfo->min_block_size = bitstream_read_u16be(bitstream);
+				#if 0
+					assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
+				#endif
+					
+					streaminfo->min_block_size = bitstream_read_u16be(bitstream);
 				streaminfo->max_block_size = bitstream_read_u16be(bitstream);
 				
 				streaminfo->min_frame_size = bitstream_read_u24be(bitstream);
@@ -1077,10 +958,12 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 				bitstream_skip_bytes(bitstream, 16);
 				
 				// NOTE(fakhri): streaminfo checks
+				#if 0
 				{
 					assert(streaminfo->min_block_size >= 16);
 					assert(streaminfo->max_block_size >= streaminfo->min_block_size);
 				}
+				#endif
 			} break;
 			case 1:
 			{
@@ -1120,7 +1003,6 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 					u32 field_len = bitstream_read_u32le(bitstream);
 					String8 field = to_string(bitstream_read_buffer(bitstream, field_len));
 					str8_list_push(arena, &flac_stream->vorbis_comments, field);
-					Log("vorbis comment: %.*s", STR8_EXPAND(field));
 				}
 			} break;
 			case 5:

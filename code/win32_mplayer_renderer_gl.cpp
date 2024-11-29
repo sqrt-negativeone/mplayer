@@ -6,6 +6,12 @@
 #define GLProc(name, type) PFNGL##type##PROC name = 0;
 #include "gl_functions.inc.h"
 
+#define STBI_SSE2
+#define STB_IMAGE_IMPLEMENTATION
+#include "third_party/stb_image.h"
+
+#include "mplayer_renderer.h"
+#include "mplayer_renderer.cpp"
 #include "mplayer_opengl.cpp"
 
 struct W32_GL_Renderer

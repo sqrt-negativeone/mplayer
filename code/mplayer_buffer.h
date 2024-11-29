@@ -35,7 +35,7 @@ to_string(Buffer buffer)
 internal b32
 is_valid(Buffer buffer)
 {
-	b32 result = buffer.size != 0;
+	b32 result = buffer.size != 0 && buffer.data;
 	return result;
 }
 

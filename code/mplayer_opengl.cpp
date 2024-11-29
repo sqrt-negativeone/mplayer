@@ -280,7 +280,6 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	opengl->render_ctx.vertex_array = m_arena_push_array(arena, Rect_Vertex_Data, opengl->render_ctx.max_vertices_count);
 	opengl->render_ctx.index_array  = m_arena_push_array(arena, u16, opengl->render_ctx.max_indices_count);
 	
-	
 	opengl->render_ctx.upload_texture_to_gpu_work = upload_texture_to_gpu_work;
 	
 	opengl->render_ctx.textures_count = 0;

@@ -2,11 +2,13 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <timeapi.h>
 #include <windowsx.h>
+
+#include <timeapi.h>
 #include <Objbase.h>
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
+
 #define CompletePreviousWritesBeforeFutureWrites() MemoryBarrier(); __faststorefence()
 
 #undef near
@@ -15,7 +17,8 @@
 #include "mplayer_base.h"
 #include "mplayer_math.h"
 
-#include "mplayer.cpp"
+#include "mplayer.h"
+
 
 global Mplayer_OS_Vtable w32_vtable;
 
@@ -91,6 +94,11 @@ w32_open_file(String8 path, u32 flags)
 		0,
 	};
 	DWORD creation_disposition = OPEN_EXISTING;
+	if (has_flag(flags,  File_Create_Always))
+	{
+		creation_disposition = CREATE_ALWAYS;
+	}
+	
 	DWORD flags_and_attributes = 0;
 	HANDLE template_file = 0;
 	
@@ -146,6 +154,29 @@ w32_read_whole_block(File_Handle *file, void *data, u64 size)
 	return result;
 }
 
+internal b32
+w32_write_whole_block(File_Handle *file, void *buf, u64 size)
+{
+	b32 result = 1;
+	HANDLE file_handle = (HANDLE)file;
+	
+	u8 *buf_ptr = (u8*)buf;
+	u64 bytes_to_write = size;
+	for (;bytes_to_write;)
+	{
+		DWORD bytes_written = 0;
+		DWORD bytes_to_request = (DWORD)MIN(bytes_to_write, 0xFFFFFFFF);
+		if (!WriteFile(file_handle, buf_ptr, bytes_to_request, &bytes_written, 0))
+		{
+			result = 0;
+			break;
+		}
+		bytes_to_write -= bytes_written;
+	}
+	
+	return result;
+}
+
 
 internal Buffer
 w32_load_entire_file(String8 file_path, Memory_Arena *arena)
@@ -187,6 +218,7 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 
 #include "win32_mplayer_renderer_gl.cpp"
 
+#define W32_EXE_NAME "mplayer"
 #define W32_WINDOW_NAME "mplayer"
 #define W32_CLASS_NAME (W32_WINDOW_NAME "_CLASS")
 #define W32_WINDOW_W 1280
@@ -428,7 +460,6 @@ w32_get_seconds_elapsed(W32_Timer *timer)
 	return result;
 }
 
-
 struct W32_File_Iterator
 {
 	HANDLE state;
@@ -519,6 +550,114 @@ w32_file_iter_end(File_Iterator_Handle *it)
   FindClose(win32_it->state);
 }
 
+
+internal u32
+w32_get_directory_files_count(String16 search_path16)
+{
+	u32 count = 0;
+	WIN32_FIND_DATAW find_data = ZERO_STRUCT;
+  HANDLE hFind = FindFirstFileW((WCHAR*)search_path16.str, &find_data);
+	if (INVALID_HANDLE_VALUE != hFind)
+	{
+		do { count += 1;} while (FindNextFileW(hFind, &find_data) != 0);
+	}
+	FindClose(hFind);
+	return count;
+}
+
+internal Directory
+w32_read_directory(Memory_Arena *arena, String8 path)
+{
+	Directory result = ZERO_STRUCT;
+	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	
+	String8 search_path;
+	if (path.str[path.len - 1] == '/' || 
+		path.str[path.len - 1] == '\\' )
+	{
+		search_path = str8_f(scratch.arena, "%.*s*", STR8_EXPAND(path));
+	}
+	else
+	{
+		search_path = str8_f(scratch.arena, "%.*s/*", STR8_EXPAND(path));
+	}
+	String16 search_path16 = str16_from_8(scratch.arena, search_path);
+	
+	result.count = w32_get_directory_files_count(search_path16);
+	
+	// NOTE(fakhri): fill the content
+	if (result.count)
+	{
+		result.files = m_arena_push_array_z(arena, File_Info, result.count);
+		
+		WIN32_FIND_DATAW find_data = ZERO_STRUCT;
+		HANDLE hFind = FindFirstFileW((WCHAR*)search_path16.str, &find_data);
+		assert(INVALID_HANDLE_VALUE != hFind);
+		
+		for (u32 i = 0; i < result.count; i += 1)
+		{
+			File_Info *info = result.files + i;
+			
+			if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			{
+				set_flag(info->flags, FileFlag_Directory);
+			}
+			
+			u16 *filename_base = (u16*)find_data.cFileName;
+			u16 *ptr = filename_base;
+			for (;*ptr; ptr += 1);
+			String16 filename16 = str16(filename_base, (u64)(ptr - filename_base));
+			info->name = str8_from_16(arena, filename16);
+			info->size = ((((u64)find_data.nFileSizeHigh) << 32) |
+				((u64)find_data.nFileSizeLow));
+			
+			info->path = str8_f(arena, "%.*s%.*s", search_path.len - 1, search_path.str, STR8_EXPAND(info->name));
+			if (!FindNextFileW(hFind, &find_data))
+			{
+				assert(i == result.count - 1);
+				break;
+			}
+		}
+		
+		FindClose(hFind);
+	}
+	
+	return result;
+}
+
+global SRWLOCK g_w32_cwd_lock;
+
+internal String8
+w32_get_current_directory(Memory_Arena *arena)
+{
+	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	
+	String8 cwd = ZERO_STRUCT;
+	AcquireSRWLockShared(&g_w32_cwd_lock);
+	
+	u64 size16 = GetCurrentDirectoryW(0, 0);
+	String16 path16;
+	path16.len = size16-1;
+	path16.str = m_arena_push_array(scratch.arena, u16, size16);
+	
+	if (GetCurrentDirectoryW((DWORD)size16, (LPWSTR)path16.str))
+	{
+		cwd = str8_from_16(scratch.arena, path16);
+		
+		if (cwd.str[cwd.len - 1] == '/' ||
+			cwd.str[cwd.len - 1] == '\\')
+		{
+			cwd = str8_clone(arena, cwd);
+		}
+		else
+		{
+			cwd = str8_f(arena, "%.*s\\", STR8_EXPAND(cwd));
+		}
+	}
+	
+	ReleaseSRWLockShared(&g_w32_cwd_lock);
+	return cwd;
+}
 
 // NOTE(fakhri): single producer multiple consumers
 struct Work_Queue
@@ -632,12 +771,109 @@ struct W32_Event_Queue
 
 global W32_Event_Queue w32_event_queue;
 
+struct Mplayer_Code
+{
+	HMODULE dll;
+	FILETIME last_write_time;
+	
+	Mplayer_Initialize_Proc *mplayer_initialize;
+	Mplayer_Hotload_Proc    *mplayer_hotload;
+	Mplayer_Update_And_Render_Proc *mplayer_update_and_render;
+	Mplayer_Get_Audio_Samples_Proc *mplayer_get_audio_samples;
+};
+
+global Mplayer_Code w32_app_code;
+
+global char w32_exe_path[256];
+global char w32_exe_dir[256];
+global char w32_app_dll_path[256];
+global char w32_temp_app_dll_path[256];
+
+internal FILETIME
+w32_get_last_write_time(char *filename)
+{
+	FILETIME last_write_time = {0};
+	WIN32_FIND_DATA find_data;
+	HANDLE find_handle = FindFirstFileA(filename, &find_data);
+	if(find_handle != INVALID_HANDLE_VALUE)
+	{
+		FindClose(find_handle);
+		last_write_time = find_data.ftLastWriteTime;
+	}
+	return last_write_time;
+}
+
+internal void
+w32_set_code_stub(Mplayer_Code *code)
+{
+	code->mplayer_initialize        = mplayer_initialize_stub;
+	code->mplayer_hotload           = mplayer_hotload_stub;
+	code->mplayer_update_and_render = mplayer_update_and_render_stub;
+	code->mplayer_get_audio_samples = mplayer_get_audio_samples_stub;
+}
+
+internal b32
+w32_load_app_code(Mplayer_Code *code)
+{
+	b32 result = 0;
+	if (CopyFile(w32_app_dll_path, w32_temp_app_dll_path, FALSE))
+	{
+		code->dll = LoadLibraryA(w32_temp_app_dll_path);
+		if (code->dll)
+		{
+			code->last_write_time = w32_get_last_write_time(w32_temp_app_dll_path);
+			
+			code->mplayer_initialize = (Mplayer_Initialize_Proc *)GetProcAddress(code->dll, "mplayer_initialize");
+			code->mplayer_hotload    = (Mplayer_Hotload_Proc *)GetProcAddress(code->dll, "mplayer_hotload");
+			code->mplayer_update_and_render = (Mplayer_Update_And_Render_Proc *)GetProcAddress(code->dll, "mplayer_update_and_render");
+			code->mplayer_get_audio_samples = (Mplayer_Get_Audio_Samples_Proc *)GetProcAddress(code->dll, "mplayer_get_audio_samples");
+			
+			if (code->mplayer_initialize && 
+				code->mplayer_hotload && 
+				code->mplayer_update_and_render && 
+				code->mplayer_get_audio_samples)
+			{
+				result = 1;
+			}
+			else
+			{
+				w32_set_code_stub(code);
+			}
+		}
+	}
+	return result;
+}
+
+internal void
+w32_code_unload(Mplayer_Code *code)
+{
+	if (code->dll)
+	{
+		FreeLibrary(code->dll);
+	}
+	code->dll = 0;
+	w32_set_code_stub(code);
+}
+
+internal void
+w32_update_code(Mplayer_Context *mplayer, Mplayer_Code *code)
+{
+	FILETIME last_write_time = w32_get_last_write_time(w32_app_dll_path);
+	if (CompareFileTime(&last_write_time, &code->last_write_time))
+	{
+		// TODO(fakhri): wait for all worker threads to finish their work before hot reloading
+		w32_code_unload(code);
+		w32_load_app_code(code);
+		code->mplayer_hotload(mplayer);
+	}
+}
+
+
 DWORD WINAPI 
-w32_main_thread(void *parameter)
+w32_main_thread(void *unused)
 {
 	HINSTANCE hInstance = GetModuleHandleA(0);
 	init_thread_context();
-	
 	HWND window = FindWindowA(W32_CLASS_NAME, W32_WINDOW_NAME);
 	
 	if (window)
@@ -648,11 +884,10 @@ w32_main_thread(void *parameter)
 		Mplayer_Context *mplayer = (Mplayer_Context *)_m_arena_bootstrap_push(gigabytes(1), member_offset(Mplayer_Context, main_arena));
 		{
 			mplayer->render_ctx  = (Render_Context*)w32_renderer;
-			
-			mplayer->library_path = str8_lit("f://Music/");
-			
 			mplayer->os = w32_vtable;
-			mplayer_initialize(mplayer);
+			assert(w32_load_app_code(&w32_app_code));
+			w32_app_code.mplayer_hotload(mplayer);
+			w32_app_code.mplayer_initialize(mplayer);
 		}
 		
 		u32 sample_rate    = 96000;
@@ -681,6 +916,7 @@ w32_main_thread(void *parameter)
 		b32 running = true;
 		for (;running;)
 		{
+			w32_update_code(mplayer, &w32_app_code);
 			m_arena_free_all(&mplayer->frame_arena);
 			
 			mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
@@ -749,7 +985,7 @@ w32_main_thread(void *parameter)
 			}
 			
 			w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
-			mplayer_update_and_render(mplayer);
+			w32_app_code.mplayer_update_and_render(mplayer);
 			w32_gl_render_end(w32_renderer);
 			
 			// NOTE(fakhri): audio
@@ -774,7 +1010,7 @@ w32_main_thread(void *parameter)
 						sound_output.render_client->GetBuffer(frames_to_write, &data);
 						
 						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
-						mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
+						w32_app_code.mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
 						
 						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
 					}
@@ -794,19 +1030,19 @@ internal void
 w32_init_os_vtable()
 {
 	w32_vtable = {
-		.file_iter_begin  = w32_file_iter_begin,
-		.file_iter_next   = w32_file_iter_next,
-		.file_iter_end    = w32_file_iter_end,
-		.load_entire_file = w32_load_entire_file,
-		.open_file        = w32_open_file,
-		.close_file       = w32_close_file,
-		.read_block       = w32_read_whole_block,
-		.push_work        = w32_push_work_sp,
-		.do_next_work     = w32_do_next_work,
-		.alloc            = w32_allocate_memory,
-		.dealloc          = w32_deallocate_memory,
-		.atomic_increment64 = w32_atomic_increment64,
-		.atomic_decrement64 = w32_atomic_decrement64,
+		.read_directory                      = w32_read_directory,
+		.get_current_directory               = w32_get_current_directory,
+		.load_entire_file                    = w32_load_entire_file,
+		.open_file                           = w32_open_file,
+		.close_file                          = w32_close_file,
+		.read_block                          = w32_read_whole_block,
+		.write_block                         = w32_write_whole_block,
+		.push_work                           = w32_push_work_sp,
+		.do_next_work                        = w32_do_next_work,
+		.alloc                               = w32_allocate_memory,
+		.dealloc                             = w32_deallocate_memory,
+		.atomic_increment64                  = w32_atomic_increment64,
+		.atomic_decrement64                  = w32_atomic_decrement64,
 		.atomic_compare_and_exchange64       = w32_atomic_compare_and_exchange64,
 		.atomic_compare_and_exchange_pointer = w32_atomic_compare_and_exchange_pointer,
 	};
@@ -822,6 +1058,32 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	init_thread_context();
 	timeBeginPeriod(1);
 	QueryPerformanceFrequency(&w32_timer_freq);
+	
+	// NOTE(fakhri): Calculate executable name and path to DLL
+	{
+		DWORD size_of_executable_path = GetModuleFileNameA(0, w32_exe_path, sizeof(w32_exe_path));
+		
+		// NOTE(fakhri): Calculate executable directory
+		{
+			memory_copy(w32_exe_dir, w32_exe_path, size_of_executable_path);
+			char *one_past_last_slash = w32_exe_dir;
+			for(i32 i = 0; w32_exe_dir[i]; ++i)
+			{
+				if(w32_exe_dir[i] == '\\')
+				{
+					one_past_last_slash = w32_exe_dir + i + 1;
+				}
+			}
+			*one_past_last_slash = 0;
+		}
+		
+		// NOTE(fakhri): Create DLL filenames
+		{
+			wsprintf(w32_app_dll_path, "%s%s.dll", w32_exe_dir, W32_EXE_NAME);
+			wsprintf(w32_temp_app_dll_path, "%stemp_%s.dll", w32_exe_dir, W32_EXE_NAME);
+		}
+	}
+	
 	
 	DWORD cpu_count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 	u32 workers_count = cpu_count - 2;

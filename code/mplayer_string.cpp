@@ -117,6 +117,15 @@ str8(u8 *str, u64 len)
 	return result;
 }
 
+internal String16
+str16(u16 *str, u64 len)
+{
+	String16 result;
+	result.str = str;
+	result.len = len;
+	return result;
+}
+
 internal String8
 str8_from_cstr(char *str)
 {
@@ -150,7 +159,7 @@ str8_f(Memory_Arena *arena, const char *fmt, ...)
 }
 
 internal String8
-str8_copy(Memory_Arena *arena, String8 str)
+str8_clone(Memory_Arena *arena, String8 str)
 {
 	String8 result;
 	result.str = m_arena_push_array(arena, u8, str.len);
@@ -447,6 +456,42 @@ str8_match(String8 a, String8 b, Match_Flags flags)
   return result;
 }
 
+internal b32
+str8_is_subsequence(String8 a, String8 b, Match_Flags flags)
+{
+	b32 result = 0;
+	
+	if (a.len >= b.len)
+	{
+		u32 j = 0;
+		for (u64 i = 0; i < a.len && j < b.len; i += 1)
+		{
+			b32 match = (a.str[i] == b.str[j]);
+			
+			if(flags & MatchFlag_CaseInsensitive)
+      {
+        match |= (char_to_lower(a.str[i]) == char_to_lower(b.str[j]));
+      }
+			if(flags & MatchFlag_SlashInsensitive)
+      {
+        match |= (char_to_forward_slash(a.str[i]) == char_to_forward_slash(b.str[j]));
+      }
+			
+			if (match)
+			{
+				j += 1;
+			}
+		}
+		
+		if (j == b.len)
+		{
+			result = 1;
+		}
+	}
+	
+	return result;
+}
+
 internal u64
 find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_Flags flags)
 {
@@ -537,7 +582,7 @@ str8_list_push(Memory_Arena *arena, String8_List *list, String8 str)
 }
 
 internal void
-str8_list_push_fv(Memory_Arena *arena, String8_List *list, char *fmt, va_list args)
+str8_list_push_fv(Memory_Arena *arena, String8_List *list, const char *fmt, va_list args)
 {
   String8_Node *n = m_arena_push_struct_z(arena, String8_Node);
   n->str = str8_fv(arena, fmt, args);
@@ -545,7 +590,7 @@ str8_list_push_fv(Memory_Arena *arena, String8_List *list, char *fmt, va_list ar
 }
 
 internal void
-str8_list_push_f(Memory_Arena *arena, String8_List *list, char *fmt, ...)
+str8_list_push_f(Memory_Arena *arena, String8_List *list, const char *fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
@@ -660,3 +705,17 @@ str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_par
   return result;
 }
 
+
+
+internal String8
+str8_chop_last_slash(String8 string)
+{
+	u64 slash_pos = find_substr8(string, str8_lit("/"), 0,
+		MatchFlag_SlashInsensitive|
+		MatchFlag_FindLast);
+	if(slash_pos < string.len)
+	{
+		string.len = slash_pos+1;
+	}
+	return string;
+}

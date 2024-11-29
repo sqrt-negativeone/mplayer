@@ -37,20 +37,29 @@ set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
 
 :: add libs to link here
 set platform_libs= ^
-  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib samplerate.lib
+  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib
+
+set app_libs= ^
+  samplerate.lib
 
 set common_linker_flags=/incremental:no
+
 set platform_linker_flags=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32"
 set platform_linker_settings=%platform_libs% %platform_linker_flags%
 
-set app_linker_settings=%common_linker_flags%
+set app_linker_settings=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32" %app_libs% 
 
 if not exist bld mkdir bld
 pushd bld
 
 del *.ilk > NUL 2> NUL
+del *.pdb > NUL 2> NUL
 set time_stamp=%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 
+echo building application layer
+call cl %compiler_settings% "%code_dir%\code\mplayer.cpp" /LD /link %app_linker_settings% /OUT:%exe_name%.dll  -PDB:%exe_name%_%time_stamp: =%.pdb
+
+echo building platform layer
 call cl %compiler_settings% "%code_dir%\code\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
 
 xcopy "%code_dir%\lib\win32\*.dll" . /Y
