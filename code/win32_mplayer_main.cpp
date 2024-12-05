@@ -64,7 +64,7 @@ w32_deallocate_memory(void *memory)
 	VirtualFree(memory, 0, MEM_RELEASE);
 }
 
-#define File_Open_ReadWrite (make_flag(File_Open_Read) | make_flag(File_Open_Write))
+#define File_Open_ReadWrite (File_Open_Read | File_Open_Write)
 
 internal File_Handle *
 w32_open_file(String8 path, u32 flags)
@@ -197,7 +197,7 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	Memory_Checkpoint scratch = get_scratch(&arena, 1);
 	String16 cpath16 = str16_from_8(scratch.arena, file_path);
 	
-	HANDLE file = w32_open_file(file_path, make_flag(File_Open_Read));
+	HANDLE file = w32_open_file(file_path, File_Open_Read);
 	
 	if(file != INVALID_HANDLE_VALUE)
 	{

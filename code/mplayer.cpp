@@ -177,7 +177,7 @@ mplayer_music_reset(Mplayer_Track *music_track)
 {
 	if (music_track && music_track->flac_stream)
 	{
-		music_track->flac_stream->bitstream.pos = music_track->flac_stream->first_block_pos;
+		flac_seek_stream(music_track->flac_stream, 0);
 	}
 }
 
@@ -257,7 +257,14 @@ mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Track *music_track)
 		if (music_track->flac_stream->front_cover)
 		{
 			music_track->header.image.texture_data = music_track->flac_stream->front_cover->buffer;
-			music_track->header.image.texture.state = Texture_State_Invalid;
+			if (music_track->header.image.texture.state == Texture_State_Loading)
+			{
+				music_track->header.image.texture.state = Texture_State_Unloaded;
+			}
+			else
+			{
+				music_track->header.image.texture.state = Texture_State_Invalid;
+			}
 		}
 	}
 }
@@ -299,9 +306,6 @@ mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Item_ID music_track_i
 			}
 			
 			mplayer_load_music_track(mplayer, music_track);
-			
-			mplayer->current_music_id = music_track->header.id;
-			mplayer->play_track = true;
 		}
 		
 		mplayer_music_reset(music_track);
@@ -453,14 +457,10 @@ font_compute_text_dim(Mplayer_Font *font, String8 text)
 
 enum Text_Render_Flags
 {
-	Text_Render_Flag_Centered,
-	Text_Render_Flag_Limit_Width,
-	Text_Render_Flag_Underline,
+	Text_Render_Flag_Centered    = (1 << 0),
+	Text_Render_Flag_Limit_Width = (1 << 1),
+	Text_Render_Flag_Underline   = (1 << 2),
 };
-
-#define Text_Render_Flag_Centered_Bit    make_flag(Text_Render_Flag_Centered)
-#define Text_Render_Flag_Limit_Width_Bit make_flag(Text_Render_Flag_Limit_Width)
-#define Text_Render_Flag_Underline_Bit   make_flag(Text_Render_Flag_Underline)
 
 struct Fancy_String8
 {
@@ -561,10 +561,10 @@ draw_text_left_side_fixed_width(Render_Group *group, Mplayer_Font *font, Range2_
 {
 	V2_F32 text_dim = font_compute_text_dim(font, text);
 	
-	u32 flags = Text_Render_Flag_Limit_Width_Bit;
+	u32 flags = Text_Render_Flag_Limit_Width;
 	if (should_underline)
 	{
-		flags |= Text_Render_Flag_Underline_Bit;
+		flags |= Text_Render_Flag_Underline;
 	}
 	
 	Fancy_String8 string = fancy_str8(text, range_dim(range).width, underline_thickness);
@@ -621,560 +621,24 @@ draw_outline(Render_Group *group, Range2_F32 rect, V4_F32 color, f32 thickness)
 }
 
 internal void
-ui_begin(Mplayer_UI *ui, Render_Group *group, Mplayer_Input *input, V2_F32 mouse_p)
+mplayer_animate_scroll(Mplayer_Scroll_Data *scroll, f32 frame_dt)
 {
-	ui->group   = group;
-	ui->input   = input;
-	ui->mouse_p = mouse_p;
-	ui->disable_input = false;
+	f32 current_scroll = scroll->t;
+	f32 target_scroll  = scroll->target;
+	f32 scroll_speed  = scroll->dt;
+	
+	f32 freq = 5.0f;
+	f32 zeta = 1.f;
+	
+	f32 K1 = zeta / (PI32 * freq);
+	f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
+	
+	f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
+	scroll->dt += frame_dt * scroll_accel;
+	scroll->t  += frame_dt * scroll->dt + 0.5f * SQUARE(frame_dt) * scroll_accel;
 }
 
-enum UI_Interaction_Flag
-{
-	UI_Flag_Selectable,
-};
-
-#define UI_Flag_Selectable_BIT make_flag(UI_Flag_Selectable)
-
-#define ui_widget_interaction(ui, widget_rect, flags) _ui_widget_interaction(ui, __LINE__, widget_rect, flags)
-internal Mplayer_UI_Interaction
-_ui_widget_interaction(Mplayer_UI *ui, u64 id, Range2_F32 widget_rect, u32 flags)
-{
-	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	if (!ui->disable_input)
-	{
-		if (ui->hot_widget_id == id && mplayer_button_released(ui->input, Key_LeftMouse))
-		{
-			interaction.released = 1;
-		}
-		
-		if (is_in_range(widget_rect, ui->mouse_p))
-		{
-			interaction.hover = 1;
-			if (ui->active_widget_id != id)
-			{
-				ui->active_widget_id = id;
-				ui->active_t = 0;
-				ui->active_dt = 8.0f;
-			}
-		}
-		else
-		{
-			if (ui->active_widget_id == id)
-			{
-				ui->active_widget_id = 0;
-			}
-			
-			if (has_flag(flags, UI_Flag_Selectable))
-			{
-				if (ui->hot_widget_id != id && 
-					ui->selected_widget_id == id &&
-					mplayer_button_released(ui->input, Key_LeftMouse))
-				{
-					ui->selected_widget_id = 0;
-				}
-			}
-			
-			if (interaction.released)
-			{
-				ui->hot_widget_id = 0;
-			}
-		}
-		
-		if (ui->active_widget_id == id)
-		{
-			ui->active_t += ui->input->frame_dt * ui->active_dt;
-			ui->active_t = CLAMP(0, ui->active_t, 1.0f);
-			
-			if (mplayer_button_clicked(ui->input, Key_LeftMouse))
-			{
-				if (has_flag(flags, UI_Flag_Selectable))
-				{
-					ui->selected_widget_id = id;
-				}
-				
-				ui->recent_click_time = ui->input->time;
-				ui->hot_widget_id = id;
-				ui->hot_t = 0;
-				ui->hot_dt = 20.0f;
-			}
-			
-			if (ui->hot_widget_id == id && mplayer_button_released(ui->input, Key_LeftMouse))
-			{
-				interaction.clicked = 1;
-				ui->hot_widget_id = 0;
-			}
-		}
-		
-		
-		if (ui->hot_widget_id == id)
-		{
-			interaction.pressed = true;
-			ui->hot_t += ui->input->frame_dt * ui->hot_dt;
-			ui->hot_t = CLAMP(0, ui->hot_t, 1.0f);
-		}
-	}
-	return interaction;
-}
-
-#define ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress) _ui_slider_f32(ui, value, min, max, slider_pos, slider_dim, progress,  __LINE__)
-internal Mplayer_UI_Interaction
-_ui_slider_f32(Mplayer_UI *ui, f32 *value, f32 min, f32 max, V2_F32 slider_pos, V2_F32 slider_dim, b32 progress, u64 id)
-{
-	Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, id, range_center_dim(slider_pos, slider_dim), 0);
-	V4_F32 color = vec4(0.3f, 0.3f, 0.3f, 1);
-	
-	V2_F32 track_dim = slider_dim;
-	track_dim.width  *= 0.99f;
-	track_dim.height *= 0.25f;
-	
-	V4_F32 track_color = vec4(0.6f, 0.6f, 0.6f, 1);
-	
-	V2_F32 handle_dim = vec2(0.75f * MIN(slider_dim.width, slider_dim.height));
-	V2_F32 handle_pos = slider_pos;
-	handle_pos.x -= 0.5f * (slider_dim.width - handle_dim.width);
-	V4_F32 handle_color = vec4(0.5f, 0.5f, 0.5f, 1);
-	
-	V2_F32 track_final_dim = track_dim;
-	V2_F32 handle_final_dim = handle_dim;
-	
-	if (interaction.hover)
-	{
-		track_final_dim.height = lerp(track_dim.height, 
-			ui->active_t,
-			1.25f * track_dim.height);
-		
-		handle_final_dim.height = lerp(handle_dim.height, 
-			ui->active_t,
-			1.15f * handle_dim.height);
-	}
-	
-	if (interaction.pressed)
-	{
-		handle_final_dim.height = lerp(handle_final_dim.height, 
-			ui->active_t,
-			0.95f * handle_dim.height);
-		
-		handle_color = lerp(handle_color, ui->hot_t, vec4(0.7f, 0.7f, 0.7f, 1));
-		
-		if (slider_dim.width)
-		{
-			f32 click_percent = ((ui->mouse_p.x - slider_pos.x) + 0.5f * slider_dim.width) / slider_dim.width;
-			click_percent = CLAMP(0.0f, click_percent, 1.0f);
-			*value = lerp(min, click_percent, max);
-		}
-	}
-	
-	// NOTE(fakhri): draw slider background
-	push_rect(ui->group, slider_pos, slider_dim, color, 5);
-	
-	// NOTE(fakhri): draw track
-	push_rect(ui->group, slider_pos, track_final_dim, track_color, 5);
-	handle_pos.x += map_into_range_zo(min, *value, max) * (slider_dim.width - handle_final_dim.width);
-	
-	if (progress)
-	{
-		V4_F32 progress_color = vec4(1, 1, 1, 1);
-		// NOTE(fakhri): draw progress
-		Range2_F32 track_rect = range_center_dim(slider_pos, track_final_dim);
-		Range2_F32 progress_rect = range_cut_left(track_rect, 0.5f * track_final_dim.width + handle_pos.x - slider_pos.x).left;
-		push_rect(ui->group, range_center(progress_rect), range_dim(progress_rect), progress_color, 5);
-	}
-	
-	
-	// NOTE(fakhri): draw handle
-	push_rect(ui->group, handle_pos, handle_final_dim, handle_color, 0.5f * handle_final_dim.width);
-	
-	return interaction;
-}
-
-#define ui_input_field(ui, font, pos, field_dim, buffer, buffer_capacity) _ui_input_field(ui, font, pos, field_dim, buffer, buffer_capacity, __LINE__)
-internal Mplayer_UI_Interaction
-_ui_input_field(Mplayer_UI *ui, Mplayer_Font *font, V2_F32 pos, V2_F32 field_dim, String8 *buffer, u32 buffer_capacity, u32 id)
-{
-	Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, id, range_center_dim(pos, field_dim), UI_Flag_Selectable_BIT);
-	
-	V2_F32 padding    = vec2(10, 10);
-	V2_F32 ui_input_dim = field_dim + padding;
-	V4_F32 ui_input_color = vec4(0.2f, 0.2f, 0.2f, 1.0f);
-	
-	V2_F32 final_ui_input_dim = ui_input_dim;
-	
-	if (interaction.hover)
-	{
-		final_ui_input_dim.height = lerp(final_ui_input_dim.height, 
-			ui->active_t,
-			1.05f * ui_input_dim.height);
-	}
-	
-	if (interaction.pressed)
-	{
-		final_ui_input_dim.height = lerp(final_ui_input_dim.height, 
-			ui->hot_t,
-			0.99f * ui_input_dim.height);
-	}
-	
-	V2_F32 text_dim = font_compute_text_dim(font, *buffer);
-	if (ui->selected_widget_id == id)
-	{
-		ui_input_color = vec4(0.4f, 0.4f, 0.4f, 0.9f);
-		
-		if (interaction.pressed)
-		{
-			f32 test_x = pos.x - 0.5f * text_dim.width;
-			ui->input_cursor = 0;
-			for (u32 i = 0; i < buffer->len; i += 1)
-			{
-				f32 glyph_width = font_get_glyph_from_char(font, buffer->str[i]).advance;
-				if (test_x + 0.5f * glyph_width < ui->mouse_p.x)
-				{
-					ui->input_cursor = i + 1;
-				}
-				test_x += glyph_width;
-			}
-		}
-		
-		for (Mplayer_Input_Event *event = ui->input->first_event; event; event = event->next)
-		{
-			if (event->consumed) continue;
-			switch(event->kind)
-			{
-				// TODO(fakhri): text selection
-				// TODO(fakhri): handle standard keyboard shortcuts (ctrl+arrows, ctrl+backspace...)
-				case Event_Kind_Text:
-				{
-					interaction.edited = true;
-					event->consumed = true;
-					if (buffer->len < buffer_capacity)
-					{
-						if (ui->input_cursor < buffer->len)
-						{
-							memory_move(buffer->str + ui->input_cursor + 1,
-								buffer->str + ui->input_cursor,
-								buffer->len - ui->input_cursor);
-						}
-						
-						buffer->str[ui->input_cursor] = (u8)event->text_character;
-						buffer->len += 1;
-						ui->input_cursor += 1;
-					}
-				};
-				case Event_Kind_Press:
-				{
-					if (event->key == Key_Backspace)
-					{
-						event->consumed = true;
-						if (ui->input_cursor && buffer->len)
-						{
-							interaction.edited = true;
-							memory_move(buffer->str + ui->input_cursor - 1,
-								buffer->str + ui->input_cursor,
-								buffer->len - ui->input_cursor);
-							buffer->len     -= 1;
-							ui->input_cursor -= 1;
-						}
-					}
-					else if (event->key == Key_Left)
-					{
-						event->consumed = true;
-						if (ui->input_cursor)
-							ui->input_cursor -= 1;
-					}
-					else if (event->key == Key_Right)
-					{
-						event->consumed = true;
-						if (ui->input_cursor < buffer->len)
-							ui->input_cursor += 1;
-					}
-				} break;
-				
-				case Event_Kind_Release: break;
-				case Event_Kind_Mouse_Wheel: break;
-				case Event_Kind_Mouse_Move: break;
-				case Event_Kind_Null: break;
-				invalid_default_case;
-			}
-		}
-	}
-	
-	push_rect(ui->group, pos, final_ui_input_dim, ui_input_color);
-	draw_outline(ui->group, pos, final_ui_input_dim, 
-		vec4(0, 0, 0, 1), 1);
-	
-	draw_text(ui->group, font, pos, vec4(1, 1, 1, 1), fancy_str8(*buffer), Text_Render_Flag_Centered_Bit);
-	if (ui->selected_widget_id == id)
-	{
-		f32 blink_t = (sin_f(2 * PI32 * (ui->input->time - ui->recent_click_time)) + 1) / 2;
-		if (ui->input->time - ui->recent_click_time > 5)
-		{
-			blink_t = 1.0f;
-		}
-		V4_F32 cursor_color = lerp(ui_input_color,
-			blink_t,
-			vec4(0, 0, 0, 1));
-		if (ui->input_cursor > buffer->len)
-		{
-			ui->input_cursor = (u32)buffer->len;
-		}
-		
-		V2_F32 cursor_pos = vec2(pos.x - 0.5f * text_dim.width + font_compute_text_dim(font, str8(buffer->str, MIN(buffer->len, ui->input_cursor))).width,
-			pos.y);
-		push_rect(ui->group, cursor_pos, vec2(2.1f, 1.25f * text_dim.height), cursor_color);
-	}
-	return interaction;
-}
-
-#define ui_button(ui, font, text, pos) _ui_button(ui, font, text, pos, __LINE__)
-internal Mplayer_UI_Interaction
-_ui_button(Mplayer_UI *ui, Mplayer_Font *font,  String8 text, V2_F32 pos, u64 id)
-{
-	V2_F32 padding    = vec2(10, 10);
-	V2_F32 button_dim = font_compute_text_dim(font, text) + padding;
-	
-	Mplayer_UI_Interaction interaction = _ui_widget_interaction(ui, id, range_center_dim(pos, button_dim), 0);
-	
-	V2_F32 final_button_dim = button_dim;
-	
-	if (interaction.hover)
-	{
-		final_button_dim.height = lerp(final_button_dim.height, 
-			ui->active_t,
-			1.05f * button_dim.height);
-	}
-	
-	if (interaction.pressed)
-	{
-		final_button_dim.height = lerp(final_button_dim.height, 
-			ui->hot_t,
-			0.95f * button_dim.height);
-	}
-	
-	V4_F32 button_bg_color = vec4(0.3f, 0.3f, 0.3f, 1);
-	V4_F32 text_color = vec4(1.0f, 1.0f, 1.0f, 1);
-	push_rect(ui->group, pos, final_button_dim, button_bg_color);
-	draw_text(ui->group, font, pos, text_color, fancy_str8(text), Text_Render_Flag_Centered_Bit);
-	return interaction;
-}
-
-
-internal Mplayer_UI_Interaction 
-ui_list_option_begin(Mplayer_UI *ui, u32 id)
-{
-	V2_F32 option_dim = ui->option_dim;
-	V2_F32 padding = ui->option_padding;
-	Range2_F32 available_space = ui->option_available_space;
-	
-	Range2_F32 item_rect = range_center_dim(ui->option_pos, option_dim);
-	Range2_F32 visible_range = range_intersection(item_rect, available_space);
-	
-	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	if (is_range_intersect(item_rect, available_space))
-	{
-		interaction = _ui_widget_interaction(ui, id, visible_range, 0);
-	}
-	else
-	{
-		interaction.not_visible = true;
-	}
-	
-	return interaction;
-}
-
-internal void
-ui_list_option_advance(Mplayer_UI *ui)
-{
-	V2_F32 option_dim = ui->option_dim;
-	V2_F32 padding = ui->option_padding;
-	Range2_F32 available_space = ui->option_available_space;
-	
-	ui->option_pos.x += option_dim.width + padding.width;
-	if (ui->option_pos.x + 0.5f * option_dim.width > available_space.max_x)
-	{
-		ui->option_pos.x = ui->option_start_pos.x;
-		ui->option_pos.y -= option_dim.height + padding.height;
-	}
-}
-
-internal u32
-ui_begin_list(Mplayer_UI *ui, Mplayer_Scroll_Data *scroll, V2_F32 option_dim, Range2_F32 available_space, u32 options_count, V2_F32 padding = vec2(0, 0))
-{
-	for (Mplayer_Input_Event *event = ui->input->first_event; event; event = event->next)
-	{
-		if (event->consumed) continue;
-		if (event->kind == Event_Kind_Mouse_Wheel)
-		{
-			event->consumed = true;
-			
-			scroll->target -= event->scroll.y;
-		}
-	}
-	
-	V2_F32 available_space_dim = range_dim(available_space);
-	V2_F32 option_start_pos = range_center(available_space);
-	option_start_pos.x -= 0.5f * (available_space_dim.width - option_dim.width) - padding.width;
-	option_start_pos.y += 0.5f * (available_space_dim.height - option_dim.height) - padding.height;
-	
-	u32 options_per_row = u32(available_space_dim.width / (option_dim.width + padding.width));
-	options_per_row = MAX(options_per_row, 1);
-	
-	u32 rows_count = options_count / options_per_row + !!(options_count % options_per_row);
-	
-	scroll->target = CLAMP(0, scroll->target, rows_count - 1);
-	
-	ui->option_pos = option_start_pos;
-	ui->option_pos.y += scroll->t * (option_dim.height + padding.height);
-	
-	ui->option_start_pos = option_start_pos;
-	ui->option_dim = option_dim;
-	ui->option_padding = padding;
-	ui->option_available_space = available_space;
-	
-	u32 index = 0;
-	for (; index < options_count; index += 1)
-	{
-		Range2_F32 item_rect = range_center_dim(ui->option_pos, option_dim);
-		Range2_F32 visible_range = range_intersection(item_rect, available_space);
-		if (is_range_intersect(item_rect, available_space))
-		{
-			break;
-		}
-		ui_list_option_advance(ui);
-	}
-	
-	return index;
-}
-
-struct Mplayer_List_Option_Result
-{
-	b32 handled;
-	b32 selected;
-};
-
-internal Mplayer_List_Option_Result
-mplayer_album_list_option(Render_Group *group, Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
-{
-	Mplayer_List_Option_Result result = ZERO_STRUCT;
-	Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
-	
-	Mplayer_UI_Interaction interaction = ui_list_option_begin(&mplayer->ui, (u32)int_from_ptr(album));
-	if (!interaction.not_visible)
-	{
-		result.handled = true;
-		
-		V4_F32 bg_color = vec4(1, 1, 1, 0.35f);
-		if (interaction.hover)
-		{
-			bg_color.a = 0.80f;
-		}
-		
-		if (interaction.pressed)
-		{
-			bg_color.a = 0;
-			result.selected = true;
-		}
-		
-		mpalyer_draw_item_image(group, mplayer, &album->header, mplayer->ui.option_pos, mplayer->ui.option_dim, bg_color, bg_color);
-		
-		V2_F32 name_dim = font_compute_text_dim(&mplayer->font, album->name);
-		
-		Range2_F32 item_rect = range_center_dim(mplayer->ui.option_pos, mplayer->ui.option_dim);
-		Range2_F32_Cut _cut = range_cut_top(item_rect, 10); // padding
-		_cut = range_cut_top(_cut.bottom, 30);
-		
-		Range2_F32 album_name_rect = _cut.top;
-		Range2_F32 album_image_rect = _cut.bottom;
-		draw_text(group, &mplayer->font, range_center(album_name_rect), vec4(1, 1, 1, 1), fancy_str8(album->name), Text_Render_Flag_Centered_Bit);
-		
-		ui_list_option_advance(&mplayer->ui);
-	}
-	
-	return result;
-}
-
-internal Mplayer_List_Option_Result
-mplayer_artist_list_option(Render_Group *group, Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
-{
-	Mplayer_List_Option_Result result = ZERO_STRUCT;
-	Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, artist_id);
-	
-	Mplayer_UI_Interaction interaction = ui_list_option_begin(&mplayer->ui, (u32)int_from_ptr(artist));
-	if (!interaction.not_visible)
-	{
-		result.handled = true;
-		
-		V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
-		if (interaction.hover)
-		{
-			bg_color = vec4(0.2f, 0.2f,0.2f, 1);
-		}
-		
-		if (interaction.pressed)
-		{
-			bg_color = vec4(0.14f, 0.14f,0.14f, 1);
-			result.selected = true;
-		}
-		
-		push_rect(group, mplayer->ui.option_pos, mplayer->ui.option_dim, bg_color);
-		V2_F32 name_dim = font_compute_text_dim(&mplayer->font, artist->name);
-		
-		Range2_F32 item_rect = range_center_dim(mplayer->ui.option_pos, mplayer->ui.option_dim);
-		Range2_F32_Cut _cut = range_cut_top(item_rect, 10); // padding
-		_cut = range_cut_top(_cut.bottom, 30);
-		
-		Range2_F32 artist_name_rect = _cut.top;
-		Range2_F32 artist_image_rect = _cut.bottom;
-		draw_text(group, &mplayer->font, range_center(artist_name_rect), vec4(1, 1, 1, 1), fancy_str8(artist->name), Text_Render_Flag_Centered_Bit);
-		
-		ui_list_option_advance(&mplayer->ui);
-	}
-	
-	return result;
-}
-
-internal Mplayer_List_Option_Result
-mplayer_track_list_option(Render_Group *group, Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
-{
-	Mplayer_List_Option_Result result = ZERO_STRUCT;
-	Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
-	Mplayer_UI_Interaction interaction = ui_list_option_begin(&mplayer->ui, (u32)int_from_ptr(track));
-	if (!interaction.not_visible)
-	{
-		result.handled = true;
-		
-		V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
-		if (track_id == mplayer->current_music_id)
-		{
-			bg_color = vec4(0.f, 0.f,0.f, 1);
-		}
-		
-		if (interaction.hover)
-		{
-			bg_color = vec4(0.2f, 0.2f,0.2f, 1);
-		}
-		
-		if (interaction.pressed)
-		{
-			bg_color = vec4(0.14f, 0.14f,0.14f, 1);
-			result.selected = true;
-		}
-		
-		// NOTE(fakhri): background
-		push_rect(group, mplayer->ui.option_pos, mplayer->ui.option_dim, bg_color);
-		
-		Range2_F32 item_rect = range_center_dim(mplayer->ui.option_pos, mplayer->ui.option_dim);
-		Range2_F32_Cut _cut = range_cut_left(item_rect, 20); // horizontal padding
-		
-		_cut = range_cut_left(_cut.right, 500);
-		Range2_F32 name_rect = _cut.left;
-		draw_text(group, &mplayer->font, vec2(name_rect.min_x, range_center(name_rect).y), vec4(1, 1, 1, 1), fancy_str8(track->title, range_dim(name_rect).width), Text_Render_Flag_Limit_Width_Bit);
-		
-		draw_outline(group, mplayer->ui.option_pos, mplayer->ui.option_dim, vec4(0, 0, 0, 1), 1);
-		
-		ui_list_option_advance(&mplayer->ui);
-	}
-	
-	return result;
-}
+#include "mplayer_ui.cpp"
 
 internal String8
 mplayer_attempt_find_cover_image_in_dir(Mplayer_Context *mplayer, Memory_Arena *arena, Directory dir)
@@ -1278,7 +742,7 @@ internal void
 mplayer_save_indexed_library(Mplayer_Context *mplayer)
 {
 	String8 index_path = MPLAYER_INDEX_FILENAME;
-	File_Handle *index_file = platform->open_file(index_path, File_Open_Write_Bit | File_Create_Always_Bit);
+	File_Handle *index_file = platform->open_file(index_path, File_Open_Write | File_Create_Always);
 	
 	if (index_file)
 	{
@@ -1443,7 +907,7 @@ mplayer_load_tracks_in_directory(Mplayer_Context *mplayer, String8 library_path)
 				music_track->path = str8_clone(&mplayer->library.arena, info.path);
 				
 				Buffer tmp_file_block = arena_push_buffer(scratch.arena, megabytes(1));
-				File_Handle *file = platform->open_file(music_track->path, make_flag(File_Open_Read));
+				File_Handle *file = platform->open_file(music_track->path, File_Open_Read);
 				Flac_Stream tmp_flac_stream = ZERO_STRUCT;
 				assert(file);
 				if (file)
@@ -1740,7 +1204,7 @@ mplayer_save_settings(Mplayer_Context *mplayer)
 {
 	// TODO(fakhri): save the config in user directory
 	String8 config_path = SETTINGS_FILE_NAME;
-	File_Handle *config_file = platform->open_file(config_path, File_Open_Write_Bit | File_Create_Always_Bit);
+	File_Handle *config_file = platform->open_file(config_path, File_Open_Write | File_Create_Always);
 	
 	if (config_file)
 	{
@@ -1849,24 +1313,6 @@ mplayer_close_path_lister(Mplayer_Context *mplayer, Mplayer_Path_Lister *path_li
 	
 }
 
-internal void
-mplayer_animate_scroll(Mplayer_Scroll_Data *scroll, f32 frame_dt)
-{
-	f32 current_scroll = scroll->t;
-	f32 target_scroll  = scroll->target;
-	f32 scroll_speed  = scroll->dt;
-	
-	f32 freq = 5.0f;
-	f32 zeta = 1.f;
-	
-	f32 K1 = zeta / (PI32 * freq);
-	f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
-	
-	f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
-	scroll->dt += frame_dt * scroll_accel;
-	scroll->t  += frame_dt * scroll->dt + 0.5f * SQUARE(frame_dt) * scroll_accel;
-}
-
 exported void
 mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
 {
@@ -1916,7 +1362,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	
 	mplayer_load_library(mplayer);
 	
-	mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
+	mplayer_change_mode(mplayer, MODE_Album_Library, 0);
 }
 
 exported  void
@@ -1941,7 +1387,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	if (mplayer->current_music_id && !is_music_track_still_playing(current_music))
 	{
 		// TODO(fakhri): play next song in queue
-		mplayer_play_music_track(mplayer, current_music->next_links[Links_Library]);
+		mplayer_play_music_track(mplayer, current_music->header.id + 1);
+		current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
 	}
 	
 	if (mplayer_button_clicked(&mplayer->input, Key_Mouse_M4))
@@ -1954,180 +1401,198 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		mplayer_change_next_mode(mplayer);
 	}
 	
-	ui_begin(&mplayer->ui, &group, &mplayer->input, world_mouse_p);
+	Mplayer_UI *ui = &mplayer->ui;;
+	ui_begin(ui, mplayer, &group, world_mouse_p);
 	
 	if (mplayer->show_path_popup)
 	{
-		mplayer->ui.disable_input = true;
+		ui->disable_input = true;
 	}
 	
-	Range2_F32 available_space = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
-	// NOTE(fakhri): track control
+	#if 1
+		
+		ui_vertical_layout(ui)
+	{
+		ui_pref_height(ui, ui_size_parent_remaining())
+			ui_horizontal_layout(ui)
+		{
+			ui_next_background_color(ui, vec4(0.06f, 0.06f, 0.06f, 1.0f));
+			ui_next_width(ui, ui_size_pixel(150, 1));
+			ui_next_border_color(ui, vec4(0.f, 0.f, 0.f, 1.0f));
+			ui_next_border_thickness(ui, 2);
+			ui_vertical_layout(ui)
+			{
+				ui_pref_background_color(ui, vec4(0.1f, 0.1f, 0.1f, 1)) ui_pref_text_color(ui, vec4(1, 1, 1, 1))
+					ui_pref_width(ui, ui_size_percent(1, 1)) ui_pref_height(ui, ui_size_text_dim(1))
+				{
+					ui_spacer(ui, ui_size_pixel(20, 1));
+					if (ui_button(ui, str8_lit("Songs")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Music_Library)
+							mplayer_change_mode(mplayer, MODE_Music_Library, 0);
+					}
+					
+					ui_spacer(ui, ui_size_pixel(2, 1));
+					if (ui_button(ui, str8_lit("Artists")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Artist_Library)
+							mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
+					}
+					
+					ui_spacer(ui, ui_size_pixel(2, 1));
+					if (ui_button(ui, str8_lit("Albums")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Album_Library)
+							mplayer_change_mode(mplayer, MODE_Album_Library, 0);
+					}
+					
+					ui_spacer(ui, ui_size_pixel(2, 1));
+					if (ui_button(ui, str8_lit("Lyrics")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Lyrics)
+							mplayer_change_mode(mplayer, MODE_Lyrics, 0);
+					}
+					
+					ui_spacer(ui, ui_size_pixel(2, 1));
+					if (ui_button(ui, str8_lit("Settings")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Settings)
+							mplayer_change_mode(mplayer, MODE_Settings, 0);
+					}
+				}
+			}
+			
+			ui_next_width(ui, ui_size_parent_remaining());
+			ui_vertical_layout(ui)
+			{
+				switch(mplayer->mode_stack->mode)
+				{
+					case MODE_Artist_Library:
+					{
+						// NOTE(fakhri): header
+						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_horizontal_layout(ui)
+						{
+							ui_spacer(ui, ui_size_pixel(50, 0));
+							
+							ui_next_background_color(ui, vec4(1, 1, 1, 0));
+							ui_next_text_color(ui, vec4(1, 1, 1, 1));
+							ui_next_width(ui, ui_size_text_dim(1));
+							ui_next_font(ui, &mplayer->header_label_font);
+							ui_label(ui, str8_lit("Artists"));
+						}
+						
+						// NOTE(fakhri): library artists list
+						{
+							
+						}
+					} break;
+					
+					case MODE_Album_Library:
+					{
+						// NOTE(fakhri): header
+						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_next_flags(ui, UI_FLAG_Allow_OverflowX);
+						ui_horizontal_layout(ui)
+						{
+							ui_spacer(ui, ui_size_pixel(50, 1));
+							
+							ui_next_background_color(ui, vec4(1, 1, 1, 0));
+							ui_next_text_color(ui, vec4(1, 1, 1, 1));
+							ui_next_width(ui, ui_size_text_dim(1));
+							ui_next_font(ui, &mplayer->header_label_font);
+							ui_label(ui, str8_lit("Albums"));
+						}
+						
+						ui_next_flags(ui, UI_FLAG_Grid);
+						ui_horizontal_layout(ui)
+						{
+							// NOTE(fakhri): library albums list
+							for (Mplayer_Item_ID album_id = 1; album_id < mplayer->library.albums_count; album_id += 1)
+							{
+								Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
+								mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
+								
+								UI_Element_Flags flags = 0;
+								if (mplayer_item_image_ready(&album->header.image))
+								{
+									flags |= UI_FLAG_Draw_Image;
+									ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
+									ui_next_texture(ui, album->header.image.texture);
+								}
+								else
+								{
+									flags |= UI_FLAG_Draw_Background;
+									ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+								}
+								
+								ui_next_width(ui, ui_size_pixel(350, 1));
+								ui_next_height(ui, ui_size_pixel(300, 1));
+								ui_next_flags(ui, UI_FLAG_Allow_OverflowY | UI_FLAG_Allow_OverflowX);
+								UI_Element *album_el = ui_make_element(ui, str8_lit(""), flags);
+								album_el->child_layout_axis = Axis2_Y;
+								ui_parent(ui, album_el)
+								{
+									ui_spacer(ui, ui_size_pixel(10, 1));
+									
+									ui_next_background_color(ui, vec4(1, 1, 1, 0));
+									ui_next_text_color(ui, vec4(1, 1, 1, 1));
+									ui_next_width(ui, ui_size_percent(1, 1));
+									ui_next_height(ui, ui_size_text_dim(1));
+									ui_label(ui, album->name);
+								}
+							}
+						}
+					} break;
+					
+					case MODE_Artist_Albums:
+					{
+						
+					} break;
+					
+					case MODE_Album_Tracks:
+					{
+						
+					} break;
+					
+					case MODE_Music_Library:
+					{
+						
+					} break;
+					
+					case MODE_Lyrics:
+					{
+						
+					} break;
+					
+					case MODE_Settings:
+					{
+						
+					} break;
+				}
+			}
+		}
+		
+		// NOTE(fakhri): track control
+		ui_next_background_color(ui, vec4(0.f, 0.f, 0.f, 1));
+		ui_pref_height(ui, ui_size_pixel(125, 1))
+			ui_vertical_layout(ui)
+		{
+			
+		}
+	}
+	
+	ui_end(ui);
+	
+	#else
+		Range2_F32 available_space = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
+	Range2_F32 track_control_rect;
 	{
 		Range2_F32_Cut cut = range_cut_bottom(available_space, 125);
-		available_space = cut.top;
-		
-		V4_F32 track_control_bg_color = vec4(0.05f, 0.05f, 0.05f, 1.0f);
-		push_rect(&group, range_center(cut.bottom), range_dim(cut.bottom), track_control_bg_color);
-		
-		// NOTE(fakhri): padding
-		cut = range_cut_top(cut.bottom, 10);
-		
-		// NOTE(fakhri): track
-		{
-			cut = range_cut_top(cut.bottom, 20);
-			Range2_F32 track_rect = cut.top;
-			
-			// NOTE(fakhri): timestamp
-			{
-				Range2_F32_Cut cut2 = range_cut_left(track_rect, 100);
-				track_rect = cut2.right;
-				
-				Range2_F32 timestamp_rect = range_cut_right(cut2.left, 100).right;
-				Mplayer_Timestamp current_timestamp = ZERO_STRUCT;
-				if (current_music) current_timestamp = flac_get_current_timestap(current_music->flac_stream);
-				
-				Memory_Checkpoint scratch = get_scratch(0, 0);
-				String8 timestamp_string = str8_f(scratch.arena, "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
-				draw_text(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), 
-					fancy_str8(timestamp_string),
-					Text_Render_Flag_Centered_Bit);
-			}
-			
-			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
-			
-			f32 samples_count = 0;
-			f32 current_playing_sample = 0;
-			if (current_music && current_music->flac_stream)
-			{
-				samples_count = (f32)current_music->flac_stream->streaminfo.samples_count;
-				current_playing_sample = (f32)current_music->flac_stream->next_sample_number;
-			}
-			
-			Mplayer_UI_Interaction track = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect), 1);
-			if (track.pressed)
-			{
-				if (current_music && current_music->flac_stream)
-				{
-					mplayer->play_track = false;
-					flac_seek_stream(current_music->flac_stream, (u64)current_playing_sample);
-				}
-			}
-			else if (track.released)
-			{
-				mplayer->play_track = true;
-			}
-		}
-		
-		if (!(current_music && current_music->flac_stream))
-		{
-			mplayer->play_track = false;
-		}
-		
-		// NOTE(fakhri): horizontal padding
-		cut = range_cut_left_percentage(cut.bottom, 1.0f/3.0f);
-		
-		// NOTE(fakhri): cover picture and track name
-		{
-			if (current_music)
-			{
-				Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, current_music->album_id);
-				
-				Range2_F32_Cut cut2 = range_cut_left(cut.left, 100);
-				Range2_F32 cover_rect      = cut2.left;
-				Range2_F32 track_name_rect = cut2.right;
-				
-				if (mplayer_is_valid_image(current_music->header.image))
-				{
-					mpalyer_draw_item_image(&group, mplayer, &current_music->header, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
-				}
-				else if (current_music->album_id && mplayer_is_valid_image(album->header.image))
-				{
-					mpalyer_draw_item_image(&group, mplayer, &album->header, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
-				}
-				
-				// TODO(fakhri): stack of render configs?
-				
-				Range2_F32 prev_cull_range = group.config.cull_range;
-				render_group_add_cull_range(&group, track_name_rect);
-				
-				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, __LINE__, track_name_rect, 0);
-				V4_F32 title_rect_color = track_control_bg_color;
-				if (interaction.hover)
-				{
-					title_rect_color = vec4(0.1f, 0.1f, 0.1f, 1.0f);
-				}
-				
-				if (interaction.pressed)
-				{
-					title_rect_color = vec4(0.0f, 0.f, 0.f, 1.0f);
-				}
-				
-				if (interaction.clicked && current_music->album_id)
-				{
-					mplayer->selected_album_id = current_music->album_id;
-					mplayer_change_mode(mplayer, MODE_Album_Tracks, mplayer->selected_album_id);
-				}
-				
-				V2_F32 track_name_center = range_center(track_name_rect); 
-				V2_F32 track_name_dim = range_dim(track_name_rect); 
-				push_rect(&group, track_name_center, track_name_dim, title_rect_color);
-				
-				V2_F32 text_pos = vec2(5 + track_name_rect.min_x, track_name_center.y);
-				f32 text_width = font_compute_text_dim(&mplayer->font, current_music->title).width;
-				
-				if (interaction.hover && text_width > track_name_dim.width)
-				{
-					mplayer->track_name_hover_t += mplayer->input.frame_dt;
-					
-					text_pos.x -= 10 * PI32 * mplayer->track_name_hover_t;
-					draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(current_music->title));
-					text_pos.x += text_width + 10;
-				}
-				else
-				{
-					mplayer->track_name_hover_t = 0;
-				}
-				
-				draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(current_music->title));
-				render_group_set_cull_range(&group, prev_cull_range);
-			}
-		}
-		
-		// NOTE(fakhri): play button
-		{
-			cut = range_cut_left_percentage(cut.right, 0.5f);
-			Range2_F32 button_rect = cut.left;
-			
-			if (!mplayer->play_track)
-			{
-				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Play"), range_center(button_rect)).clicked)
-				{
-					mplayer->play_track = 1;
-				}
-			}
-			else
-			{
-				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Pause"), range_center(button_rect)).clicked)
-				{
-					mplayer->play_track = 0;
-				}
-			}
-		}
-		
-		// NOTE(fakhri): volume
-		{
-			// NOTE(fakhri): vertical padding
-			cut = range_cut_top(cut.right, 30);
-			
-			// NOTE(fakhri): horizontal padding
-			cut = range_cut_right(cut.right, 20);
-			
-			// NOTE(fakhri): volume rect
-			cut = range_cut_right(cut.left, 150);
-			Range2_F32 volume_rect = range_cut_top(cut.right, 20).top;
-			ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, range_center(volume_rect), range_dim(volume_rect), 1);
-		}
+		available_space    = cut.top;
+		track_control_rect = cut.bottom;
 	}
 	
 	// NOTE(fakhri): left side
@@ -2188,7 +1653,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				mplayer_change_mode(mplayer, MODE_Settings, 0);
 			}
 		}
-		
 	}
 	
 	
@@ -2213,7 +1677,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				cut2 = range_cut_left(cut2.right, artist_label_width + 10);
 				
 				Range2_F32 label_rect = cut2.left;
-				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(artist_label), Text_Render_Flag_Centered_Bit);
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(artist_label), Text_Render_Flag_Centered);
 			}
 			
 			Range2_F32 library_header = cut.top;
@@ -2410,6 +1874,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				if (selected_track_id)
 				{
 					mplayer_play_music_track(mplayer, selected_track_id);
+					current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
 				}
 			}
 		} break;
@@ -2430,7 +1895,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				cut2 = range_cut_left(cut2.right, album_label_width + 10);
 				
 				Range2_F32 label_rect = cut2.left;
-				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(album_label), Text_Render_Flag_Centered_Bit);
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(album_label), Text_Render_Flag_Centered);
 				
 				// TODO(fakhri): display the number of albums and tracks the selected artist have
 			}
@@ -2477,7 +1942,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				cut2 = range_cut_left(cut2.right, songs_label_width + 10);
 				
 				Range2_F32 label_rect = cut2.left;
-				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(songs_label), Text_Render_Flag_Centered_Bit);
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(songs_label), Text_Render_Flag_Centered);
 			}
 			
 			Range2_F32 library_header = cut.top;
@@ -2504,13 +1969,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				if (selected_track_id)
 				{
 					mplayer_play_music_track(mplayer, selected_track_id);
+					current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
 				}
 			}
 		} break;
 		
 		case MODE_Lyrics:
 		{
-			draw_text(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), fancy_str8_lit("Lyrics not available"), Text_Render_Flag_Centered_Bit);
+			draw_text(&group, &mplayer->font, range_center(available_space), vec4(1, 1, 1, 1), fancy_str8_lit("Lyrics not available"), Text_Render_Flag_Centered);
 		} break;
 		
 		case MODE_Settings:
@@ -2529,7 +1995,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				cut2 = range_cut_left(cut2.right, settings_label_width + 10);
 				
 				Range2_F32 label_rect = cut2.left;
-				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(settings_label), Text_Render_Flag_Centered_Bit);
+				draw_text(&group, &mplayer->header_label_font, range_center(label_rect), vec4(1, 1, 1, 1), fancy_str8(settings_label), Text_Render_Flag_Centered);
 			}
 			
 			available_space = cut.bottom;
@@ -2627,6 +2093,174 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			}
 			
 		} break;
+	}
+	
+	
+	// NOTE(fakhri): track control
+	{
+		render_group_set_cull_range(&group, track_control_rect);
+		
+		V4_F32 track_control_bg_color = vec4(0.05f, 0.05f, 0.05f, 1.0f);
+		push_rect(&group, range_center(track_control_rect), range_dim(track_control_rect), track_control_bg_color);
+		
+		// NOTE(fakhri): padding
+		Range2_F32_Cut cut = range_cut_top(track_control_rect, 10);
+		
+		// NOTE(fakhri): track
+		{
+			cut = range_cut_top(cut.bottom, 20);
+			Range2_F32 track_rect = cut.top;
+			
+			// NOTE(fakhri): timestamp
+			{
+				Range2_F32_Cut cut2 = range_cut_left(track_rect, 100);
+				track_rect = cut2.right;
+				
+				Range2_F32 timestamp_rect = range_cut_right(cut2.left, 100).right;
+				Mplayer_Timestamp current_timestamp = ZERO_STRUCT;
+				if (current_music) current_timestamp = flac_get_current_timestap(current_music->flac_stream);
+				
+				Memory_Checkpoint scratch = get_scratch(0, 0);
+				String8 timestamp_string = str8_f(scratch.arena, "%.2d:%.2d:%.2d", current_timestamp.hours, current_timestamp.minutes, current_timestamp.seconds);
+				draw_text(&group, &mplayer->timestamp_font, range_center(timestamp_rect), vec4(1, 1, 1, 1), 
+					fancy_str8(timestamp_string),
+					Text_Render_Flag_Centered);
+			}
+			
+			track_rect = range_cut_right(range_cut_left(track_rect, 20).right, 20).left;
+			
+			f32 samples_count = 0;
+			f32 current_playing_sample = 0;
+			if (current_music && current_music->flac_stream)
+			{
+				samples_count = (f32)current_music->flac_stream->streaminfo.samples_count;
+				current_playing_sample = (f32)current_music->flac_stream->next_sample_number;
+			}
+			
+			Mplayer_UI_Interaction track = ui_slider_f32(&mplayer->ui, &current_playing_sample, 0, samples_count, range_center(track_rect), range_dim(track_rect), 1);
+			if (track.pressed)
+			{
+				if (current_music && current_music->flac_stream)
+				{
+					mplayer->play_track = false;
+					flac_seek_stream(current_music->flac_stream, (u64)current_playing_sample);
+				}
+			}
+			else if (track.released)
+			{
+				mplayer->play_track = true;
+			}
+		}
+		
+		if (!(current_music && current_music->flac_stream))
+		{
+			mplayer->play_track = false;
+		}
+		
+		// NOTE(fakhri): horizontal padding
+		cut = range_cut_left_percentage(cut.bottom, 1.0f/3.0f);
+		
+		// NOTE(fakhri): cover picture and track name
+		{
+			if (current_music)
+			{
+				Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, current_music->album_id);
+				
+				Range2_F32_Cut cut2 = range_cut_left(cut.left, 100);
+				Range2_F32 cover_rect      = cut2.left;
+				Range2_F32 track_name_rect = cut2.right;
+				
+				if (mplayer_is_valid_image(current_music->header.image))
+				{
+					mpalyer_draw_item_image(&group, mplayer, &current_music->header, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
+				}
+				else if (current_music->album_id && mplayer_is_valid_image(album->header.image))
+				{
+					mpalyer_draw_item_image(&group, mplayer, &album->header, range_center(cover_rect), range_dim(cover_rect), vec4(1,1,1,1));
+				}
+				
+				// TODO(fakhri): stack of render configs?
+				
+				Range2_F32 prev_cull_range = group.config.cull_range;
+				render_group_add_cull_range(&group, track_name_rect);
+				
+				Mplayer_UI_Interaction interaction = _ui_widget_interaction(&mplayer->ui, __LINE__, track_name_rect, 0);
+				V4_F32 title_rect_color = track_control_bg_color;
+				if (interaction.hover)
+				{
+					title_rect_color = vec4(0.1f, 0.1f, 0.1f, 1.0f);
+				}
+				
+				if (interaction.pressed)
+				{
+					title_rect_color = vec4(0.0f, 0.f, 0.f, 1.0f);
+				}
+				
+				if (interaction.clicked && current_music->album_id)
+				{
+					mplayer->selected_album_id = current_music->album_id;
+					mplayer_change_mode(mplayer, MODE_Album_Tracks, mplayer->selected_album_id);
+				}
+				
+				V2_F32 track_name_center = range_center(track_name_rect); 
+				V2_F32 track_name_dim = range_dim(track_name_rect); 
+				push_rect(&group, track_name_center, track_name_dim, title_rect_color);
+				
+				V2_F32 text_pos = vec2(5 + track_name_rect.min_x, track_name_center.y);
+				f32 text_width = font_compute_text_dim(&mplayer->font, current_music->title).width;
+				
+				if (interaction.hover && text_width > track_name_dim.width)
+				{
+					mplayer->track_name_hover_t += mplayer->input.frame_dt;
+					
+					text_pos.x -= 10 * PI32 * mplayer->track_name_hover_t;
+					draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(current_music->title));
+					text_pos.x += text_width + 10;
+				}
+				else
+				{
+					mplayer->track_name_hover_t = 0;
+				}
+				
+				draw_text(&group, &mplayer->font, text_pos, vec4(1, 1, 1, 1), fancy_str8(current_music->title));
+				render_group_set_cull_range(&group, prev_cull_range);
+			}
+		}
+		
+		// NOTE(fakhri): play button
+		{
+			cut = range_cut_left_percentage(cut.right, 0.5f);
+			Range2_F32 button_rect = cut.left;
+			
+			if (!mplayer->play_track)
+			{
+				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Play"), range_center(button_rect)).clicked)
+				{
+					mplayer->play_track = 1;
+				}
+			}
+			else
+			{
+				if (ui_button(&mplayer->ui, &mplayer->font, str8_lit("Pause"), range_center(button_rect)).clicked)
+				{
+					mplayer->play_track = 0;
+				}
+			}
+		}
+		
+		// NOTE(fakhri): volume
+		{
+			// NOTE(fakhri): vertical padding
+			cut = range_cut_top(cut.right, 30);
+			
+			// NOTE(fakhri): horizontal padding
+			cut = range_cut_right(cut.right, 20);
+			
+			// NOTE(fakhri): volume rect
+			cut = range_cut_right(cut.left, 150);
+			Range2_F32 volume_rect = range_cut_top(cut.right, 20).top;
+			ui_slider_f32(&mplayer->ui, &mplayer->volume, 0, 1, range_center(volume_rect), range_dim(volume_rect), 1);
+		}
 	}
 	
 	if (mplayer->show_path_popup)
@@ -2738,14 +2372,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			mplayer_close_path_lister(mplayer, &mplayer->path_lister);
 		}
 	}
-	
-	// NOTE(fakhri): animate scroll
-	if (mplayer->mode_stack)
-	{
-		mplayer_animate_scroll(&mplayer->mode_stack->scroll, mplayer->input.frame_dt);
-	}
-	
-	// NOTE(fakhri): draw fps
+	#endif
+		
+		// NOTE(fakhri): draw fps
 	{
 		render_group_set_cull_range(&group, screen_rect);
 		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
@@ -2754,7 +2383,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		Memory_Checkpoint scratch = get_scratch(0, 0);
 		draw_text(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), 
 			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
-			Text_Render_Flag_Centered_Bit);
+			Text_Render_Flag_Centered);
 	}
 	
 }

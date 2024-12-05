@@ -36,8 +36,8 @@ struct File_Iterator_Handle
 
 enum File_Flag
 {
-	FileFlag_Directory,
-	FileFlag_Valid,
+	FileFlag_Directory = (1 << 0),
+	FileFlag_Valid     = (1 << 1),
 };
 typedef u32 File_Flags;
 
@@ -54,14 +54,10 @@ struct File_Info
 typedef u32 File_Open_Flags;
 enum
 {
-	File_Open_Read,
-	File_Open_Write,
-	File_Create_Always,
+	File_Open_Read     = (1 << 0),
+	File_Open_Write    = (1 << 1),
+	File_Create_Always = (1 << 2),
 };
-
-#define File_Open_Read_Bit make_flag(File_Open_Read)
-#define File_Open_Write_Bit make_flag(File_Open_Write)
-#define File_Create_Always_Bit make_flag(File_Create_Always)
 
 typedef void File_Handle;
 
@@ -120,32 +116,6 @@ global Mplayer_OS_Vtable *platform = 0;
 #include "mplayer_bitstream.h"
 #include "mplayer_flac.h"
 
-struct Mplayer_UI
-{
-	Render_Group *group;
-	Mplayer_Input *input;
-	V2_F32 mouse_p;
-	b32 disable_input;
-	
-	u64 active_widget_id;
-	u64 hot_widget_id;
-	
-	u64 selected_widget_id;
-	
-	f32 active_t;
-	f32 active_dt;
-	
-	f32 hot_t;
-	f32 hot_dt;
-	
-	f32 recent_click_time;
-	u32 input_cursor;
-	V2_F32 option_start_pos;
-	V2_F32 option_pos;
-	V2_F32 option_dim;
-	V2_F32 option_padding;
-	Range2_F32 option_available_space;
-};
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "third_party/stb_truetype.h"
@@ -173,16 +143,7 @@ struct Mplayer_Font
 	f32 descent;
 };
 
-
-struct Mplayer_UI_Interaction
-{
-	b32 hover;
-	b32 pressed;
-	b32 released;
-	b32 clicked; // pressed widget and released inside the widget
-	b32 edited;
-	b32 not_visible;
-};
+#include "mplayer_ui.h"
 
 struct Mplayer_Item_Image
 {

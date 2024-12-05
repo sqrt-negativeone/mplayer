@@ -106,9 +106,9 @@ typedef void void_function();
 #define memory_zero_struct(p) memory_zero(p, sizeof(*(p)))
 
 #define array_count(a) (sizeof(a) / sizeof((a)[0]))
-#define has_flag(flags, f) ((flags) & (1 << (f)))
-#define set_flag(flags, f) ((flags) |= (1 << (f)))
-#define make_flag(f) (1 << (f))
+#define has_flag(flags, f) ((flags) & (f))
+#define set_flag(flags, f) ((flags) |= (f))
+#define _make_flag(f) (1 << (f))
 
 #define member(T, m) (((T*)0)->m)
 #define member_offset(T, m) int_from_ptr(&member(T, m))

@@ -22,6 +22,7 @@ union V2_F32
 {
 	struct {f32 x, y;};
 	struct {f32 width, height;};
+	f32 v[2];
 };
 
 union V3_F32
@@ -202,6 +203,13 @@ vec4(f32 x, f32 y, f32 z, f32 w)
 	result.y = y;
 	result.z = z;
 	result.w = w;
+	return result;
+}
+
+internal V4_F32
+vec4(f32 d)
+{
+	V4_F32 result = vec4(d, d, d, d);
 	return result;
 }
 

@@ -117,9 +117,9 @@ enum Mplayer_Input_Event_Kind
 
 enum Mplayer_Key_Modifier_Flag
 {
-	Modifier_Ctrl,
-	Modifier_Shift,
-	Modifier_Alt,
+	Modifier_Ctrl  = (1 << 0),
+	Modifier_Shift = (1 << 1),
+	Modifier_Alt   = (1 << 2),
 };
 
 struct Mplayer_Input_Event
