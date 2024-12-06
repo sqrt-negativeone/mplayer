@@ -186,7 +186,6 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	result->flags = flags;
 	result->size[0]  = ui_stack_top(ui->sizes[0]);
 	result->size[1]  = ui_stack_top(ui->sizes[1]);
-	result->computed_dim = ZERO_STRUCT;
 	result->hash = hash;
 	result->frame_index = ui->frame_index;
 	result->parent = result->next = result->prev = result->first = result->last = 0;
