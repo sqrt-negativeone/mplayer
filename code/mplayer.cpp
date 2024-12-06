@@ -1506,8 +1506,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_label(ui, str8_lit("Albums"));
 						}
 						
-						ui_next_flags(ui, UI_FLAG_Grid);
-						ui_horizontal_layout(ui)
+						ui_vertical_layout(ui)
 						{
 							// NOTE(fakhri): library albums list
 							for (Mplayer_Item_ID album_id = 1; album_id < mplayer->library.albums_count; album_id += 1)
@@ -1531,7 +1530,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_width(ui, ui_size_pixel(350, 1));
 								ui_next_height(ui, ui_size_pixel(300, 1));
 								ui_next_flags(ui, UI_FLAG_Allow_OverflowY | UI_FLAG_Allow_OverflowX);
-								UI_Element *album_el = ui_make_element(ui, str8_lit(""), flags);
+								UI_Element *album_el = ui_element(ui, str8_lit(""), flags);
 								album_el->child_layout_axis = Axis2_Y;
 								ui_parent(ui, album_el)
 								{

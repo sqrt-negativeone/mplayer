@@ -58,14 +58,6 @@ ui_auto_pop_stack(ui->flags_stack);         \
 } while (0)
 
 
-internal String8
-ui_drawable_text_from_string(Mplayer_UI *ui, String8 string)
-{
-	// TODO(fakhri): only copy drawable part of the string
-	String8 resutl = str8_clone(ui->frame_arena, string);
-	return resutl;
-}
-
 internal void
 ui_push_parent(Mplayer_UI *ui, UI_Element *node)
 {
@@ -79,26 +71,125 @@ ui_pop_parent(Mplayer_UI *ui)
 		ui->curr_parent = ui->curr_parent->parent;
 }
 
-internal UI_Element *
-ui_make_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
+// NOTE(fakhri): from http://www.cse.yorku.ca/~oz/hash.html
+internal u64
+ui_hash_key(String8 key)
 {
-	//- NOTE(fakhri): create new element
-	UI_Element *result = ui->free_elements;
-	if (result)
+	u64 hash = 0;
+	if (key.len)
 	{
-		ui->free_elements = result->next_free;
-		memory_zero_struct(result);
+		hash = 5381;
+		for (u32 i = 0; i < key.len; i += 1)
+		{
+			hash = ((hash << 5) + hash) + key.str[i];
+		}
 	}
-	else
+	return hash;
+}
+
+internal UI_Element *
+ui_element_from_key(Mplayer_UI *ui, String8 key)
+{
+	UI_Element *result = 0;
+	if (key.len)
 	{
-		result = m_arena_push_struct_z(ui->arena, UI_Element);
+		u64 hash = ui_hash_key(key);
+		u32 bucket_index = hash % array_count(ui->elements_table);
+		for (UI_Element *node = ui->elements_table[bucket_index].first; node; node = node->next_hash)
+		{
+			if (node->hash == hash)
+			{
+				result = node;
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+internal String8
+ui_drawable_text_from_string(String8 string)
+{
+	String8 result = string;
+	u64 sep_pos = find_substr8(string, str8_lit("##"), 0, 0);
+	if (sep_pos < string.len)
+	{
+		result.len = sep_pos;
+	}
+	return result;
+}
+
+internal String8
+ui_key_from_string(String8 string)
+{
+	String8 result = string;
+	u64 sep_pos = find_substr8(string, str8_lit("###"), 0, 0);
+	if (sep_pos < string.len)
+	{
+		result = str8_skip_first(string, sep_pos);
+	}
+	return result;
+}
+
+internal void
+ui_element_set_text(Mplayer_UI *ui, UI_Element *element, String8 string)
+{
+	element->flags |= UI_FLAG_Draw_Text;
+	
+	element->font       = ui_stack_top(ui->fonts);
+	element->text_color = ui_stack_top(ui->text_colors);
+	element->text       = ui_drawable_text_from_string(string);
+}
+
+internal UI_Element *
+ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
+{
+	UI_Element *result = 0;
+	
+	//- NOTE(fakhri): check hash table
+	String8 key = ui_key_from_string(string);
+	u64 hash = ui_hash_key(key);
+	u32 bucket_index = hash % array_count(ui->elements_table);
+	if (hash)
+	{
+		for (UI_Element *ht_node = ui->elements_table[bucket_index].first; ht_node; ht_node = ht_node->next_hash)
+		{
+			if (ht_node->hash == hash)
+			{
+				assert(ht_node->frame_index < ui->frame_index);
+				result = ht_node;
+				break;
+			}
+		}
+	}
+	
+	if (!result)
+	{
+		//- NOTE(fakhri): create new element
+		result = ui->free_elements;
+		if (result)
+		{
+			ui->free_elements = result->next_free;
+			memory_zero_struct(result);
+		}
+		else
+		{
+			result = m_arena_push_struct_z(ui->arena, UI_Element);
+		}
+		
+		// NOTE(fakhri): push to the hash table
+		DLLPushBack_NP(ui->elements_table[bucket_index].first, ui->elements_table[bucket_index].last, result, next_hash, prev_hash);
 	}
 	
 	//- NOTE(fakhri): init ui element
+	assert(result);
 	result->flags = flags;
 	result->size[0]  = ui_stack_top(ui->sizes[0]);
 	result->size[1]  = ui_stack_top(ui->sizes[1]);
 	result->computed_dim = ZERO_STRUCT;
+	result->hash = hash;
+	result->frame_index = ui->frame_index;
+	result->parent = result->next = result->prev = result->first = result->last = 0;
 	
 	if (ui->flags_stack.top)
 	{
@@ -126,7 +217,7 @@ ui_make_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	{
 		result->font       = ui_stack_top(ui->fonts);
 		result->text_color = ui_stack_top(ui->text_colors);
-		result->text       = ui_drawable_text_from_string(ui, string);
+		result->text       = ui_drawable_text_from_string(string);
 	}
 	
 	if (ui->curr_parent)
@@ -353,7 +444,7 @@ ui_pop_flags(Mplayer_UI *ui)
 internal UI_Element *
 ui_layout(Mplayer_UI *ui, Axis2 child_layout_axis)
 {
-	UI_Element *layout = ui_make_element(ui, str8_lit(""), UI_FLAG_Draw_Background | UI_FLAG_Draw_Border);
+	UI_Element *layout = ui_element(ui, str8_lit(""), UI_FLAG_Draw_Background | UI_FLAG_Draw_Border);
 	layout->child_layout_axis = child_layout_axis;
 	return layout;
 }
@@ -366,7 +457,7 @@ ui_spacer(Mplayer_UI *ui, UI_Size size)
 	{
 		ui_next_size(ui, parent->child_layout_axis, size);
 		ui_next_size(ui, inverse_axis(parent->child_layout_axis), ui_size_pixel(0, 0));
-		UI_Element *spacer = ui_make_element(ui, str8_lit(""), 0);
+		UI_Element *spacer = ui_element(ui, str8_lit(""), 0);
 	}
 	
 }
@@ -382,7 +473,7 @@ ui_interaction_from_element(Mplayer_UI *ui, UI_Element *element)
 internal Mplayer_UI_Interaction
 ui_button(Mplayer_UI *ui, String8 string)
 {
-	UI_Element *button = ui_make_element(ui, string,
+	UI_Element *button = ui_element(ui, string,
 		UI_FLAG_Clickable |
 		UI_FLAG_Draw_Background |
 		UI_FLAG_Draw_Text
@@ -395,11 +486,11 @@ ui_button(Mplayer_UI *ui, String8 string)
 internal void
 ui_label(Mplayer_UI *ui, String8 string)
 {
-	ui_make_element(ui, string,
+	UI_Element *label = ui_element(ui, ZERO_STRUCT,
 		UI_FLAG_Draw_Border |
-		UI_FLAG_Draw_Background |
-		UI_FLAG_Draw_Text
+		UI_FLAG_Draw_Background
 	);
+	ui_element_set_text(ui, label, string);
 }
 
 internal void
@@ -435,49 +526,54 @@ internal void
 ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 {
 	if (!node->first) return;
-	f32 childs_sum_size = 0;
-	for (UI_Element *child = node->first; child; child = child->next)
+	
+	f32 parent_size = node->computed_dim.v[axis];
+	if (axis == node->child_layout_axis)
 	{
-		if (axis == node->child_layout_axis)
+		f32 childs_sum_size = 0;
+		for (UI_Element *child = node->first; child; child = child->next)
 		{
 			childs_sum_size += child->computed_dim.v[axis];
 		}
-		else
+		
+		if (childs_sum_size > parent_size)
 		{
-			childs_sum_size = MAX(childs_sum_size, child->computed_dim.v[axis]);
-		}
-	}
-	
-	f32 parent_size = node->computed_dim.v[axis];
-	if (childs_sum_size > parent_size)
-	{
-		for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
-		{
-			f32 child_old_size = child->computed_dim.v[axis];
-			f32 new_child_size = child_old_size;
-			f32 min_child_size = child->size[axis].strictness * child_old_size;
-			
-			if (axis == node->child_layout_axis)
+			for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
 			{
+				f32 child_old_size = child->computed_dim.v[axis];
+				f32 new_child_size = child_old_size;
+				f32 min_child_size = child->size[axis].strictness * child_old_size;
+				
 				f32 other_childs_sum_size = childs_sum_size - child_old_size;
 				f32 child_needed_size = parent_size - other_childs_sum_size;
 				
 				new_child_size = MAX(min_child_size, child_needed_size);
 				childs_sum_size = other_childs_sum_size + new_child_size;
+				
+				child->computed_dim.v[axis] = new_child_size;
 			}
-			else if (child_old_size > parent_size)
-			{
-				f32 child_needed_size = parent_size;
-				new_child_size = MAX(min_child_size, child_needed_size);
-			}
-			child->computed_dim.v[axis] = new_child_size;
+		}
+	}
+	else
+	{
+		f32 childs_sum_size = 0;
+		for (UI_Element *child = node->first; child; child = child->next)
+		{
+			childs_sum_size = MAX(childs_sum_size, child->computed_dim.v[axis]);
 		}
 		
-		if (childs_sum_size > parent_size && 
-			axis == node->child_layout_axis && 
-			!has_flag(node->flags, UI_FLAG_Allow_OverflowX << axis))
+		if (childs_sum_size > parent_size)
 		{
-			set_flag(node->flags, UI_FLAG_Break_Child_X << axis);
+			for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
+			{
+				f32 child_old_size = child->computed_dim.v[axis];
+				f32 new_child_size = child_old_size;
+				f32 min_child_size = child->size[axis].strictness * child_old_size;
+				
+				f32 child_needed_size = parent_size;
+				new_child_size = MAX(min_child_size, child_needed_size);
+				child->computed_dim.v[axis] = new_child_size;
+			}
 		}
 	}
 	
@@ -506,7 +602,8 @@ ui_layout_compute_positions(UI_Element *node)
 	V2_F32 child_pos = start_child_pos;
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
-		if (axis == Axis2_X)
+		#if 0
+			if (axis == Axis2_X)
 		{
 			if (has_flag(node->flags, UI_FLAG_Break_Child_X) && 
 				(child_pos.x + 0.75f * child->computed_dim.width > node->rect.max_x))
@@ -515,8 +612,9 @@ ui_layout_compute_positions(UI_Element *node)
 				child_pos.y -= node->max_child_dim.y + 5;
 			}
 		}
-		
-		f32 offset = (axis == Axis2_X? 0.5f:-0.5f) * child->computed_dim.v[axis];
+		#endif
+			
+			f32 offset = (axis == Axis2_X? 0.5f:-0.5f) * child->computed_dim.v[axis];
 		child_pos.v[axis] += offset;
 		child->computed_pos = child_pos;
 		child_pos.v[axis] += offset;
@@ -621,12 +719,29 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 	ui->frame_arena = &mplayer->frame_arena;
 	ui->arena       = &mplayer->main_arena;
 	ui->def_font    = &mplayer->font;
+	ui->frame_index += 1;
+	
+	//-NOTE(fakhri): purge untouched elements from hashtable
+	for (u32 i = 0; i < array_count(ui->elements_table); i += 1)
+	{
+		UI_Elements_Bucket *bucket = ui->elements_table + i;
+		for (UI_Element *element = bucket->first, *next = 0; element; element = next)
+		{
+			next = element->next_hash;
+			
+			if (!element->hash || element->frame_index + 1 < ui->frame_index)
+			{
+				DLLRemove_NP(bucket->first, bucket->last, element, next_hash, prev_hash);
+				StackPush_N(ui->free_elements, element, next_free);
+			}
+		}
+	}
 	
 	ui->curr_parent = 0;
 	
 	ui_next_width(ui, ui_size_pixel(group->render_ctx->draw_dim.width, 1));
 	ui_next_height(ui, ui_size_pixel(group->render_ctx->draw_dim.height, 1));
-	UI_Element *root = ui_make_element(ui, str8_lit(""), 0);
+	UI_Element *root = ui_element(ui, str8_lit("root_ui_element"), 0);
 	root->child_layout_axis = Axis2_Y;
 	ui_push_parent(ui, root);
 	
@@ -641,7 +756,6 @@ ui_end(Mplayer_UI *ui)
 	
 	ui_update_layout(ui);
 	ui_draw_elements(ui, ui->root);
-	ui_cache_or_dispose_hierarchy(ui, ui->root);
 }
 
 #if 0

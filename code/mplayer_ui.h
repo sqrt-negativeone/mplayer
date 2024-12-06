@@ -40,11 +40,8 @@ enum
 	UI_FLAG_Draw_Border     = (1 << 2),
 	UI_FLAG_Draw_Image      = (1 << 3),
 	UI_FLAG_Draw_Text       = (1 << 4),
-	UI_FLAG_Break_Child_X   = (1 << 5),
-	UI_FLAG_Break_Child_Y   = (1 << 6),
-	UI_FLAG_Allow_OverflowX = (1 << 7),
-	UI_FLAG_Allow_OverflowY = (1 << 8),
-	UI_FLAG_Grid            = (1 << 9),
+	UI_FLAG_Allow_OverflowX = (1 << 5),
+	UI_FLAG_Allow_OverflowY = (1 << 6),
 };
 typedef u32 UI_Element_Flags;
 
@@ -57,6 +54,12 @@ struct UI_Element
 	UI_Element *last;
 	
 	UI_Element *next_free;
+	
+	UI_Element *next_hash;
+	UI_Element *prev_hash;
+	u64 hash;
+	
+	u64 frame_index;
 	
 	Axis2 child_layout_axis;
 	UI_Size size[Axis2_COUNT];
@@ -77,8 +80,12 @@ struct UI_Element
 	V2_F32 computed_dim;
 	V2_F32 computed_pos;
 	Range2_F32 rect;
-	
-	u64 hash;
+};
+
+struct UI_Elements_Bucket
+{
+	UI_Element *first;
+	UI_Element *last;
 };
 
 struct Mplayer_UI_Interaction
@@ -134,6 +141,7 @@ struct UI_Size_Stack
 	b32 auto_pop;
 };
 
+#define UI_ELEMENETS_HASHTABLE_SIZE 128
 struct Mplayer_UI
 {
 	Render_Group *group;
@@ -141,6 +149,8 @@ struct Mplayer_UI
 	Mplayer_Input *input;
 	Memory_Arena *arena;
 	Memory_Arena *frame_arena;
+	
+	u64 frame_index;
 	
 	V2_F32 mouse_p;
 	b32 disable_input;
@@ -178,6 +188,7 @@ struct Mplayer_UI
 	UI_Element *curr_parent;
 	
 	UI_Element *free_elements;
+	UI_Elements_Bucket elements_table[UI_ELEMENETS_HASHTABLE_SIZE];
 };
 
 #endif //MPLAYER_UI_H

@@ -147,6 +147,9 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 ((zchk((n)->next) ? (0) : ((n)->next->prev=(n)->prev)),\
 (zchk((n)->prev) ? (0) : ((n)->prev->next=(n)->next))))
 
+#define DLLRemove_NP(f,l,n,next,prev)    DLLRemove_NPZ(f,l,n,next,prev,CheckNull,SetNull)
+#define DLLPushBack_NP(f,l,n,next,prev)  DLLPushBack_NPZ(f,l,n,next,prev,CheckNull,SetNull)
+#define DLLPushFront_NP(f,l,n,next,prev) DLLPushBack_NPZ(l,f,n,prev,next,CheckNull,SetNull)
 
 #define QueuePush_Next(f,l,n, next)   QueuePush_NZ(f,l,n,next,CheckNull,SetNull)
 #define QueuePush(f,l,n)         QueuePush_NZ(f,l,n,next,CheckNull,SetNull)
