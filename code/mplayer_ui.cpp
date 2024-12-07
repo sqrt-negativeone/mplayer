@@ -43,6 +43,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_font(ui, font)                         _defer_loop(ui_push_font(ui, font), ui_pop_font(ui))
 #define ui_pref_texture_tint_color(ui, tint_color)     _defer_loop(ui_push_texture_tint_color(ui, tint_color), ui_pop_texture_tint_color(ui))
 #define ui_pref_flags(ui, falgs)     _defer_loop(ui_push_flags(ui, tint_color), ui_pop_flags(ui))
+#define ui_pref_roundness(ui, roundness)   _defer_loop(ui_push_roundness(ui, roundness), ui_pop_roundness(ui))
 
 #define ui_auto_pop_style(ui) do {              \
 ui_auto_pop_stack(ui->fonts);               \
@@ -55,6 +56,7 @@ ui_auto_pop_stack(ui->border_thickness);    \
 ui_auto_pop_stack(ui->sizes[Axis2_X]);      \
 ui_auto_pop_stack(ui->sizes[Axis2_Y]);      \
 ui_auto_pop_stack(ui->flags_stack);         \
+ui_auto_pop_stack(ui->roundness_stack);         \
 } while (0)
 
 
@@ -195,6 +197,11 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 		result->flags |= ui_stack_top(ui->flags_stack);
 	}
 	
+	if (ui->roundness_stack.top)
+	{
+		result->roundness = ui_stack_top(ui->roundness_stack);
+	}
+	
 	if (has_flag(flags, UI_FLAG_Draw_Background))
 	{
 		result->background_color = ui_stack_top(ui->bg_colors);
@@ -232,6 +239,18 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	// ui_element_push(ui, result);
 	
 	ui_auto_pop_style(ui);
+	return result;
+}
+
+internal UI_Element *
+ui_element_f(Mplayer_UI *ui, UI_Element_Flags flags, const char *fmt, ...)
+{
+	va_list args;
+  va_start(args, fmt);
+	String8 string = str8_fv(ui->frame_arena, fmt, args);
+	va_end(args);
+	
+	UI_Element *result = ui_element(ui, string, flags);
 	return result;
 }
 
@@ -439,6 +458,23 @@ ui_pop_flags(Mplayer_UI *ui)
 	ui_stack_pop(ui->flags_stack);
 }
 
+//- NOTE(fakhri): texture tint color stack
+internal void
+ui_push_roundness(Mplayer_UI *ui, f32 roundness)
+{
+	ui_stack_push(ui->roundness_stack, roundness);
+}
+internal void
+ui_next_roundness(Mplayer_UI *ui, f32 roundness)
+{
+	ui_stack_push_auto_pop(ui->roundness_stack, roundness);
+}
+internal void
+ui_pop_roundness(Mplayer_UI *ui)
+{
+	ui_stack_pop(ui->roundness_stack);
+}
+
 //- NOTE(fakhri): layout
 internal UI_Element *
 ui_layout(Mplayer_UI *ui, Axis2 child_layout_axis)
@@ -586,7 +622,7 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 internal void
 ui_layout_compute_positions(UI_Element *node)
 {
-	node->rect = range_center_dim(node->computed_pos, node->computed_dim);
+	node->computed_rect = range_center_dim(node->computed_pos, node->computed_dim);
 	
 	Axis2 axis = node->child_layout_axis;
 	Axis2 inv_axis = inverse_axis(axis);
@@ -602,7 +638,7 @@ ui_layout_compute_positions(UI_Element *node)
 			if (axis == Axis2_X)
 		{
 			if (has_flag(node->flags, UI_FLAG_Break_Child_X) && 
-				(child_pos.x + 0.75f * child->computed_dim.width > node->rect.max_x))
+				(child_pos.x + 0.75f * child->computed_dim.width > node->computed_rect.max_x))
 			{
 				child_pos.x = start_child_pos.x;
 				child_pos.y -= node->max_child_dim.y + 5;
@@ -638,17 +674,17 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 	// NOTE(fakhri): only render the leaf nodes
 	if (has_flag(node->flags, UI_FLAG_Draw_Background))
 	{
-		push_rect(ui->group, node->computed_pos, node->computed_dim, node->background_color);
+		push_rect(ui->group, node->pos, node->dim, node->background_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Image))
 	{
-		push_image(ui->group, node->computed_pos, node->computed_dim, node->texture, node->texture_tint_color);
+		push_image(ui->group, node->pos, node->dim, node->texture, node->texture_tint_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
-		draw_text(ui->group, node->font, node->computed_pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
+		draw_text(ui->group, node->font, node->pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
 	}
 	
 	for (UI_Element *child = node->first; child; child = child->next)
@@ -659,7 +695,7 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Border))
 	{
-		draw_outline(ui->group, node->computed_pos, node->computed_dim, node->border_color, node->border_thickness);
+		draw_outline(ui->group, node->pos, node->dim, node->border_color, node->border_thickness);
 	}
 	
 }
@@ -746,11 +782,69 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 }
 
 internal void
+ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
+{
+	f32 dt = ui->input->frame_dt;
+	
+	if (node->hash)
+	{
+		//- NOTE(fakhri): animate position
+		if (has_flag(node->flags, UI_FLAG_Animate_Pos))
+		{
+			f32 freq = 5.0f;
+			f32 zeta = 1.f;
+			
+			f32 K1 = zeta / (PI32 * freq);
+			f32 K2 = SQUARE(2 * PI32 * freq);
+			
+			V2_F32 dd_pos = K2 * (node->computed_pos - node->pos - K1 * node->d_pos);
+			node->d_pos += dt * dd_pos;
+			node->pos   += dt * node->d_pos + 0.5f * SQUARE(dt) * dd_pos;
+		}
+		else
+		{
+			node->pos = node->computed_pos;
+		}
+		
+		//- NOTE(fakhri): animate dim
+		if (has_flag(node->flags, UI_FLAG_Animate_Dim))
+		{
+			f32 freq = 5.0f;
+			f32 zeta = 1.f;
+			
+			f32 K1 = zeta / (PI32 * freq);
+			f32 K2 = SQUARE(2 * PI32 * freq);
+			
+			V2_F32 dd_dim = K2 * (node->computed_dim - node->dim - K1 * node->d_dim);
+			node->d_dim += dt * dd_dim;
+			node->dim   += dt * node->d_dim + 0.5f * SQUARE(dt) * dd_dim;
+		}
+		else
+		{
+			node->dim = node->computed_dim;
+		}
+	}
+	else
+	{
+		node->pos = node->computed_pos;
+		node->dim = node->computed_dim;
+	}
+	// TODO(fakhri): active animations
+	// TODO(fakhri): hot animations
+	
+	for (UI_Element *child = node->first; child; child = child->next)
+	{
+		ui_animate_elements(ui, child);
+	}
+}
+
+internal void
 ui_end(Mplayer_UI *ui)
 {
 	ui_pop_parent(ui);
 	
 	ui_update_layout(ui);
+	ui_animate_elements(ui, ui->root);
 	ui_draw_elements(ui, ui->root);
 }
 

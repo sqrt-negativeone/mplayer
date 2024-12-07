@@ -379,6 +379,18 @@ operator+(V2_F32 lhs, V2_F32 rhs)
 	return add_v2(lhs, rhs);
 }
 
+internal inline V2_F32 &
+operator+=(V2_F32 &lhs, V2_F32 rhs)
+{
+	return lhs = lhs + rhs;
+}
+
+internal inline V2_F32 &
+operator+=(V2_F32 &lhs, V2_F32 &rhs)
+{
+	return lhs = lhs + rhs;
+}
+
 internal inline V2_F32
 operator-(V2_F32 lhs, V2_F32 rhs)
 {
@@ -390,6 +402,12 @@ internal inline V4_F32
 operator+(V4_F32 lhs, V4_F32 rhs)
 {
 	return add_v4(lhs, rhs);
+}
+
+internal inline V4_F32 &
+operator+=(V4_F32 &lhs, V4_F32 rhs)
+{
+	return lhs = lhs + rhs;
 }
 
 internal inline V4_F32

@@ -42,6 +42,8 @@ enum
 	UI_FLAG_Draw_Text       = (1 << 4),
 	UI_FLAG_Allow_OverflowX = (1 << 5),
 	UI_FLAG_Allow_OverflowY = (1 << 6),
+	UI_FLAG_Animate_Pos     = (1 << 7),
+	UI_FLAG_Animate_Dim     = (1 << 8),
 };
 typedef u32 UI_Element_Flags;
 
@@ -79,6 +81,13 @@ struct UI_Element
 	V2_F32 max_child_dim;
 	V2_F32 computed_dim;
 	V2_F32 computed_pos;
+	Range2_F32 computed_rect;
+	
+	f32 roundness;
+	V2_F32 d_dim;
+	V2_F32 dim;
+	V2_F32 pos;
+	V2_F32 d_pos;
 	Range2_F32 rect;
 };
 
@@ -181,6 +190,7 @@ struct Mplayer_UI
 	UI_Color_Stack    bg_colors;
 	UI_Color_Stack    border_colors;
 	UI_F32_Stack      border_thickness;
+	UI_F32_Stack      roundness_stack;
 	UI_U32_Stack      flags_stack;
 	UI_Size_Stack sizes[Axis2_COUNT];
 	

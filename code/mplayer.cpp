@@ -621,19 +621,16 @@ draw_outline(Render_Group *group, Range2_F32 rect, V4_F32 color, f32 thickness)
 }
 
 internal void
-mplayer_animate_scroll(Mplayer_Scroll_Data *scroll, f32 frame_dt)
+mplayer_animate_scroll(Mplayer_Scroll_Data *scroll, f32 frame_dt, f32 freq = 5.0f, f32 zeta = 1.f)
 {
 	f32 current_scroll = scroll->t;
 	f32 target_scroll  = scroll->target;
-	f32 scroll_speed  = scroll->dt;
-	
-	f32 freq = 5.0f;
-	f32 zeta = 1.f;
+	f32 scroll_speed   = scroll->dt;
 	
 	f32 K1 = zeta / (PI32 * freq);
-	f32 K2 = 1.0f / SQUARE(2 * PI32 * freq);
+	f32 K2 = SQUARE(2 * PI32 * freq);
 	
-	f32 scroll_accel = (1.0f / K2) * (target_scroll - current_scroll - K1 * scroll_speed);
+	f32 scroll_accel = K2 * (target_scroll - current_scroll - K1 * scroll_speed);
 	scroll->dt += frame_dt * scroll_accel;
 	scroll->t  += frame_dt * scroll->dt + 0.5f * SQUARE(frame_dt) * scroll_accel;
 }
@@ -1509,8 +1506,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						UI_Element *grid = ui_element(ui, str8_lit("library-albums-grid"), UI_FLAG_Allow_OverflowY);
 						grid->child_layout_axis = Axis2_Y;
 						
-						f32 grid_item_min_width = 350.0f;
-						f32 grid_item_min_height = 300.0f;
+						f32 grid_item_min_width = 250.0f;
+						f32 grid_item_min_height = 220.0f;
 						ui_parent(ui, grid)
 						{
 							f32 padding = 50;
@@ -1551,19 +1548,21 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
 										}
 										
+										ui_next_roundness(ui, 10);
 										ui_next_width(ui, ui_size_pixel(grid_item_min_width, 1));
 										ui_next_height(ui, ui_size_pixel(grid_item_min_height, 1));
-										ui_next_flags(ui, UI_FLAG_Allow_OverflowY | UI_FLAG_Allow_OverflowX);
-										UI_Element *album_el = ui_element(ui, str8_lit(""), flags);
+										ui_next_flags(ui, UI_FLAG_Allow_OverflowY | UI_FLAG_Allow_OverflowX | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim);
+										UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
 										album_el->child_layout_axis = Axis2_Y;
+										
 										ui_parent(ui, album_el)
 										{
 											ui_spacer(ui, ui_size_pixel(10, 1));
 											
-											ui_next_background_color(ui, vec4(1, 1, 1, 0));
 											ui_next_width(ui, ui_size_percent(1, 1));
 											ui_next_height(ui, ui_size_text_dim(1));
-											ui_label(ui, album->name);
+											ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+												STR8_EXPAND(album->name), album);
 										}
 										ui_spacer(ui, ui_size_parent_remaining());
 									}
