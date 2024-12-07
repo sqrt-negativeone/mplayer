@@ -529,27 +529,24 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 	f32 parent_size = node->computed_dim.v[axis];
 	if (axis == node->child_layout_axis)
 	{
+		f32 total_fixup = 0;
 		f32 childs_sum_size = 0;
 		for (UI_Element *child = node->first; child; child = child->next)
 		{
+			total_fixup += child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
 			childs_sum_size += child->computed_dim.v[axis];
 		}
 		
-		if (childs_sum_size > parent_size)
+		if (childs_sum_size > parent_size && total_fixup > 0)
 		{
+			f32 extra_size = childs_sum_size - parent_size;
+			
 			for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
 			{
-				f32 child_old_size = child->computed_dim.v[axis];
-				f32 new_child_size = child_old_size;
-				f32 min_child_size = child->size[axis].strictness * child_old_size;
-				
-				f32 other_childs_sum_size = childs_sum_size - child_old_size;
-				f32 child_needed_size = parent_size - other_childs_sum_size;
-				
-				new_child_size = MAX(min_child_size, child_needed_size);
-				childs_sum_size = other_childs_sum_size + new_child_size;
-				
-				child->computed_dim.v[axis] = new_child_size;
+				f32 child_fixup = child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
+				f32 balanced_child_fixup = child_fixup * extra_size / total_fixup;
+				child_fixup = CLAMP(0, balanced_child_fixup, child_fixup);
+				child->computed_dim.v[axis] -= child_fixup;
 			}
 		}
 	}

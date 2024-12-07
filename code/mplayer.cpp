@@ -1509,10 +1509,72 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						UI_Element *grid = ui_element(ui, str8_lit("library-albums-grid"), UI_FLAG_Allow_OverflowY);
 						grid->child_layout_axis = Axis2_Y;
 						
+						f32 grid_item_min_width = 350.0f;
+						f32 grid_item_min_height = 300.0f;
 						ui_parent(ui, grid)
 						{
-							// NOTE(fakhri): library albums list
-							for (Mplayer_Item_ID album_id = 1; album_id < mplayer->library.albums_count; album_id += 1)
+							f32 padding = 50;
+							u32 childs_count_per_row = (u32)((grid->computed_dim.width - 2 * padding) / grid_item_min_width);
+							childs_count_per_row = MAX(childs_count_per_row, 1);
+							f32 childs_width_sum = childs_count_per_row * grid_item_min_width;
+							
+							u32 rows_count = u32(grid->computed_dim.height / grid_item_min_height) + 1;
+							
+							Mplayer_Item_ID album_id = 1;
+							for (u32 row = 0; row < rows_count; row += 1)
+							{
+								b32 done = 0;
+								
+								ui_next_height(ui, ui_size_pixel(grid_item_min_height, 1));
+								ui_horizontal_layout(ui)
+								{
+									ui_spacer(ui, ui_size_pixel(padding, 1));
+									ui_spacer(ui, ui_size_parent_remaining());
+									for (u32 i = 0; 
+										i < childs_count_per_row && album_id < mplayer->library.albums_count; 
+										i += 1, album_id += 1)
+									{
+										
+										Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
+										mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
+										
+										UI_Element_Flags flags = 0;
+										if (mplayer_item_image_ready(&album->header.image))
+										{
+											flags |= UI_FLAG_Draw_Image;
+											ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
+											ui_next_texture(ui, album->header.image.texture);
+										}
+										else
+										{
+											flags |= UI_FLAG_Draw_Background;
+											ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+										}
+										
+										ui_next_width(ui, ui_size_pixel(grid_item_min_width, 1));
+										ui_next_height(ui, ui_size_pixel(grid_item_min_height, 1));
+										ui_next_flags(ui, UI_FLAG_Allow_OverflowY | UI_FLAG_Allow_OverflowX);
+										UI_Element *album_el = ui_element(ui, str8_lit(""), flags);
+										album_el->child_layout_axis = Axis2_Y;
+										ui_parent(ui, album_el)
+										{
+											ui_spacer(ui, ui_size_pixel(10, 1));
+											
+											ui_next_background_color(ui, vec4(1, 1, 1, 0));
+											ui_next_width(ui, ui_size_percent(1, 1));
+											ui_next_height(ui, ui_size_text_dim(1));
+											ui_label(ui, album->name);
+										}
+										ui_spacer(ui, ui_size_parent_remaining());
+									}
+									ui_spacer(ui, ui_size_parent_remaining());
+									ui_spacer(ui, ui_size_pixel(padding, 1));
+								}
+							}
+							
+							#if 0
+								// NOTE(fakhri): library albums list
+								for (Mplayer_Item_ID album_id = 1; album_id < mplayer->library.albums_count; album_id += 1)
 							{
 								Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
 								mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
@@ -1540,12 +1602,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_spacer(ui, ui_size_pixel(10, 1));
 									
 									ui_next_background_color(ui, vec4(1, 1, 1, 0));
-									ui_next_text_color(ui, vec4(1, 1, 1, 1));
 									ui_next_width(ui, ui_size_percent(1, 1));
 									ui_next_height(ui, ui_size_text_dim(1));
 									ui_label(ui, album->name);
 								}
 							}
+							#endif
 						}
 					} break;
 					
