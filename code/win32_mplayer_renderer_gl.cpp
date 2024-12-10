@@ -106,6 +106,7 @@ w32_init_wgl(HINSTANCE hInstance, HDC dc)
           WGL_STENCIL_BITS_ARB, 8,
           WGL_SAMPLE_BUFFERS_ARB, 1,
           WGL_SAMPLES_ARB, 4,
+					WGL_SAMPLES_ARB, 16,
           0,
         };
         

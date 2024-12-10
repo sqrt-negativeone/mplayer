@@ -42,7 +42,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_texture(ui, border_thickness)          _defer_loop(ui_push_texture(ui, texture), ui_pop_texture(ui))
 #define ui_pref_font(ui, font)                         _defer_loop(ui_push_font(ui, font), ui_pop_font(ui))
 #define ui_pref_texture_tint_color(ui, tint_color)     _defer_loop(ui_push_texture_tint_color(ui, tint_color), ui_pop_texture_tint_color(ui))
-#define ui_pref_flags(ui, falgs)     _defer_loop(ui_push_flags(ui, tint_color), ui_pop_flags(ui))
+#define ui_pref_flags(ui, flags)     _defer_loop(ui_push_flags(ui, flags), ui_pop_flags(ui))
 #define ui_pref_roundness(ui, roundness)   _defer_loop(ui_push_roundness(ui, roundness), ui_pop_roundness(ui))
 
 #define ui_auto_pop_style(ui) do {              \
@@ -95,11 +95,11 @@ ui_element_from_key(Mplayer_UI *ui, String8 key)
 	UI_Element *result = 0;
 	if (key.len)
 	{
-		u64 hash = ui_hash_key(key);
-		u32 bucket_index = hash % array_count(ui->elements_table);
+		u64 id = ui_hash_key(key);
+		u32 bucket_index = id % array_count(ui->elements_table);
 		for (UI_Element *node = ui->elements_table[bucket_index].first; node; node = node->next_hash)
 		{
-			if (node->hash == hash)
+			if (node->id == id)
 			{
 				result = node;
 				break;
@@ -134,13 +134,17 @@ ui_key_from_string(String8 string)
 }
 
 internal void
-ui_element_set_text(Mplayer_UI *ui, UI_Element *element, String8 string)
+ui_element_set_draw_proc(UI_Element *element, UI_Custom_Draw_Proc *draw_proc, void *custom_draw_data)
 {
-	element->flags |= UI_FLAG_Draw_Text;
-	
-	element->font       = ui_stack_top(ui->fonts);
-	element->text_color = ui_stack_top(ui->text_colors);
-	element->text       = ui_drawable_text_from_string(string);
+	set_flag(element->flags, UI_FLAG_Has_Custom_Draw);
+	element->custom_draw_proc = draw_proc;
+	element->custom_draw_data = custom_draw_data;
+}
+
+internal void
+ui_element_set_text(UI_Element *element, String8 string)
+{
+	element->text = ui_drawable_text_from_string(string);
 }
 
 internal UI_Element *
@@ -150,13 +154,13 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	
 	//- NOTE(fakhri): check hash table
 	String8 key = ui_key_from_string(string);
-	u64 hash = ui_hash_key(key);
-	u32 bucket_index = hash % array_count(ui->elements_table);
-	if (hash)
+	u64 id = ui_hash_key(key);
+	u32 bucket_index = id % array_count(ui->elements_table);
+	if (id)
 	{
 		for (UI_Element *ht_node = ui->elements_table[bucket_index].first; ht_node; ht_node = ht_node->next_hash)
 		{
-			if (ht_node->hash == hash)
+			if (ht_node->id == id)
 			{
 				assert(ht_node->frame_index < ui->frame_index);
 				result = ht_node;
@@ -188,7 +192,7 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	result->flags = flags;
 	result->size[0]  = ui_stack_top(ui->sizes[0]);
 	result->size[1]  = ui_stack_top(ui->sizes[1]);
-	result->hash = hash;
+	result->id = id;
 	result->frame_index = ui->frame_index;
 	result->parent = result->next = result->prev = result->first = result->last = 0;
 	
@@ -494,14 +498,83 @@ ui_spacer(Mplayer_UI *ui, UI_Size size)
 		ui_next_size(ui, inverse_axis(parent->child_layout_axis), ui_size_pixel(0, 0));
 		UI_Element *spacer = ui_element(ui, str8_lit(""), 0);
 	}
-	
 }
+
+#define ui_spacer_pixels(ui, px, strictness) ui_spacer(ui, ui_size_pixel(px, strictness))
 
 internal Mplayer_UI_Interaction
 ui_interaction_from_element(Mplayer_UI *ui, UI_Element *element)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	// TODO(fakhri): figure out the interactions with this ui element
+	Range2_F32 interaction_rect = element->computed_rect;
+	u64 id = element->id;
+	for (UI_Element *p = element->parent; p; p = p->parent)
+	{
+		if (p->id)
+		{
+			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
+		}
+	}
+	
+	V2_F32 mouse_p = ui->mouse_pos;
+	b32 mouse_over = is_in_range(interaction_rect, mouse_p);
+	
+	for (Mplayer_Input_Event *e = ui->input->first_event, *next = 0; e; e = next)
+	{
+		next = e->next;
+		b32 consumed = 0;
+		
+		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Key && e->key == Mouse_Left)
+		{
+			if (mouse_over && e->is_down)
+			{
+				consumed = 1;
+				ui->hot_id = id;
+				ui->active_id = id;
+				ui->mouse_drag_start_pos = mouse_p;
+				ui->recent_click_time = ui->input->time;
+				set_flag(interaction.flags, UI_Interaction_Pressed);
+			}
+			if (!e->is_down)
+			{
+				if (ui->active_id == id)
+				{
+					consumed = 1;
+					set_flag(interaction.flags, UI_Interaction_Clicked);
+					ui->active_id = 0;
+				}
+				
+				if (ui->hot_id == id)
+				{
+					consumed = 1;
+					set_flag(interaction.flags, UI_Interaction_Released);
+					ui->hot_id = 0;
+				}
+			}
+		}
+		
+		if (consumed)
+		{
+			DLLRemove(ui->input->first_event, ui->input->last_event, e);
+		}
+	}
+	
+	if (mouse_over)
+	{
+		set_flag(interaction.flags, UI_Interaction_Hover);
+	}
+	else
+	{
+		if (ui->active_id == id)
+		{
+			ui->active_id = 0;
+		}
+	}
+	
+	if (ui->hot_id == id)
+	{
+		set_flag(interaction.flags, UI_Interaction_Pressed);
+	}
 	return interaction;
 }
 
@@ -522,10 +595,11 @@ internal void
 ui_label(Mplayer_UI *ui, String8 string)
 {
 	UI_Element *label = ui_element(ui, ZERO_STRUCT,
+		UI_FLAG_Draw_Text |
 		UI_FLAG_Draw_Border |
 		UI_FLAG_Draw_Background
 	);
-	ui_element_set_text(ui, label, string);
+	label->text = ui_drawable_text_from_string(string);
 }
 
 internal void
@@ -634,19 +708,7 @@ ui_layout_compute_positions(UI_Element *node)
 	V2_F32 child_pos = start_child_pos;
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
-		#if 0
-			if (axis == Axis2_X)
-		{
-			if (has_flag(node->flags, UI_FLAG_Break_Child_X) && 
-				(child_pos.x + 0.75f * child->computed_dim.width > node->computed_rect.max_x))
-			{
-				child_pos.x = start_child_pos.x;
-				child_pos.y -= node->max_child_dim.y + 5;
-			}
-		}
-		#endif
-			
-			f32 offset = (axis == Axis2_X? 0.5f:-0.5f) * child->computed_dim.v[axis];
+		f32 offset = (axis == Axis2_X? 0.5f:-0.5f) * child->computed_dim.v[axis];
 		child_pos.v[axis] += offset;
 		child->computed_pos = child_pos;
 		child_pos.v[axis] += offset;
@@ -687,11 +749,15 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 		draw_text(ui->group, node->font, node->pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
 	}
 	
+	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
+	{
+		node->custom_draw_proc(ui->group, node);
+	}
+	
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
 		ui_draw_elements(ui, child);
 	}
-	
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Border))
 	{
@@ -744,7 +810,7 @@ internal void
 ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 mouse_p)
 {
 	ui->group   = group;
-	ui->mouse_p = mouse_p;
+	ui->mouse_pos = mouse_p;
 	ui->disable_input = false;
 	
 	ui->input       = &mplayer->input;
@@ -761,7 +827,7 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 		{
 			next = element->next_hash;
 			
-			if (!element->hash || element->frame_index + 1 < ui->frame_index)
+			if (!element->id || element->frame_index + 1 < ui->frame_index)
 			{
 				DLLRemove_NP(bucket->first, bucket->last, element, next_hash, prev_hash);
 				StackPush_N(ui->free_elements, element, next_free);
@@ -786,12 +852,12 @@ ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
 {
 	f32 dt = ui->input->frame_dt;
 	
-	if (node->hash)
+	if (node->id)
 	{
 		//- NOTE(fakhri): animate position
 		if (has_flag(node->flags, UI_FLAG_Animate_Pos))
 		{
-			f32 freq = 5.0f;
+			f32 freq = 10.0f;
 			f32 zeta = 1.f;
 			
 			f32 K1 = zeta / (PI32 * freq);
@@ -810,7 +876,7 @@ ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
 		if (has_flag(node->flags, UI_FLAG_Animate_Dim))
 		{
 			f32 freq = 5.0f;
-			f32 zeta = 1.f;
+			f32 zeta = 0.9f;
 			
 			f32 K1 = zeta / (PI32 * freq);
 			f32 K2 = SQUARE(2 * PI32 * freq);
@@ -831,6 +897,8 @@ ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
 	}
 	// TODO(fakhri): active animations
 	// TODO(fakhri): hot animations
+	
+	node->rect = range_center_dim(node->pos, node->dim);
 	
 	for (UI_Element *child = node->first; child; child = child->next)
 	{

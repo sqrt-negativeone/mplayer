@@ -33,9 +33,11 @@ struct UI_Size
 
 #define UI_DEFAULT_SIZE UI_Size{.kind = UI_SIZE_Percent, .value = 1.0, .strictness = 0.0.}
 
+#define UI_FLAG_Mouse_Clickable (UI_FLAG_Left_Mouse_Clickable)
+#define UI_FLAG_Clickable (UI_FLAG_Mouse_Clickable)
 enum
 {
-	UI_FLAG_Clickable       = (1 << 0),
+	UI_FLAG_Has_Custom_Draw = (1 << 0),
 	UI_FLAG_Draw_Background = (1 << 1),
 	UI_FLAG_Draw_Border     = (1 << 2),
 	UI_FLAG_Draw_Image      = (1 << 3),
@@ -44,8 +46,15 @@ enum
 	UI_FLAG_Allow_OverflowY = (1 << 6),
 	UI_FLAG_Animate_Pos     = (1 << 7),
 	UI_FLAG_Animate_Dim     = (1 << 8),
+	
+	UI_FLAG_Left_Mouse_Clickable = (1 << 9),
 };
 typedef u32 UI_Element_Flags;
+
+struct UI_Element;
+#define UI_CUSTOM_DRAW_PROC(name) void name(Render_Group *group, UI_Element *element)
+
+typedef UI_CUSTOM_DRAW_PROC(UI_Custom_Draw_Proc);
 
 struct UI_Element
 {
@@ -59,7 +68,7 @@ struct UI_Element
 	
 	UI_Element *next_hash;
 	UI_Element *prev_hash;
-	u64 hash;
+	u64 id;
 	
 	u64 frame_index;
 	
@@ -89,6 +98,14 @@ struct UI_Element
 	V2_F32 pos;
 	V2_F32 d_pos;
 	Range2_F32 rect;
+	
+	UI_Custom_Draw_Proc *custom_draw_proc;
+	void *custom_draw_data;
+	
+	f32 active_t;
+	f32 hot_t;
+	f32 active_dt;
+	f32 hot_dt;
 };
 
 struct UI_Elements_Bucket
@@ -97,14 +114,26 @@ struct UI_Elements_Bucket
 	UI_Element *last;
 };
 
-struct Mplayer_UI_Interaction
+enum UI_Interaction_Flag
 {
-	b32 hover;
-	b32 pressed;
-	b32 released;
-	b32 clicked; // pressed widget and released inside the widget
-	b32 edited;
-	b32 not_visible;
+	UI_Interaction_Hover    = 1 << 0,
+	UI_Interaction_Released = 1 << 1,
+	UI_Interaction_Clicked  = 1 << 2,
+	UI_Interaction_Pressed  = 1 << 3,
+	UI_Interaction_Dragging = 1 << 4,
+};
+
+union Mplayer_UI_Interaction
+{
+	u32 flags;
+	struct
+	{
+		u32 hover : 1;
+		u32 released : 1;
+		u32 clicked : 1;
+		u32 pressed : 1;
+		u32 dragging : 1;
+	};
 };
 
 #define UI_STACK_MAX_SIZE 128
@@ -161,27 +190,17 @@ struct Mplayer_UI
 	
 	u64 frame_index;
 	
-	V2_F32 mouse_p;
+	V2_F32 mouse_drag_start_pos;
+	V2_F32 mouse_pos;
 	b32 disable_input;
 	
-	u64 active_widget_id;
-	u64 hot_widget_id;
+	u64 active_id;
+	u64 hot_id;
 	
-	u64 selected_widget_id;
-	
-	f32 active_t;
-	f32 active_dt;
-	
-	f32 hot_t;
-	f32 hot_dt;
+	u64 selected_id;
 	
 	f32 recent_click_time;
 	u32 input_cursor;
-	V2_F32 option_start_pos;
-	V2_F32 option_pos;
-	V2_F32 option_dim;
-	V2_F32 option_padding;
-	Range2_F32 option_available_space;
 	
 	UI_Fonts_Stack    fonts;
 	UI_Textures_Stack textures;

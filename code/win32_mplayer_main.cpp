@@ -234,66 +234,73 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		{
 			global_request_quit = 1;
 		} break;
+		case WM_GETMINMAXINFO:
+		{
+			LPMINMAXINFO lpMMI = (LPMINMAXINFO)lparam;
+			lpMMI->ptMinTrackSize.x = 650;
+			lpMMI->ptMinTrackSize.y = 170;
+			return 0;
+		} break;
 	}
 	return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
 
 
-internal Mplayer_Input_Key_Kind
+internal Mplayer_Keyboard_Key_Kind
 w32_resolve_vk_code(WPARAM wParam)
 {
-	local_persist Mplayer_Input_Key_Kind key_table[256] = {0};
+	local_persist Mplayer_Keyboard_Key_Kind key_table[256] = {0};
 	local_persist b32 key_table_initialized = 0;
 	
 	if(!key_table_initialized)
 	{
 		key_table_initialized = 1;
 		
-		for (u32 i = 'A', j = Key_A; i <= 'Z'; i += 1, j += 1)
+		for (u32 i = 'A', j = Keyboard_A; i <= 'Z'; i += 1, j += 1)
 		{
-			key_table[i] = (Mplayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Keyboard_Key_Kind)j;
 		}
-		for (u32 i = '0', j = Key_0; i <= '9'; i += 1, j += 1)
+		for (u32 i = '0', j = Keyboard_0; i <= '9'; i += 1, j += 1)
 		{
-			key_table[i] = (Mplayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Keyboard_Key_Kind)j;
 		}
-		for (u32 i = VK_F1, j = Key_F1; i <= VK_F24; i += 1, j += 1)
+		for (u32 i = VK_F1, j = Keyboard_F1; i <= VK_F24; i += 1, j += 1)
 		{
-			key_table[i] = (Mplayer_Input_Key_Kind)j;
+			key_table[i] = (Mplayer_Keyboard_Key_Kind)j;
 		}
 		
-		key_table[VK_OEM_1]      = Key_SemiColon;
-		key_table[VK_OEM_2]      = Key_ForwardSlash;
-		key_table[VK_OEM_3]      = Key_GraveAccent;
-		key_table[VK_OEM_4]      = Key_LeftBracket;
-		key_table[VK_OEM_6]      = Key_RightBracket;
-		key_table[VK_OEM_7]      = Key_Quote;
-		key_table[VK_OEM_PERIOD] = Key_Period;
-		key_table[VK_OEM_COMMA]  = Key_Comma;
-		key_table[VK_OEM_MINUS]  = Key_Minus;
-		key_table[VK_OEM_PLUS]   = Key_Plus;
+		key_table[VK_OEM_1]      = Keyboard_SemiColon;
+		key_table[VK_OEM_2]      = Keyboard_ForwardSlash;
+		key_table[VK_OEM_3]      = Keyboard_GraveAccent;
+		key_table[VK_OEM_4]      = Keyboard_LeftBracket;
+		key_table[VK_OEM_6]      = Keyboard_RightBracket;
+		key_table[VK_OEM_7]      = Keyboard_Quote;
+		key_table[VK_OEM_PERIOD] = Keyboard_Period;
+		key_table[VK_OEM_COMMA]  = Keyboard_Comma;
+		key_table[VK_OEM_MINUS]  = Keyboard_Minus;
+		key_table[VK_OEM_PLUS]   = Keyboard_Plus;
 		
-		key_table[VK_ESCAPE]     = Key_Esc;
-		key_table[VK_BACK]       = Key_Backspace;
-		key_table[VK_TAB]        = Key_Tab;
-		key_table[VK_SPACE]      = Key_Space;
-		key_table[VK_RETURN]     = Key_Enter;
-		key_table[VK_CONTROL]    = Key_Ctrl;
-		key_table[VK_SHIFT]      = Key_Shift;
-		key_table[VK_MENU]       = Key_Alt;
-		key_table[VK_UP]         = Key_Up;
-		key_table[VK_LEFT]       = Key_Left;
-		key_table[VK_DOWN]       = Key_Down;
-		key_table[VK_RIGHT]      = Key_Right;
-		key_table[VK_DELETE]     = Key_Delete;
-		key_table[VK_PRIOR]      = Key_PageUp;
-		key_table[VK_NEXT]       = Key_PageDown;
-		key_table[VK_HOME]       = Key_Home;
-		key_table[VK_END]        = Key_End;
+		key_table[VK_ESCAPE]     = Keyboard_Esc;
+		key_table[VK_BACK]       = Keyboard_Backspace;
+		key_table[VK_TAB]        = Keyboard_Tab;
+		key_table[VK_SPACE]      = Keyboard_Space;
+		key_table[VK_RETURN]     = Keyboard_Enter;
+		key_table[VK_CONTROL]    = Keyboard_Ctrl;
+		key_table[VK_SHIFT]      = Keyboard_Shift;
+		key_table[VK_MENU]       = Keyboard_Alt;
+		key_table[VK_UP]         = Keyboard_Up;
+		key_table[VK_LEFT]       = Keyboard_Left;
+		key_table[VK_DOWN]       = Keyboard_Down;
+		key_table[VK_RIGHT]      = Keyboard_Right;
+		key_table[VK_DELETE]     = Keyboard_Delete;
+		key_table[VK_PRIOR]      = Keyboard_PageUp;
+		key_table[VK_NEXT]       = Keyboard_PageDown;
+		key_table[VK_HOME]       = Keyboard_Home;
+		key_table[VK_END]        = Keyboard_End;
 		
 	}
 	
-	Mplayer_Input_Key_Kind key = Key_Unknown;
+	Mplayer_Keyboard_Key_Kind key = Keyboard_Unknown;
 	if(wParam < array_count(key_table))
 	{
 		key = key_table[wParam];
@@ -923,9 +930,14 @@ w32_main_thread(void *unused)
 			mplayer->input.time += mplayer->input.frame_dt;
 			w32_update_timer(&timer);
 			
-			for (u32 i = 0; i < array_count(mplayer->input.buttons); i += 1)
+			for (u32 i = 0; i < array_count(mplayer->input.keyboard_buttons); i += 1)
 			{
-				mplayer->input.buttons[i].was_down = mplayer->input.buttons[i].is_down;
+				mplayer->input.keyboard_buttons[i].was_down = mplayer->input.keyboard_buttons[i].is_down;
+			}
+			for (u32 i = 0; i < array_count(mplayer->input.mouse_buttons); i += 1)
+			{
+				mplayer->input.mouse_buttons[i].was_down = mplayer->input.mouse_buttons[i].is_down;
+				
 			}
 			
 			V2_I32 window_dim;
@@ -943,21 +955,24 @@ w32_main_thread(void *unused)
 			mplayer->input.last_event = 0;
 			for (;w32_event_queue.head != w32_event_queue.tail;)
 			{
-				Mplayer_Input_Event _event = w32_event_queue.events[w32_event_queue.tail % array_count(w32_event_queue.events)];
+				Mplayer_Input_Event w32_event = w32_event_queue.events[w32_event_queue.tail % array_count(w32_event_queue.events)];
 				CompletePreviousWritesBeforeFutureWrites();
 				platform->atomic_increment64((volatile i64*)&w32_event_queue.tail);
 				
-				switch(_event.kind)
+				switch(w32_event.kind)
 				{
-					case Event_Kind_Press: fallthrough;
-					case Event_Kind_Release:
+					case Event_Kind_Keyboard_Key: fallthrough;
 					{
-						mplayer->input.buttons[_event.key].is_down = (_event.kind == Event_Kind_Press);
+						mplayer->input.keyboard_buttons[w32_event.key].is_down = (w32_event.is_down);
+					} break;
+					case Event_Kind_Mouse_Key: fallthrough;
+					{
+						mplayer->input.mouse_buttons[w32_event.key].is_down = (w32_event.is_down);
 					} break;
 					case Event_Kind_Mouse_Move:
 					{
-						f32 mouse_x = _event.pos.x;
-						f32 mouse_y = _event.pos.y;
+						f32 mouse_x = w32_event.pos.x;
+						f32 mouse_y = w32_event.pos.y;
 						mouse_y = f32(window_dim.y - 1) - mouse_y;
 						
 						V2_F32 mouse_clip_pos;
@@ -975,8 +990,8 @@ w32_main_thread(void *unused)
 				}
 				
 				Mplayer_Input_Event *event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
-				memory_copy_struct(event, &_event);
-				push_input_event(&mplayer->input, event);
+				memory_copy_struct(event, &w32_event);
+				DLLPushBack(mplayer->input.first_event, mplayer->input.last_event, event);
 			}
 			
 			if (global_request_quit)
@@ -1163,7 +1178,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								b32 was_down = (msg.lParam & (1 << 30)) != 0;
 								b32 is_down = (msg.lParam & (1 << 31)) == 0;
 								
-								event.kind = (is_down)? Event_Kind_Press : Event_Kind_Release;
+								event.kind = Event_Kind_Keyboard_Key;
+								event.is_down = is_down;
 								event.key = w32_resolve_vk_code(vk_code);
 							} break;
 							
@@ -1184,24 +1200,27 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 							case WM_MBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event.key = Key_MiddleMouse;
+								event.kind = Event_Kind_Mouse_Key;
+								event.is_down = is_down;
+								event.key = Mouse_Middle;
 							} break;
 							
 							case WM_LBUTTONDOWN: fallthrough;
 							case WM_LBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event.key = Key_LeftMouse;
+								event.kind = Event_Kind_Mouse_Key;
+								event.is_down = is_down;
+								event.key = Mouse_Left;
 							} break;
 							
 							case WM_RBUTTONDOWN: fallthrough;
 							case WM_RBUTTONUP:
 							{
 								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
-								event.key = Key_RightMouse;
+								event.kind = Event_Kind_Mouse_Key;
+								event.is_down = is_down;
+								event.key = Mouse_Right;
 							} break;
 							
 							case WM_MOUSEWHEEL:
@@ -1230,13 +1249,15 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 								{
 									case XBUTTON1:
 									{
-										event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
-										event.key = Key_Mouse_M4;
+										event.kind = Event_Kind_Mouse_Key;
+										event.is_down = is_down;
+										event.key = Mouse_M4;
 									} break;
 									case XBUTTON2:
 									{
-										event.kind = is_down? Event_Kind_Press: Event_Kind_Release;
-										event.key = Key_Mouse_M5;
+										event.kind = Event_Kind_Mouse_Key;
+										event.is_down = is_down;
+										event.key = Mouse_M5;
 									} break;
 									
 								}

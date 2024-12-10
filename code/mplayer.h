@@ -321,6 +321,7 @@ struct Mplayer_Context
 	Mplayer_Font timestamp_font;
 	Mplayer_Font header_label_font;
 	Mplayer_Font font;
+	Mplayer_Font small_font;
 	Mplayer_Font debug_font;
 	Mplayer_Font big_debug_font;
 	f32 volume;

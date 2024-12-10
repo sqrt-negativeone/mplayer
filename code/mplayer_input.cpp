@@ -1,102 +1,108 @@
 
-enum Mplayer_Input_Key_Kind
+enum Mplayer_Keyboard_Key_Kind
 {
-	Key_Unknown,
-  Key_Esc,
-  Key_F1,
-  Key_F2,
-  Key_F3,
-  Key_F4,
-  Key_F5,
-  Key_F6,
-  Key_F7,
-  Key_F8,
-  Key_F9,
-  Key_F10,
-  Key_F11,
-  Key_F12,
-  Key_F13,
-  Key_F14,
-  Key_F15,
-  Key_F16,
-  Key_F17,
-  Key_F18,
-  Key_F19,
-  Key_F20,
-  Key_F21,
-  Key_F22,
-  Key_F23,
-  Key_F24,
-  Key_GraveAccent,
-  Key_0,
-  Key_1,
-  Key_2,
-  Key_3,
-  Key_4,
-  Key_5,
-  Key_6,
-  Key_7,
-  Key_8,
-  Key_9,
-  Key_Minus,
-  Key_Plus,
-  Key_Backspace,
-  Key_Delete,
-  Key_Tab,
-  Key_A,
-  Key_B,
-  Key_C,
-  Key_D,
-  Key_E,
-  Key_F,
-  Key_G,
-  Key_H,
-  Key_I,
-  Key_J,
-  Key_K,
-  Key_L,
-  Key_M,
-  Key_N,
-  Key_O,
-  Key_P,
-  Key_Q,
-  Key_R,
-  Key_S,
-  Key_T,
-  Key_U,
-  Key_V,
-  Key_W,
-  Key_X,
-  Key_Y,
-  Key_Z,
-  Key_Space,
-  Key_Enter,
-  Key_Ctrl,
-  Key_Shift,
-  Key_Alt,
-  Key_Up,
-  Key_Left,
-  Key_Down,
-  Key_Right,
-  Key_PageUp,
-  Key_PageDown,
-  Key_Home,
-  Key_End,
-  Key_ForwardSlash,
-  Key_Period,
-  Key_Comma,
-  Key_Quote,
-  Key_LeftBracket,
-  Key_RightBracket,
-  Key_SemiColon,
+	Keyboard_Unknown,
+  Keyboard_Esc,
+  Keyboard_F1,
+  Keyboard_F2,
+  Keyboard_F3,
+  Keyboard_F4,
+  Keyboard_F5,
+  Keyboard_F6,
+  Keyboard_F7,
+  Keyboard_F8,
+  Keyboard_F9,
+  Keyboard_F10,
+  Keyboard_F11,
+  Keyboard_F12,
+  Keyboard_F13,
+  Keyboard_F14,
+  Keyboard_F15,
+  Keyboard_F16,
+  Keyboard_F17,
+  Keyboard_F18,
+  Keyboard_F19,
+  Keyboard_F20,
+  Keyboard_F21,
+  Keyboard_F22,
+  Keyboard_F23,
+  Keyboard_F24,
+  Keyboard_GraveAccent,
+  Keyboard_0,
+  Keyboard_1,
+  Keyboard_2,
+  Keyboard_3,
+  Keyboard_4,
+  Keyboard_5,
+  Keyboard_6,
+  Keyboard_7,
+  Keyboard_8,
+  Keyboard_9,
+  Keyboard_Minus,
+  Keyboard_Plus,
+  Keyboard_Backspace,
+  Keyboard_Delete,
+  Keyboard_Tab,
+  Keyboard_A,
+  Keyboard_B,
+  Keyboard_C,
+  Keyboard_D,
+  Keyboard_E,
+  Keyboard_F,
+  Keyboard_G,
+  Keyboard_H,
+  Keyboard_I,
+  Keyboard_J,
+  Keyboard_K,
+  Keyboard_L,
+  Keyboard_M,
+  Keyboard_N,
+  Keyboard_O,
+  Keyboard_P,
+  Keyboard_Q,
+  Keyboard_R,
+  Keyboard_S,
+  Keyboard_T,
+  Keyboard_U,
+  Keyboard_V,
+  Keyboard_W,
+  Keyboard_X,
+  Keyboard_Y,
+  Keyboard_Z,
+  Keyboard_Space,
+  Keyboard_Enter,
+  Keyboard_Ctrl,
+  Keyboard_Shift,
+  Keyboard_Alt,
+  Keyboard_Up,
+  Keyboard_Left,
+  Keyboard_Down,
+  Keyboard_Right,
+  Keyboard_PageUp,
+  Keyboard_PageDown,
+  Keyboard_Home,
+  Keyboard_End,
+  Keyboard_ForwardSlash,
+  Keyboard_Period,
+  Keyboard_Comma,
+  Keyboard_Quote,
+  Keyboard_LeftBracket,
+  Keyboard_RightBracket,
+  Keyboard_SemiColon,
 	
-  Key_LeftMouse,
-  Key_MiddleMouse,
-  Key_RightMouse,
-  Key_Mouse_M4,
-  Key_Mouse_M5,
-  
-	Key_COUNT,
+	Keyboard_COUNT,
+};
+
+
+enum Mplayer_Mouse_Key_Kind
+{
+  Mouse_Left,
+  Mouse_Middle,
+  Mouse_Right,
+  Mouse_M4,
+  Mouse_M5,
+	
+	Mouse_COUNT
 };
 
 struct Mplayer_Input_Key
@@ -108,8 +114,8 @@ struct Mplayer_Input_Key
 enum Mplayer_Input_Event_Kind
 {
 	Event_Kind_Null,
-	Event_Kind_Press,
-	Event_Kind_Release,
+	Event_Kind_Keyboard_Key,
+	Event_Kind_Mouse_Key,
 	Event_Kind_Text,
 	Event_Kind_Mouse_Wheel,
 	Event_Kind_Mouse_Move,
@@ -125,10 +131,11 @@ enum Mplayer_Key_Modifier_Flag
 struct Mplayer_Input_Event
 {
 	Mplayer_Input_Event *next;
-	b32 consumed;
+	Mplayer_Input_Event *prev;
 	Mplayer_Input_Event_Kind kind;
+	b32 is_down;
 	u32 modifiers;
-	Mplayer_Input_Key_Kind key;
+	u32 key;
 	u32 text_character;
 	V2_F32 pos;
 	V2_F32 scroll;
@@ -142,7 +149,8 @@ struct Mplayer_Input
 	Mplayer_Input_Event *first_event;
 	Mplayer_Input_Event *last_event;
 	
-	Mplayer_Input_Key buttons[Key_COUNT];
+	Mplayer_Input_Key keyboard_buttons[Keyboard_COUNT];
+	Mplayer_Input_Key mouse_buttons[Mouse_COUNT];
 };
 
 internal b32
@@ -160,16 +168,30 @@ mplayer_button_released(Mplayer_Input_Key button)
 }
 
 internal b32
-mplayer_button_released(Mplayer_Input *input, Mplayer_Input_Key_Kind key)
+mplayer_keyboard_button_released(Mplayer_Input *input, Mplayer_Keyboard_Key_Kind key)
 {
-	b32 result = mplayer_button_released(input->buttons[key]);
+	b32 result = mplayer_button_released(input->keyboard_buttons[key]);
 	return result;
 }
 
 internal b32
-mplayer_button_clicked(Mplayer_Input *input, Mplayer_Input_Key_Kind key)
+mplayer_keyboard_button_clicked(Mplayer_Input *input, Mplayer_Keyboard_Key_Kind key)
 {
-	b32 result = mplayer_button_clicked(input->buttons[key]);
+	b32 result = mplayer_button_clicked(input->keyboard_buttons[key]);
+	return result;
+}
+
+internal b32
+mplayer_mouse_button_released(Mplayer_Input *input, Mplayer_Mouse_Key_Kind key)
+{
+	b32 result = mplayer_button_released(input->mouse_buttons[key]);
+	return result;
+}
+
+internal b32
+mplayer_mouse_button_clicked(Mplayer_Input *input, Mplayer_Mouse_Key_Kind key)
+{
+	b32 result = mplayer_button_clicked(input->mouse_buttons[key]);
 	return result;
 }
 

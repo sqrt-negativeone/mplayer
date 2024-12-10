@@ -329,6 +329,7 @@ gl_end_frame(OpenGL *opengl)
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glEnable(GL_SCISSOR_TEST);
+	glEnable(GL_MULTISAMPLE);
 	
 	glDepthFunc(GL_LEQUAL);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
