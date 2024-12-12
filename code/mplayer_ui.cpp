@@ -648,60 +648,20 @@ ui_grid_push_row(Mplayer_UI *ui)
 	ui->grid_item_index_in_row = 0;
 }
 
-internal u32
-ui_grid_begin(Mplayer_UI *ui, String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpadding)
-{
-	ui_next_scroll_step(ui, vec2(0, -50));
-	UI_Element *grid = ui_element(ui, string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll);
-	grid->child_layout_axis = Axis2_Y;
-	ui_interaction_from_element(ui, grid);
-	ui_push_parent(ui, grid);
-	
-	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
-	item_count_per_row = MAX(item_count_per_row, 1);
-	
-	u32 max_rows_count = ((items_count + item_count_per_row - 1) / item_count_per_row);
-	
-	u32 visible_rows_count = u32(grid->computed_dim.height / (grid_item_dim.height + vpadding)) + 2;
-	
-	f32 space_before_first_row = ABS(grid->view_scroll.y);
-	u32 first_visible_row = (u32)(space_before_first_row / (grid_item_dim.height + vpadding));
-	first_visible_row = MIN(first_visible_row, max_rows_count-1);
-	
-	ui_spacer_pixels(ui, first_visible_row * (grid_item_dim.height + vpadding), 1);
-	
-	ui->grid_first_visible_row = first_visible_row;
-	ui->grid_item_count_per_row = item_count_per_row;
-	ui->grid_max_rows_count = max_rows_count;
-	ui->grid_item_index_in_row = 0;
-	ui->grid_row_index = 0;
-	ui->grid_visible_rows_count = visible_rows_count;
-	ui->grid_vpadding = vpadding;
-	ui->grid_item_dim = grid_item_dim;
-	
-	if (items_count)
-	{
-		ui_grid_push_row(ui);
-	}
-	
-	u32 first_visible_item_index = first_visible_row * item_count_per_row;
-	return first_visible_item_index;
-}
-
 internal b32
 ui_grid_item_begin(Mplayer_UI *ui)
 {
-	UI_Element *grid_item = 0;
-	
 	b32 good = 0;
-	if (ui->grid_item_index_in_row < ui->grid_item_count_per_row)
+	if (ui->grid_item_index < ui->grid_items_count && 
+		ui->grid_item_index_in_row < ui->grid_item_count_per_row)
 	{
 		good = 1;
 		
+		ui->grid_item_index += 1;
 		ui->grid_item_index_in_row += 1;
 		ui_next_width(ui, ui_size_pixel(ui->grid_item_dim.width, 1));
 		ui_next_height(ui, ui_size_pixel(ui->grid_item_dim.height, 1));
-		grid_item = ui_element(ui, {0}, 0);
+		UI_Element *grid_item = ui_element(ui, {0}, 0);
 		ui_push_parent(ui, grid_item);
 	}
 	return good;
@@ -729,6 +689,47 @@ ui_grid_item_end(Mplayer_UI *ui)
 	}
 }
 
+internal u32
+ui_grid_begin(Mplayer_UI *ui, String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpadding)
+{
+	ui_next_scroll_step(ui, vec2(0, -50));
+	UI_Element *grid = ui_element(ui, string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll);
+	grid->child_layout_axis = Axis2_Y;
+	ui_interaction_from_element(ui, grid);
+	ui_push_parent(ui, grid);
+	
+	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
+	item_count_per_row = MAX(item_count_per_row, 1);
+	
+	u32 max_rows_count = ((items_count + item_count_per_row - 1) / item_count_per_row);
+	
+	u32 visible_rows_count = u32(grid->computed_dim.height / (grid_item_dim.height + vpadding)) + 2;
+	
+	f32 space_before_first_row = ABS(grid->view_scroll.y);
+	u32 first_visible_row = (u32)(space_before_first_row / (grid_item_dim.height + vpadding));
+	first_visible_row = MIN(first_visible_row, max_rows_count-1);
+	
+	ui_spacer_pixels(ui, first_visible_row * (grid_item_dim.height + vpadding), 1);
+	
+	ui->grid_items_count = items_count;
+	ui->grid_first_visible_row = first_visible_row;
+	ui->grid_item_count_per_row = item_count_per_row;
+	ui->grid_max_rows_count = max_rows_count;
+	ui->grid_item_index_in_row = 0;
+	ui->grid_row_index = 0;
+	ui->grid_visible_rows_count = visible_rows_count;
+	ui->grid_vpadding = vpadding;
+	ui->grid_item_dim = grid_item_dim;
+	
+	if (items_count)
+	{
+		ui_grid_push_row(ui);
+	}
+	
+	ui->grid_item_index = first_visible_row * item_count_per_row;
+	return ui->grid_item_index;
+}
+
 internal void
 ui_grid_end(Mplayer_UI *ui)
 {
@@ -746,6 +747,83 @@ ui_grid_end(Mplayer_UI *ui)
 	ui_pop_parent(ui);
 }
 
+#define ui_for_each_grid_item(ui, string, items_count, item_dim, vpadding, item_index) \
+defer(ui_grid_end(ui)) for (u32 item_index = ui_grid_begin(ui, string, items_count, item_dim, vpadding); \
+ui_grid_item_begin(ui);\
+(item_index += 1, ui_grid_item_end(ui)))
+
+#define ui_for_each_list_item(ui, string, items_count, item_height, vpadding, item_index) \
+defer(ui_list_end(ui)) for (u32 item_index = ui_list_begin(ui, string, items_count, item_height, vpadding); \
+ui_list_item_begin(ui);\
+(item_index += 1, ui_list_item_end(ui)))
+
+
+internal b32
+ui_list_item_begin(Mplayer_UI *ui)
+{
+	b32 good = 0;
+	if (ui->list_item_index < ui->list_items_count && 
+		ui->list_row_index < ui->list_visible_rows_count)
+	{
+		good = 1;
+		
+		ui->list_item_index += 1;
+		ui->list_row_index += 1;
+		
+		ui_next_width(ui, ui_size_parent_remaining());
+		ui_next_height(ui, ui_size_pixel(ui->list_item_height, 1));
+		UI_Element *list_item = ui_element(ui, {0}, 0);
+		
+		ui_push_parent(ui, list_item);
+	}
+	return good;
+}
+
+internal void
+ui_list_item_end(Mplayer_UI *ui)
+{
+	ui_pop_parent(ui);
+	ui_spacer_pixels(ui, ui->list_vpadding, 1);
+}
+
+internal u32
+ui_list_begin(Mplayer_UI *ui, String8 string, u32 items_count, f32 item_height, f32 vpadding)
+{
+	ui_next_scroll_step(ui, vec2(0, -50));
+	UI_Element *list = ui_element(ui, string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll);
+	list->child_layout_axis = Axis2_Y;
+	ui_interaction_from_element(ui, list);
+	ui_push_parent(ui, list);
+	
+	u32 visible_rows_count = u32(list->computed_dim.height / (item_height + vpadding)) + 2;
+	
+	f32 space_before_first_row = ABS(list->view_scroll.y);
+	u32 first_visible_row = (u32)(space_before_first_row / (item_height + vpadding));
+	first_visible_row = MIN(first_visible_row, items_count-1);
+	
+	ui_spacer_pixels(ui, first_visible_row * (item_height + vpadding), 1);
+	
+	ui->list_items_count = items_count;
+	ui->list_first_visible_row = first_visible_row;
+	ui->list_max_rows_count = items_count;
+	ui->list_row_index = 0;
+	ui->list_visible_rows_count = visible_rows_count;
+	ui->list_vpadding = vpadding;
+	ui->list_item_height = item_height;
+	
+	ui->list_item_index = first_visible_row;
+	return ui->list_item_index;
+}
+
+internal void
+ui_list_end(Mplayer_UI *ui)
+{
+	u32 rows_remaining = ui->list_max_rows_count - MIN(ui->list_first_visible_row + ui->list_visible_rows_count, ui->list_max_rows_count);
+	ui_spacer_pixels(ui, rows_remaining * (ui->list_item_height + ui->list_vpadding), 1);
+	
+	// NOTE(fakhri): pop list
+	ui_pop_parent(ui);
+}
 
 
 internal void

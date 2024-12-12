@@ -220,6 +220,17 @@ struct Mplayer_UI
 	f32 recent_click_time;
 	u32 input_cursor;
 	
+	u32 list_items_count;
+	u32 list_item_index;
+	u32 list_first_visible_row;
+	u32 list_max_rows_count;
+	u32 list_row_index;
+	u32 list_visible_rows_count;
+	f32 list_vpadding;
+	f32 list_item_height;
+	
+	u32 grid_item_index;
+	u32 grid_items_count;
 	u32 grid_first_visible_row;
 	u32 grid_item_count_per_row;
 	u32 grid_max_rows_count;
