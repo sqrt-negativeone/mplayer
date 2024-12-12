@@ -28,6 +28,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_size_parent_remaining() ui_size_percent(1, 0)
 
 #define _defer_loop(exp1, exp2) for(i32 __i__ = ((exp1), 0); __i__ == 0; (__i__ += 1, (exp2)))
+#define defer(exp) _defer_loop(0, exp)
 #define ui_parent(ui, p) _defer_loop(ui_push_parent(ui, p), ui_pop_parent(ui))
 #define ui_vertical_layout(ui)   ui_parent(ui, ui_layout(ui, Axis2_Y))
 #define ui_horizontal_layout(ui) ui_parent(ui, ui_layout(ui, Axis2_X))
@@ -44,6 +45,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_texture_tint_color(ui, tint_color)     _defer_loop(ui_push_texture_tint_color(ui, tint_color), ui_pop_texture_tint_color(ui))
 #define ui_pref_flags(ui, flags)     _defer_loop(ui_push_flags(ui, flags), ui_pop_flags(ui))
 #define ui_pref_roundness(ui, roundness)   _defer_loop(ui_push_roundness(ui, roundness), ui_pop_roundness(ui))
+#define ui_pref_scroll_step(ui, scroll_step)   _defer_loop(ui_push_scroll_step(ui, scroll_step), ui_pop_scroll_step(ui))
 
 #define ui_auto_pop_style(ui) do {              \
 ui_auto_pop_stack(ui->fonts);               \
@@ -56,7 +58,8 @@ ui_auto_pop_stack(ui->border_thickness);    \
 ui_auto_pop_stack(ui->sizes[Axis2_X]);      \
 ui_auto_pop_stack(ui->sizes[Axis2_Y]);      \
 ui_auto_pop_stack(ui->flags_stack);         \
-ui_auto_pop_stack(ui->roundness_stack);         \
+ui_auto_pop_stack(ui->roundness_stack);     \
+ui_auto_pop_stack(ui->scroll_steps);        \
 } while (0)
 
 
@@ -228,6 +231,11 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 		result->font       = ui_stack_top(ui->fonts);
 		result->text_color = ui_stack_top(ui->text_colors);
 		result->text       = ui_drawable_text_from_string(string);
+	}
+	
+	if (has_flag(flags, UI_FLAG_View_Scroll))
+	{
+		result->scroll_step = ui_stack_top(ui->scroll_steps);
 	}
 	
 	if (ui->curr_parent)
@@ -479,6 +487,23 @@ ui_pop_roundness(Mplayer_UI *ui)
 	ui_stack_pop(ui->roundness_stack);
 }
 
+//- NOTE(fakhri): texture tint color stack
+internal void
+ui_push_scroll_step(Mplayer_UI *ui, V2_F32 scroll_step)
+{
+	ui_stack_push(ui->scroll_steps, scroll_step);
+}
+internal void
+ui_next_scroll_step(Mplayer_UI *ui, V2_F32 scroll_step)
+{
+	ui_stack_push_auto_pop(ui->scroll_steps, scroll_step);
+}
+internal void
+ui_pop_scroll_step(Mplayer_UI *ui)
+{
+	ui_stack_pop(ui->scroll_steps);
+}
+
 //- NOTE(fakhri): layout
 internal UI_Element *
 ui_layout(Mplayer_UI *ui, Axis2 child_layout_axis)
@@ -495,12 +520,13 @@ ui_spacer(Mplayer_UI *ui, UI_Size size)
 	if (parent)
 	{
 		ui_next_size(ui, parent->child_layout_axis, size);
-		ui_next_size(ui, inverse_axis(parent->child_layout_axis), ui_size_pixel(0, 0));
+		ui_next_size(ui, inverse_axis(parent->child_layout_axis), ui_size_percent(1, 0));
 		UI_Element *spacer = ui_element(ui, str8_lit(""), 0);
 	}
 }
 
 #define ui_spacer_pixels(ui, px, strictness) ui_spacer(ui, ui_size_pixel(px, strictness))
+#define ui_padding(ui, size) _defer_loop(ui_spacer(ui, size), ui_spacer(ui, size))
 
 internal Mplayer_UI_Interaction
 ui_interaction_from_element(Mplayer_UI *ui, UI_Element *element)
@@ -553,6 +579,16 @@ ui_interaction_from_element(Mplayer_UI *ui, UI_Element *element)
 			}
 		}
 		
+		if (has_flag(element->flags, UI_FLAG_View_Scroll) && e->kind == Event_Kind_Mouse_Wheel)
+		{
+			consumed = 1;
+			element->view_target_scroll += element->scroll_step * e->scroll;
+			
+			V2_F32 bounds_dim = element->child_bounds;
+			element->view_target_scroll.x = CLAMP(0, element->view_target_scroll.x, bounds_dim.width);
+			element->view_target_scroll.y = CLAMP(0, element->view_target_scroll.y, bounds_dim.height);
+		}
+		
 		if (consumed)
 		{
 			DLLRemove(ui->input->first_event, ui->input->last_event, e);
@@ -602,6 +638,116 @@ ui_label(Mplayer_UI *ui, String8 string)
 	label->text = ui_drawable_text_from_string(string);
 }
 
+
+internal void
+ui_grid_push_row(Mplayer_UI *ui)
+{
+	ui_next_height(ui, ui_size_pixel(ui->grid_item_dim.height, 1));
+	ui_push_parent(ui, ui_layout(ui, Axis2_X));
+	ui_spacer(ui, ui_size_parent_remaining());
+	ui->grid_item_index_in_row = 0;
+}
+
+internal u32
+ui_grid_begin(Mplayer_UI *ui, String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpadding)
+{
+	ui_next_scroll_step(ui, vec2(0, -50));
+	UI_Element *grid = ui_element(ui, string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll);
+	grid->child_layout_axis = Axis2_Y;
+	ui_interaction_from_element(ui, grid);
+	ui_push_parent(ui, grid);
+	
+	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
+	item_count_per_row = MAX(item_count_per_row, 1);
+	
+	u32 max_rows_count = ((items_count + item_count_per_row - 1) / item_count_per_row);
+	
+	u32 visible_rows_count = u32(grid->computed_dim.height / (grid_item_dim.height + vpadding)) + 2;
+	
+	f32 space_before_first_row = ABS(grid->view_scroll.y);
+	u32 first_visible_row = (u32)(space_before_first_row / (grid_item_dim.height + vpadding));
+	first_visible_row = MIN(first_visible_row, max_rows_count-1);
+	
+	ui_spacer_pixels(ui, first_visible_row * (grid_item_dim.height + vpadding), 1);
+	
+	ui->grid_first_visible_row = first_visible_row;
+	ui->grid_item_count_per_row = item_count_per_row;
+	ui->grid_max_rows_count = max_rows_count;
+	ui->grid_item_index_in_row = 0;
+	ui->grid_row_index = 0;
+	ui->grid_visible_rows_count = visible_rows_count;
+	ui->grid_vpadding = vpadding;
+	ui->grid_item_dim = grid_item_dim;
+	
+	if (items_count)
+	{
+		ui_grid_push_row(ui);
+	}
+	
+	u32 first_visible_item_index = first_visible_row * item_count_per_row;
+	return first_visible_item_index;
+}
+
+internal b32
+ui_grid_item_begin(Mplayer_UI *ui)
+{
+	UI_Element *grid_item = 0;
+	
+	b32 good = 0;
+	if (ui->grid_item_index_in_row < ui->grid_item_count_per_row)
+	{
+		good = 1;
+		
+		ui->grid_item_index_in_row += 1;
+		ui_next_width(ui, ui_size_pixel(ui->grid_item_dim.width, 1));
+		ui_next_height(ui, ui_size_pixel(ui->grid_item_dim.height, 1));
+		grid_item = ui_element(ui, {0}, 0);
+		ui_push_parent(ui, grid_item);
+	}
+	return good;
+}
+
+
+internal void
+ui_grid_item_end(Mplayer_UI *ui)
+{
+	// NOTE(fakhri): pop grid item
+	ui_pop_parent(ui);
+	ui_spacer(ui, ui_size_parent_remaining());
+	
+	// NOTE(fakhri): check if row is full
+	if (ui->grid_item_index_in_row == ui->grid_item_count_per_row)
+	{
+		ui_pop_parent(ui); // pop parent row
+		ui_spacer_pixels(ui, ui->grid_vpadding, 1);
+		ui->grid_row_index += 1;
+		
+		if (ui->grid_row_index < (i32)ui->grid_visible_rows_count)
+		{
+			ui_grid_push_row(ui);
+		}
+	}
+}
+
+internal void
+ui_grid_end(Mplayer_UI *ui)
+{
+	// NOTE(fakhri): pop incomplete rows
+	if (ui->grid_row_index < (i32)ui->grid_visible_rows_count && 
+		ui->grid_item_index_in_row < ui->grid_item_count_per_row)
+	{
+		ui_pop_parent(ui); // pop parent row
+	}
+	
+	u32 rows_remaining = ui->grid_max_rows_count - MIN(ui->grid_first_visible_row + ui->grid_visible_rows_count, ui->grid_max_rows_count);
+	ui_spacer_pixels(ui, rows_remaining * (ui->grid_item_dim.height + ui->grid_vpadding), 1);
+	
+	// NOTE(fakhri): pop grid
+	ui_pop_parent(ui);
+}
+
+
+
 internal void
 ui_layout_compute_preorder_sizes(UI_Element *node, Axis2 axis)
 {
@@ -637,83 +783,88 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 	if (!node->first) return;
 	
 	f32 parent_size = node->computed_dim.v[axis];
-	if (axis == node->child_layout_axis)
+	if (!has_flag(node->flags, UI_FLAG_OverflowX << axis))
 	{
-		f32 total_fixup = 0;
-		f32 childs_sum_size = 0;
-		for (UI_Element *child = node->first; child; child = child->next)
+		if (axis == node->child_layout_axis)
 		{
-			total_fixup += child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
-			childs_sum_size += child->computed_dim.v[axis];
-		}
-		
-		if (childs_sum_size > parent_size && total_fixup > 0)
-		{
-			f32 extra_size = childs_sum_size - parent_size;
+			f32 total_fixup = 0;
+			f32 childs_sum_size = 0;
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				total_fixup += child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
+				childs_sum_size += child->computed_dim.v[axis];
+			}
 			
-			for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
+			if (childs_sum_size > parent_size && total_fixup > 0)
 			{
-				f32 child_fixup = child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
-				f32 balanced_child_fixup = child_fixup * extra_size / total_fixup;
-				child_fixup = CLAMP(0, balanced_child_fixup, child_fixup);
-				child->computed_dim.v[axis] -= child_fixup;
-			}
-		}
-	}
-	else
-	{
-		f32 childs_sum_size = 0;
-		for (UI_Element *child = node->first; child; child = child->next)
-		{
-			childs_sum_size = MAX(childs_sum_size, child->computed_dim.v[axis]);
-		}
-		
-		if (childs_sum_size > parent_size)
-		{
-			for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
-			{
-				f32 child_old_size = child->computed_dim.v[axis];
-				f32 new_child_size = child_old_size;
-				f32 min_child_size = child->size[axis].strictness * child_old_size;
+				f32 extra_size = childs_sum_size - parent_size;
 				
-				f32 child_needed_size = parent_size;
-				new_child_size = MAX(min_child_size, child_needed_size);
-				child->computed_dim.v[axis] = new_child_size;
+				for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
+				{
+					f32 child_fixup = child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
+					f32 balanced_child_fixup = child_fixup * extra_size / total_fixup;
+					child_fixup = CLAMP(0, balanced_child_fixup, child_fixup);
+					child->computed_dim.v[axis] -= child_fixup;
+				}
+			}
+		}
+		else
+		{
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				if (child->computed_dim.v[axis] > parent_size)
+				{
+					child->computed_dim.v[axis] = MAX(child->size[axis].strictness * child->computed_dim.v[axis], parent_size);
+				}
 			}
 		}
 	}
 	
-	node->max_child_dim.v[axis] = 0;
-	for (UI_Element *child = node->first; child; child = child->next)
+	// NOTE(fakhri): position childs
 	{
-		node->max_child_dim.v[axis] = MAX(node->max_child_dim.v[axis], child->computed_dim.v[axis]);
+		if (axis == node->child_layout_axis)
+		{
+			f32 p = 0;
+			node->child_bounds.v[axis] = 0;
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				child->rel_top_left_pos.v[axis] = p;
+				p += child->computed_dim.v[axis];
+				
+				node->child_bounds.v[axis] += child->computed_dim.v[axis];
+			}
+		}
+		else
+		{
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				child->rel_top_left_pos.v[axis] = 0;
+				node->child_bounds.v[axis] = MAX(child->computed_dim.v[axis], child->computed_dim.v[axis]);
+			}
+		}
 		
-		ui_layout_fix_sizes_violations(child, axis);
+		// NOTE(fakhri): compute on screen position from relative positions
+		if (axis == Axis2_X)
+		{
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				child->computed_rect.min_x = node->computed_rect.min_x + child->rel_top_left_pos.x - node->view_scroll.x;
+				child->computed_rect.max_x = child->computed_rect.min_x + child->computed_dim.width;
+			}
+		}
+		else // Y axis
+		{
+			for (UI_Element *child = node->first; child; child = child->next)
+			{
+				child->computed_rect.max_y = node->computed_rect.max_y - child->rel_top_left_pos.y + node->view_scroll.y;
+				child->computed_rect.min_y = child->computed_rect.max_y - child->computed_dim.height;
+			}
+		}
 	}
-}
-
-
-internal void
-ui_layout_compute_positions(UI_Element *node)
-{
-	node->computed_rect = range_center_dim(node->computed_pos, node->computed_dim);
 	
-	Axis2 axis = node->child_layout_axis;
-	Axis2 inv_axis = inverse_axis(axis);
-	
-	V2_F32 start_child_pos = node->computed_pos;
-	start_child_pos.v[axis] += (axis == Axis2_X? -0.5f:0.5f) * node->computed_dim.v[axis];
-	start_child_pos.v[inv_axis] += (inv_axis == Axis2_X? -0.5f:0.5f) * (node->computed_dim.v[inv_axis] - node->max_child_dim.v[inv_axis]);
-	
-	V2_F32 child_pos = start_child_pos;
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
-		f32 offset = (axis == Axis2_X? 0.5f:-0.5f) * child->computed_dim.v[axis];
-		child_pos.v[axis] += offset;
-		child->computed_pos = child_pos;
-		child_pos.v[axis] += offset;
-		
-		ui_layout_compute_positions(child);
+		ui_layout_fix_sizes_violations(child, axis);
 	}
 }
 
@@ -726,27 +877,26 @@ ui_update_layout(Mplayer_UI *ui)
 		ui_layout_compute_preorder_sizes(ui->root, (Axis2)axis);
 		ui_layout_fix_sizes_violations(ui->root, (Axis2)axis);
 	}
-	
-	ui_layout_compute_positions(ui->root);
 }
 
 internal void
 ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 {
+	V2_F32 pos = range_center(node->rect);
 	// NOTE(fakhri): only render the leaf nodes
 	if (has_flag(node->flags, UI_FLAG_Draw_Background))
 	{
-		push_rect(ui->group, node->pos, node->dim, node->background_color, node->roundness);
+		push_rect(ui->group, pos, node->dim, node->background_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Image))
 	{
-		push_image(ui->group, node->pos, node->dim, node->texture, node->texture_tint_color, node->roundness);
+		push_image(ui->group, pos, node->dim, node->texture, node->texture_tint_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
-		draw_text(ui->group, node->font, node->pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
+		draw_text(ui->group, node->font, pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
@@ -761,7 +911,7 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Border))
 	{
-		draw_outline(ui->group, node->pos, node->dim, node->border_color, node->border_thickness);
+		draw_outline(ui->group, pos, node->dim, node->border_color, node->border_thickness);
 	}
 	
 }
@@ -807,6 +957,84 @@ ui_reset_default_style(Mplayer_UI *ui)
 }
 
 internal void
+ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
+{
+	f32 dt = ui->input->frame_dt;
+	
+	if (node->id)
+	{
+		#if 0
+			//- NOTE(fakhri): animate position
+			if (has_flag(node->flags, UI_FLAG_Animate_Pos))
+		{
+			f32 freq = 10.0f;
+			f32 zeta = 1.f;
+			
+			f32 K1 = zeta / (PI32 * freq);
+			f32 K2 = SQUARE(2 * PI32 * freq);
+			
+			V2_F32 dd_pos = K2 * (node->computed_pos - node->pos - K1 * node->d_pos);
+			node->d_pos += dt * dd_pos;
+			node->pos   += dt * node->d_pos + 0.5f * SQUARE(dt) * dd_pos;
+		}
+		else
+		{
+			node->pos = node->computed_pos;
+		}
+		#endif
+			
+			//- NOTE(fakhri): animate dim
+			if (has_flag(node->flags, UI_FLAG_Animate_Dim))
+		{
+			f32 step = 1 - pow_f(2, -69 * dt);
+			node->dim += (node->computed_dim - node->dim) * step;
+		}
+		else
+		{
+			node->dim = node->computed_dim;
+		}
+		
+		//- NOTE(fakhri): animate scroll
+		if (has_flag(node->flags, UI_FLAG_Animate_Scroll))
+		{
+			#if 0			
+				f32 freq = 5.0f;
+			f32 zeta = 1.f;
+			
+			f32 K1 = zeta / (PI32 * freq);
+			f32 K2 = SQUARE(2 * PI32 * freq);
+			
+			V2_F32 dd_scroll = K2 * (node->view_target_scroll - node->view_scroll - K1 * node->d_view_scroll);
+			node->d_view_scroll += dt * dd_scroll;
+			node->view_scroll   += dt * node->d_view_scroll + 0.5f * SQUARE(dt) * dd_scroll;
+			#else
+				f32 step = 1 - pow_f(2, -30 * dt);
+			node->view_scroll += (node->view_target_scroll - node->view_scroll) * step;
+			#endif
+		}
+		else
+		{
+			node->view_scroll = node->view_target_scroll;
+		}
+	}
+	else
+	{
+		node->dim = node->computed_dim;
+		node->view_scroll = node->view_target_scroll;
+	}
+	
+	// TODO(fakhri): active animations
+	// TODO(fakhri): hot animations
+	
+	node->rect = range_center_dim(range_center(node->computed_rect), node->dim);
+	
+	for (UI_Element *child = node->first; child; child = child->next)
+	{
+		ui_animate_elements(ui, child);
+	}
+}
+
+internal void
 ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 mouse_p)
 {
 	ui->group   = group;
@@ -847,69 +1075,17 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 	ui_push_default_style(ui);
 }
 
-internal void
-ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
-{
-	f32 dt = ui->input->frame_dt;
-	
-	if (node->id)
-	{
-		//- NOTE(fakhri): animate position
-		if (has_flag(node->flags, UI_FLAG_Animate_Pos))
-		{
-			f32 freq = 10.0f;
-			f32 zeta = 1.f;
-			
-			f32 K1 = zeta / (PI32 * freq);
-			f32 K2 = SQUARE(2 * PI32 * freq);
-			
-			V2_F32 dd_pos = K2 * (node->computed_pos - node->pos - K1 * node->d_pos);
-			node->d_pos += dt * dd_pos;
-			node->pos   += dt * node->d_pos + 0.5f * SQUARE(dt) * dd_pos;
-		}
-		else
-		{
-			node->pos = node->computed_pos;
-		}
-		
-		//- NOTE(fakhri): animate dim
-		if (has_flag(node->flags, UI_FLAG_Animate_Dim))
-		{
-			f32 freq = 5.0f;
-			f32 zeta = 0.9f;
-			
-			f32 K1 = zeta / (PI32 * freq);
-			f32 K2 = SQUARE(2 * PI32 * freq);
-			
-			V2_F32 dd_dim = K2 * (node->computed_dim - node->dim - K1 * node->d_dim);
-			node->d_dim += dt * dd_dim;
-			node->dim   += dt * node->d_dim + 0.5f * SQUARE(dt) * dd_dim;
-		}
-		else
-		{
-			node->dim = node->computed_dim;
-		}
-	}
-	else
-	{
-		node->pos = node->computed_pos;
-		node->dim = node->computed_dim;
-	}
-	// TODO(fakhri): active animations
-	// TODO(fakhri): hot animations
-	
-	node->rect = range_center_dim(node->pos, node->dim);
-	
-	for (UI_Element *child = node->first; child; child = child->next)
-	{
-		ui_animate_elements(ui, child);
-	}
-}
 
 internal void
 ui_end(Mplayer_UI *ui)
 {
 	ui_pop_parent(ui);
+	
+	if (ui->root)
+	{
+		ui->root->computed_dim = ui->group->render_ctx->draw_dim;
+		ui->root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
+	}
 	
 	ui_update_layout(ui);
 	ui_animate_elements(ui, ui->root);

@@ -33,8 +33,6 @@ struct UI_Size
 
 #define UI_DEFAULT_SIZE UI_Size{.kind = UI_SIZE_Percent, .value = 1.0, .strictness = 0.0.}
 
-#define UI_FLAG_Mouse_Clickable (UI_FLAG_Left_Mouse_Clickable)
-#define UI_FLAG_Clickable (UI_FLAG_Mouse_Clickable)
 enum
 {
 	UI_FLAG_Has_Custom_Draw = (1 << 0),
@@ -42,12 +40,19 @@ enum
 	UI_FLAG_Draw_Border     = (1 << 2),
 	UI_FLAG_Draw_Image      = (1 << 3),
 	UI_FLAG_Draw_Text       = (1 << 4),
-	UI_FLAG_Allow_OverflowX = (1 << 5),
-	UI_FLAG_Allow_OverflowY = (1 << 6),
+	UI_FLAG_View_Scroll     = (1 << 5),
+	
+	UI_FLAG_Left_Mouse_Clickable = (1 << 6),
+	
 	UI_FLAG_Animate_Pos     = (1 << 7),
 	UI_FLAG_Animate_Dim     = (1 << 8),
+	UI_FLAG_Animate_Scroll  = (1 << 9),
 	
-	UI_FLAG_Left_Mouse_Clickable = (1 << 9),
+	UI_FLAG_OverflowX       = (1 << 10),
+	UI_FLAG_OverflowY       = (1 << 11),
+	
+	UI_FLAG_Mouse_Clickable = UI_FLAG_Left_Mouse_Clickable,
+	UI_FLAG_Clickable       =  UI_FLAG_Mouse_Clickable,
 };
 typedef u32 UI_Element_Flags;
 
@@ -87,20 +92,26 @@ struct UI_Element
 	V4_F32 border_color;
 	f32 border_thickness;
 	
-	V2_F32 max_child_dim;
+	V2_F32 rel_top_left_pos; // relative to the parent element
+	
 	V2_F32 computed_dim;
-	V2_F32 computed_pos;
 	Range2_F32 computed_rect;
 	
 	f32 roundness;
 	V2_F32 d_dim;
 	V2_F32 dim;
-	V2_F32 pos;
-	V2_F32 d_pos;
+	
+	V2_F32 child_bounds;
 	Range2_F32 rect;
 	
 	UI_Custom_Draw_Proc *custom_draw_proc;
 	void *custom_draw_data;
+	
+	V2_F32 scroll_step;
+	
+	V2_F32 view_target_scroll;
+	V2_F32 view_scroll;
+	V2_F32 d_view_scroll;
 	
 	f32 active_t;
 	f32 hot_t;
@@ -158,6 +169,13 @@ struct UI_Color_Stack
 	b32 auto_pop;
 };
 
+struct UI_V2_F32_Stack
+{
+	V2_F32 stack[UI_STACK_MAX_SIZE];
+	u32 top;
+	b32 auto_pop;
+};
+
 struct UI_F32_Stack
 {
 	f32 stack[UI_STACK_MAX_SIZE];
@@ -202,6 +220,15 @@ struct Mplayer_UI
 	f32 recent_click_time;
 	u32 input_cursor;
 	
+	u32 grid_first_visible_row;
+	u32 grid_item_count_per_row;
+	u32 grid_max_rows_count;
+	u32 grid_visible_rows_count;
+	u32 grid_item_index_in_row;
+	i32 grid_row_index;
+	f32 grid_vpadding;
+	V2_F32 grid_item_dim;
+	
 	UI_Fonts_Stack    fonts;
 	UI_Textures_Stack textures;
 	UI_Color_Stack    text_colors;
@@ -211,6 +238,7 @@ struct Mplayer_UI
 	UI_F32_Stack      border_thickness;
 	UI_F32_Stack      roundness_stack;
 	UI_U32_Stack      flags_stack;
+	UI_V2_F32_Stack   scroll_steps;
 	UI_Size_Stack sizes[Axis2_COUNT];
 	
 	UI_Element *root;

@@ -124,6 +124,13 @@ union Range2_F32_Cut
 #define RANGE2_F32_FULL_ZO Range2_F32{.min_x = 0, .min_y = 0, .max_x = 1, .max_y = 1}
 
 internal inline f32
+pow_f(f32 base, f32 exp)
+{
+	f32 result = powf(base, exp);
+	return result;
+}
+
+internal inline f32
 sin_f(f32 angle)
 {
 	f32 result = sinf(angle);
@@ -385,16 +392,16 @@ operator+=(V2_F32 &lhs, V2_F32 rhs)
 	return lhs = lhs + rhs;
 }
 
-internal inline V2_F32 &
-operator+=(V2_F32 &lhs, V2_F32 &rhs)
-{
-	return lhs = lhs + rhs;
-}
-
 internal inline V2_F32
 operator-(V2_F32 lhs, V2_F32 rhs)
 {
 	return sub_v2(lhs, rhs);
+}
+
+internal inline V2_F32 &
+operator-=(V2_F32 &lhs, V2_F32 rhs)
+{
+	return lhs = lhs - rhs;
 }
 
 
