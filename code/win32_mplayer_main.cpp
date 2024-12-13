@@ -22,6 +22,16 @@
 
 global Mplayer_OS_Vtable w32_vtable;
 
+
+global Cursor_Shape g_w32_cursor = Cursor_Arrow;
+
+
+internal void
+w32_set_cursor(Cursor_Shape cursor)
+{
+	g_w32_cursor = cursor;
+}
+
 internal i64
 w32_atomic_increment64(volatile i64 *addend)
 {
@@ -240,6 +250,54 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			lpMMI->ptMinTrackSize.x = 650;
 			lpMMI->ptMinTrackSize.y = 170;
 			return 0;
+		} break;
+		case WM_SETCURSOR:
+		{
+			global HCURSOR cursors[Cursor_COUNT];
+			local_persist b32 cursors_inited = 0;
+			if (!cursors_inited)
+			{
+				cursors_inited = 1;
+				
+				for (u32 i = 0; i < Cursor_COUNT; i += 1)
+				{
+					Cursor_Shape shape = (Cursor_Shape)i;
+					
+					LPCSTR cur_name = 0;
+					switch(shape)
+					{
+						case Cursor_Arrow:             cur_name = IDC_ARROW; break;
+						case Cursor_Hand:              cur_name = IDC_HAND; break;
+						case Cursor_Horizontal_Resize: cur_name = IDC_SIZEWE; break;
+						case Cursor_Vertical_Resize:   cur_name = IDC_SIZENS; break;
+						case Cursor_Wait:              cur_name = IDC_WAIT; break;
+						case Cursor_TextSelect:        cur_name = IDC_IBEAM; break;
+						case Cursor_Unavailable:       cur_name = IDC_NO; break;
+						
+						default:
+						case Cursor_COUNT: invalid_code_path();
+					}
+					
+					cursors[i] = LoadCursor(0, cur_name);
+					
+				}
+			}
+			
+			
+			RECT client_rect;
+			GetClientRect(hwnd, &client_rect);
+			
+			POINT point;
+			if (GetCursorPos(&point))
+			{
+				ScreenToClient(hwnd, &point);
+			}
+			if (is_in_range(range((f32)client_rect.left, (f32)client_rect.right, (f32)client_rect.top, (f32)client_rect.bottom),
+					vec2((f32)point.x, (f32)point.y)))
+			{
+				SetCursor(cursors[g_w32_cursor]);
+				return 0;
+			}
 		} break;
 	}
 	return DefWindowProcA(hwnd, msg, wparam, lparam);
@@ -1045,6 +1103,7 @@ internal void
 w32_init_os_vtable()
 {
 	w32_vtable = {
+		.set_cursor                          = w32_set_cursor,
 		.read_directory                      = w32_read_directory,
 		.get_current_directory               = w32_get_current_directory,
 		.load_entire_file                    = w32_load_entire_file,
@@ -1298,7 +1357,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 						DispatchMessage(&msg);
 					}
 				}
-				
 			}
 			
 		}

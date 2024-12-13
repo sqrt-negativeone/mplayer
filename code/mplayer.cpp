@@ -1304,35 +1304,37 @@ mplayer_close_path_lister(Mplayer_Context *mplayer, Mplayer_Path_Lister *path_li
 	
 }
 
-struct UI_Slider_Draw_Data
+internal Mplayer_UI_Interaction
+mplayer_ui_underlined_button(Mplayer_UI *ui, String8 string)
 {
-	f32 percent;
-};
-
-internal
-UI_CUSTOM_DRAW_PROC(ui_slider_draw_proc)
-{
-	UI_Slider_Draw_Data *slider_data = (UI_Slider_Draw_Data *)element->custom_draw_data;
-	
-	V2_F32 slider_dim = element->dim;
-	V2_F32 slider_pos = range_center(element->rect);
-	
-	push_rect(group, element->rect, element->background_color, element->roundness);
-	
-	V4_F32 progress_bg_color = vec4(0.6f, 0.6f, 0.6f, 1);
-	
-	V2_F32 full_progress_dim = slider_dim;
-	full_progress_dim.width  *= 0.99f;
-	full_progress_dim.height *= 0.3f;
-	
-	push_rect(group, slider_pos, full_progress_dim, progress_bg_color, 5);
-	
-	Range2_F32 filled_progress_rect = range_center_dim(slider_pos, full_progress_dim);
-	filled_progress_rect.max_x -= full_progress_dim.width * (1 - slider_data->percent);
-	V4_F32 filled_progress_color = vec4(1, 1, 1, 1);
-	push_rect(group, filled_progress_rect, filled_progress_color, 5);
-	
+	ui_next_hover_cursor(ui, Cursor_Hand);
+	UI_Element *button = ui_element(ui, string, UI_FLAG_Draw_Text | UI_FLAG_Clickable);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, button);
+	if (interaction.hover) ui_parent(ui, button)
+	{
+		button->child_layout_axis = Axis2_Y;
+		ui_spacer(ui, ui_size_percent(0.85f, 1));
+		
+		ui_next_width(ui, ui_size_percent(1, 1));
+		ui_next_height(ui, ui_size_pixel(1, 1));
+		ui_next_background_color(ui, button->text_color);
+		ui_element(ui, {}, UI_FLAG_Draw_Background);
+	}
+	return interaction;
 }
+
+internal Mplayer_UI_Interaction
+mplayer_ui_underlined_button_f(Mplayer_UI *ui, const char *fmt, ...)
+{
+	va_list args;
+  va_start(args, fmt);
+	String8 string = str8_fv(ui->frame_arena, fmt, args);
+	va_end(args);
+	
+	return mplayer_ui_underlined_button(ui, string);
+}
+
+
 
 exported void
 mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, void *output_buf, u32 frame_count)
@@ -1407,7 +1409,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
 	
 	Mplayer_Track *current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
-	if (mplayer->current_music_id && !is_music_track_still_playing(current_music))
+	if (mplayer->play_track && mplayer->current_music_id && !is_music_track_still_playing(current_music))
 	{
 		// TODO(fakhri): play next song in queue
 		mplayer_play_music_track(mplayer, current_music->header.id + 1);
@@ -1427,14 +1429,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	Mplayer_UI *ui = &mplayer->ui;;
 	ui_begin(ui, mplayer, &group, world_mouse_p);
 	
-	if (mplayer->show_path_popup)
-	{
-		ui->disable_input = true;
-	}
-	
 	#if 1
 		
-		ui_vertical_layout(ui)
+		if (mplayer->show_path_popup)
+	{
+		// TODO(fakhri): draw locations path selector
+	}
+	
+	ui_vertical_layout(ui)
 	{
 		ui_pref_height(ui, ui_size_parent_remaining())
 			ui_horizontal_layout(ui)
@@ -1446,7 +1448,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			ui_vertical_layout(ui)
 			{
 				ui_pref_background_color(ui, vec4(0.1f, 0.1f, 0.1f, 1)) ui_pref_text_color(ui, vec4(1, 1, 1, 1))
-					ui_pref_width(ui, ui_size_percent(1, 1)) ui_pref_height(ui, ui_size_text_dim(1))
+					ui_pref_width(ui, ui_size_percent(1, 1)) ui_pref_height(ui, ui_size_pixel(30, 1)) ui_pref_roundness(ui, 15)
 				{
 					ui_spacer_pixels(ui, 20, 1);
 					if (ui_button(ui, str8_lit("Songs")).clicked)
@@ -1530,10 +1532,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
 								}
 								
+								ui_next_hover_cursor(ui, Cursor_Hand);
 								ui_next_roundness(ui, 10);
 								ui_next_width(ui, ui_size_percent(1, 1));
 								ui_next_height(ui, ui_size_percent(1, 1));
-								flags |= UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable;
+								flags |= UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
 								UI_Element *artist_el = ui_element_f(ui, flags, "library_artist_%p", artist);
 								artist_el->child_layout_axis = Axis2_Y;
 								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, artist_el);
@@ -1578,51 +1581,56 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_label(ui, str8_lit("Albums"));
 						}
 						
-						u32 selected_album_id = 0;
-						ui_for_each_grid_item(ui, str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(250.0f, 220.0f), 10, album_index)
+						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
 						{
-							Mplayer_Item_ID album_id = 1 + album_index;
-							Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
-							mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
-							
-							UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable;
-							if (mplayer_item_image_ready(album->header.image.texture))
+							u32 selected_album_id = 0;
+							ui_for_each_grid_item(ui, str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
 							{
-								flags |= UI_FLAG_Draw_Image;
-								ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
-								ui_next_texture(ui, album->header.image.texture);
-							}
-							else
-							{
-								flags |= UI_FLAG_Draw_Background;
-								ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
-							}
-							
-							ui_next_roundness(ui, 10);
-							UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
-							album_el->child_layout_axis = Axis2_Y;
-							Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
-							if (interaction.clicked)
-							{
-								selected_album_id = album_id;
-							}
-							
-							ui_parent(ui, album_el)
-							{
-								ui_spacer_pixels(ui, 10, 1);
+								Mplayer_Item_ID album_id = 1 + album_index;
+								Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
+								mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
 								
-								ui_next_width(ui, ui_size_percent(1, 1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
-									STR8_EXPAND(album->name), album);
+								UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
+								if (mplayer_item_image_ready(album->header.image.texture))
+								{
+									flags |= UI_FLAG_Draw_Image;
+									ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
+									ui_next_texture(ui, album->header.image.texture);
+								}
+								else
+								{
+									flags |= UI_FLAG_Draw_Background;
+									ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+								}
+								
+								ui_next_hover_cursor(ui, Cursor_Hand);
+								ui_next_roundness(ui, 10);
+								UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
+								album_el->child_layout_axis = Axis2_Y;
+								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
+								if (interaction.clicked)
+								{
+									selected_album_id = album_id;
+								}
+								
+								ui_parent(ui, album_el)
+								{
+									ui_spacer_pixels(ui, 10, 1);
+									
+									ui_next_width(ui, ui_size_percent(1, 1));
+									ui_next_height(ui, ui_size_text_dim(1));
+									ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+										STR8_EXPAND(album->name), album);
+								}
+							}
+							
+							if (selected_album_id)
+							{
+								mplayer->selected_album_id = selected_album_id;
+								mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album_id);
 							}
 						}
 						
-						if (selected_album_id)
-						{
-							mplayer->selected_album_id = selected_album_id;
-							mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album_id);
-						}
 					} break;
 					
 					case MODE_Music_Library:
@@ -1648,9 +1656,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							{
 								Mplayer_Item_ID track_id = 1 + track_index;
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
-								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border;
+								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 								
-								ui_next_background_color(ui, vec4(0.15f, 0.15f,0.15f, 1));
+								V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+								if (track_id == mplayer->current_music_id)
+								{
+									bg_color = vec4(0, 0, 0, 1);
+								}
+								ui_next_background_color(ui, bg_color);
 								ui_next_border_color(ui, vec4(0, 0, 0, 1));
 								ui_next_border_thickness(ui, 1);
 								UI_Element *track_el = ui_element_f(ui, flags, "library_track_%p", track);
@@ -1693,52 +1706,57 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_label(ui, artist->name);
 						}
 						
-						u32 selected_album_id = 0;
-						ui_for_each_grid_item(ui, str8_lit("artist-albums-grid"), artist->albums.count, vec2(250.0f, 220.0f), 10, album_index)
+						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
 						{
-							Mplayer_Item_ID album_id = artist->albums.items[album_index];
-							Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
-							mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
-							
-							UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable;
-							if (mplayer_item_image_ready(album->header.image.texture))
+							u32 selected_album_id = 0;
+							ui_for_each_grid_item(ui, str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10, album_index)
 							{
-								flags |= UI_FLAG_Draw_Image;
-								ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
-								ui_next_texture(ui, album->header.image.texture);
-							}
-							else
-							{
-								flags |= UI_FLAG_Draw_Background;
-								ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
-							}
-							
-							ui_next_roundness(ui, 10);
-							UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
-							album_el->child_layout_axis = Axis2_Y;
-							Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
-							if (interaction.clicked)
-							{
-								selected_album_id = album_id;
-							}
-							
-							ui_parent(ui, album_el)
-							{
-								ui_spacer_pixels(ui, 10, 1);
+								Mplayer_Item_ID album_id = artist->albums.items[album_index];
+								Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
+								mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
 								
-								ui_next_width(ui, ui_size_percent(1, 1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
-									STR8_EXPAND(album->name), album);
+								UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
+								if (mplayer_item_image_ready(album->header.image.texture))
+								{
+									flags |= UI_FLAG_Draw_Image;
+									ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
+									ui_next_texture(ui, album->header.image.texture);
+								}
+								else
+								{
+									flags |= UI_FLAG_Draw_Background;
+									ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+								}
+								
+								ui_next_hover_cursor(ui, Cursor_Hand);
+								ui_next_roundness(ui, 10);
+								UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
+								album_el->child_layout_axis = Axis2_Y;
+								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
+								if (interaction.clicked)
+								{
+									selected_album_id = album_id;
+								}
+								
+								ui_parent(ui, album_el)
+								{
+									ui_spacer_pixels(ui, 10, 1);
+									
+									ui_next_width(ui, ui_size_percent(1, 1));
+									ui_next_height(ui, ui_size_text_dim(1));
+									ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+										STR8_EXPAND(album->name), album);
+								}
+							}
+							
+							
+							if (selected_album_id)
+							{
+								mplayer->selected_album_id = selected_album_id;
+								mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album_id);
 							}
 						}
 						
-						
-						if (selected_album_id)
-						{
-							mplayer->selected_album_id = selected_album_id;
-							mplayer_change_mode(mplayer, MODE_Album_Tracks, selected_album_id);
-						}
 					} break;
 					
 					case MODE_Album_Tracks:
@@ -1802,16 +1820,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											ui_next_height(ui, ui_size_text_dim(1));
 											ui_next_font(ui, &mplayer->font);
 											ui_next_text_color(ui, vec4(0.4f, 0.4f, 0.4f, 1));
-											UI_Element *artist_button = ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Clickable, "%.*s###_album_artist_button", STR8_EXPAND(album->artist));
-											Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, artist_button);
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f(ui, "%.*s###_album_artist_button", STR8_EXPAND(album->artist));
 											if (interaction.hover)
 											{
-												artist_button->text_color = vec4(0.6f, 0.6f, 0.6f, 1);;
+												interaction.element->text_color = vec4(0.6f, 0.6f, 0.6f, 1);
 											}
-											
 											if (interaction.pressed)
 											{
-												artist_button->text_color = vec4(1, 1, 1, 1);
+												interaction.element->text_color = vec4(1, 1, 1, 1);
 											}
 											
 											if (interaction.clicked)
@@ -1836,11 +1852,18 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							{
 								Mplayer_Item_ID track_id = album->tracks.items[track_index];
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
-								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border;
+								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 								
-								ui_next_background_color(ui, vec4(0.15f, 0.15f,0.15f, 1));
+								V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+								if (track_id == mplayer->current_music_id)
+								{
+									bg_color = vec4(0, 0, 0, 1);
+								}
+								
+								ui_next_background_color(ui, bg_color);
 								ui_next_border_color(ui, vec4(0, 0, 0, 1));
 								ui_next_border_thickness(ui, 1);
+								ui_next_hover_cursor(ui, Cursor_Hand);
 								UI_Element *track_el = ui_element_f(ui, flags, "library_track_%p", track);
 								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, track_el);
 								if (interaction.clicked)
@@ -1875,11 +1898,161 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					case MODE_Lyrics:
 					{
+						// NOTE(fakhri): header
+						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_horizontal_layout(ui)
+						{
+							ui_spacer_pixels(ui, 50, 0);
+							
+							ui_next_background_color(ui, vec4(1, 1, 1, 0));
+							ui_next_text_color(ui, vec4(1, 1, 1, 1));
+							ui_next_width(ui, ui_size_text_dim(1));
+							ui_next_font(ui, &mplayer->header_label_font);
+							ui_label(ui, str8_lit("Lyrics"));
+						}
 						
 					} break;
 					
 					case MODE_Settings:
 					{
+						// NOTE(fakhri): header
+						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_horizontal_layout(ui)
+						{
+							ui_spacer_pixels(ui, 50, 0);
+							
+							ui_next_background_color(ui, vec4(1, 1, 1, 0));
+							ui_next_text_color(ui, vec4(1, 1, 1, 1));
+							ui_next_width(ui, ui_size_text_dim(1));
+							ui_next_font(ui, &mplayer->header_label_font);
+							ui_label(ui, str8_lit("Settings"));
+						}
+						
+						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
+						{
+							ui_next_childs_axis(ui, Axis2_Y);
+							ui_parent(ui, ui_element(ui, str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll | UI_FLAG_Defer_Handle_Input))
+								ui_padding(ui, ui_size_pixel(20, 1))
+							{
+								ui_next_height(ui, ui_size_by_childs(1));
+								ui_horizontal_layout(ui)
+								{
+									ui_next_width(ui, ui_size_text_dim(1));
+									ui_next_height(ui, ui_size_text_dim(1));
+									ui_label(ui, str8_lit("Library"));
+								}
+								
+								ui_spacer_pixels(ui, 10, 1);
+								
+								ui_next_width(ui, ui_size_parent_remaining());
+								ui_next_height(ui, ui_size_by_childs(1));
+								ui_parent(ui, ui_element(ui, {}, 0))
+								{
+									ui_next_background_color(ui, vec4(0.2f,0.2f,0.2f,1));
+									ui_next_height(ui, ui_size_pixel(60, 1));
+									ui_next_roundness(ui, 5);
+									UI_Element *add_location_el = ui_element(ui, str8_lit("setting-music-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
+									ui_parent(ui, add_location_el) ui_padding(ui, ui_size_parent_remaining()) ui_pref_height(ui, ui_size_by_childs(1))
+										ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(20, 1))
+									{
+										Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(ui, add_location_el);
+										if (add_loc_interaction.hover)
+										{
+											add_location_el->background_color = vec4(0.3f,0.3f,0.3f,1);
+										}
+										if (add_loc_interaction.pressed)
+										{
+											add_location_el->background_color = vec4(0.17f,0.17f,0.17f,1);
+										}
+										if (add_loc_interaction.clicked)
+										{
+											mplayer->show_library_locations = !mplayer->show_library_locations;
+										}
+										
+										ui_next_width(ui, ui_size_text_dim(1));
+										ui_next_height(ui, ui_size_text_dim(1));
+										ui_label(ui, str8_lit("Music Library Locations"));
+										
+										ui_spacer(ui, ui_size_parent_remaining());
+										
+										ui_next_roundness(ui, 5);
+										ui_next_background_color(ui, vec4(0.25f,0.25f,0.25f,1));
+										ui_next_width(ui, ui_size_by_childs(1));
+										ui_next_height(ui, ui_size_by_childs(1));
+										ui_vertical_layout(ui) 
+											ui_padding(ui, ui_size_pixel(5, 1)) ui_pref_width(ui, ui_size_by_childs(1))
+											ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(5, 1))
+										{
+											ui_next_width(ui, ui_size_text_dim(1));
+											ui_next_height(ui, ui_size_text_dim(1));
+											if (ui_button(ui, str8_lit("Add Location")).pressed)
+											{
+												mplayer->show_path_popup = 1;
+											}
+										}
+									}
+									
+									u32 location_to_delete = mplayer->settings.locations_count;
+									
+									if (mplayer->show_library_locations) 
+										ui_pref_background_color(ui, vec4(0.15f,0.15f,0.15f,1))
+										ui_pref_flags(ui, UI_FLAG_Animate_Dim)
+										ui_pref_height(ui, ui_size_by_childs(1))
+										ui_pref_roundness(ui, 10)
+										ui_for_each_list_item(ui, str8_lit("settings-location-list"), mplayer->settings.locations_count, 40.0f, 1.0f, location_index)
+										
+										ui_pref_height(ui, ui_size_parent_remaining()) ui_pref_flags(ui, 0) ui_pref_roundness(ui, 100)
+									{
+										Mplayer_Library_Location *location = mplayer->settings.locations + location_index;
+										ui_next_border_thickness(ui, 2);
+										u32 flags = UI_FLAG_Animate_Dim | UI_FLAG_Clip | UI_FLAG_Draw_Background;
+										UI_Element *location_el = ui_element(ui, {}, flags);
+										location_el->child_layout_axis = Axis2_X;
+										
+										ui_parent(ui, location_el) ui_padding(ui, ui_size_pixel(10, 1))
+										{
+											ui_next_width(ui, ui_size_text_dim(1));
+											ui_label(ui, str8(location->path, location->path_len));
+											
+											ui_spacer(ui, ui_size_parent_remaining());
+											
+											ui_next_width(ui, ui_size_pixel(20, 1));
+											ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+											{
+												ui_next_height(ui, ui_size_pixel(20, 1));
+												ui_next_roundness(ui, 10);
+												ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1));
+												if (ui_button(ui, str8_lit("X")).clicked)
+												{
+													location_to_delete = location_index;
+												}
+											}
+										}
+									}
+									
+									if (location_to_delete < mplayer->settings.locations_count)
+									{
+										for (u32 i = location_to_delete; i < mplayer->settings.locations_count - 1; i += 1)
+										{
+											memory_copy_struct(&mplayer->settings.locations[i], &mplayer->settings.locations[i + 1]);
+										}
+										
+										mplayer->settings.locations_count -= 1;
+									}
+								}
+								
+								ui_spacer_pixels(ui, 20,1);
+								ui_next_width(ui, ui_size_text_dim(1));
+								ui_next_height(ui, ui_size_text_dim(1));
+								if (mplayer_ui_underlined_button(ui, str8_lit("Reindex Library")).clicked)
+								{
+									mplayer->current_music_id = 0;
+									mplayer_index_library(mplayer);
+								}
+							}
+						}
 						
 					} break;
 				}
@@ -1919,28 +2092,35 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				
 				// NOTE(fakhri): track progres slider
 				{
-					f32 samples_count = 0;
-					f32 current_playing_sample = 0;
+					u64 samples_count = 0;
+					u64 current_playing_sample = 0;
 					if (current_music && current_music->flac_stream)
 					{
-						samples_count = (f32)current_music->flac_stream->streaminfo.samples_count;
-						current_playing_sample = (f32)current_music->flac_stream->next_sample_number;
+						samples_count = current_music->flac_stream->streaminfo.samples_count;
+						current_playing_sample = current_music->flac_stream->next_sample_number;
 					}
 					
 					ui_next_width(ui, ui_size_percent(1.0f, 0.25f));
 					ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1.0f));
 					ui_next_roundness(ui, 5);
-					UI_Element *slider = ui_element_f(ui, UI_FLAG_Draw_Background, "track_progress_slider");
-					
-					f32 percent = 0.f;
-					if (samples_count)
+					Mplayer_UI_Interaction progress = ui_slider_u64(ui, str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count - 10);
+					if (progress.pressed)
 					{
-						percent = f32(current_playing_sample) / f32(samples_count);
+						mplayer->play_track = false;
+						if (current_music && current_music->flac_stream)
+						{
+							flac_seek_stream(current_music->flac_stream, (u64)current_playing_sample);
+						}
+					}
+					else if (progress.released)
+					{
+						mplayer->play_track = true;
 					}
 					
-					UI_Slider_Draw_Data *slider_data = m_arena_push_struct_z(&mplayer->frame_arena, UI_Slider_Draw_Data);
-					slider_data->percent = percent;
-					ui_element_set_draw_proc(slider, ui_slider_draw_proc, slider_data);
+					if (!(current_music && current_music->flac_stream))
+					{
+						mplayer->play_track = false;
+					}
 				}
 				
 				ui_spacer_pixels(ui, 10, 1);
@@ -2000,7 +2180,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_texture(ui, cover_image->texture);
 							}
 							
-							ui_next_width(ui, ui_size_pixel(100, 1));
+							ui_next_width(ui, ui_size_pixel(90, 1));
+							ui_next_height(ui, ui_size_pixel(90, 1));
 							ui_element(ui, {}, flags);
 						}
 						
@@ -2008,20 +2189,31 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						// NOTE(fakhri): track info
 						ui_next_width(ui, ui_size_parent_remaining());
-						ui_vertical_layout(ui)
+						ui_pref_flags(ui, UI_FLAG_Clip)
+							ui_vertical_layout(ui)
 						{
 							ui_spacer_pixels(ui, 25, 0);
 							
 							ui_next_height(ui, ui_size_text_dim(1));
 							ui_next_width(ui, ui_size_text_dim(1));
-							ui_label(ui, current_music->title);
+							if (mplayer_ui_underlined_button_f(ui, "%.*s##_song_title_button", STR8_EXPAND(current_music->title)).clicked)
+							{
+								assert(album->artist_id);
+								mplayer->selected_album_id = current_music->album_id;
+								mplayer_change_mode(mplayer, MODE_Album_Tracks, current_music->album_id);
+							}
 							
 							ui_spacer_pixels(ui, 5, 0);
 							
 							ui_next_height(ui, ui_size_text_dim(1));
 							ui_next_width(ui, ui_size_text_dim(1));
 							ui_next_font(ui, &mplayer->small_font);
-							ui_label(ui, current_music->artist);
+							if (mplayer_ui_underlined_button_f(ui, "%.*s##_song_artist_button", STR8_EXPAND(current_music->artist)).clicked)
+							{
+								assert(album->artist_id);
+								mplayer->selected_artist_id = current_music->artist_id;
+								mplayer_change_mode(mplayer, MODE_Artist_Albums, current_music->artist_id);
+							}
 						}
 					}
 				}
@@ -2091,12 +2283,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_height(ui, ui_size_pixel(12, 1));
 							ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1.0f));
 							ui_next_roundness(ui, 5);
-							UI_Element *slider = ui_element_f(ui, UI_FLAG_Draw_Background, "volume-control-slider");
-							
-							f32 percent = mplayer->volume;
-							UI_Slider_Draw_Data *slider_data = m_arena_push_struct_z(&mplayer->frame_arena, UI_Slider_Draw_Data);
-							slider_data->percent = percent;
-							ui_element_set_draw_proc(slider, ui_slider_draw_proc, slider_data);
+							ui_slider_f32(ui, str8_lit("volume-control-slider"), &mplayer->volume, 0, 1);
 						}
 						
 						ui_spacer(ui, ui_size_parent_remaining());

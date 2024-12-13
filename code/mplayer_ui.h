@@ -22,6 +22,7 @@ enum UI_Size_Kind
 	UI_Size_Kind_Percent,
 	UI_Size_Kind_Pixel,
 	UI_Size_Kind_Text_Dim,
+	UI_Size_Kind_By_Childs,
 };
 
 struct UI_Size
@@ -51,6 +52,10 @@ enum
 	UI_FLAG_OverflowX       = (1 << 10),
 	UI_FLAG_OverflowY       = (1 << 11),
 	
+	UI_FLAG_Clip            = (1 << 12),
+	
+	UI_FLAG_Defer_Handle_Input = (1 << 13),
+	
 	UI_FLAG_Mouse_Clickable = UI_FLAG_Left_Mouse_Clickable,
 	UI_FLAG_Clickable       =  UI_FLAG_Mouse_Clickable,
 };
@@ -60,6 +65,31 @@ struct UI_Element;
 #define UI_CUSTOM_DRAW_PROC(name) void name(Render_Group *group, UI_Element *element)
 
 typedef UI_CUSTOM_DRAW_PROC(UI_Custom_Draw_Proc);
+
+enum UI_Interaction_Flag
+{
+	UI_Interaction_Hover    = 1 << 0,
+	UI_Interaction_Released = 1 << 1,
+	UI_Interaction_Clicked  = 1 << 2,
+	UI_Interaction_Pressed  = 1 << 3,
+	UI_Interaction_Dragging = 1 << 4,
+};
+
+struct Mplayer_UI_Interaction
+{
+	UI_Element *element;
+	union {
+		u32 flags;
+		struct
+		{
+			u32 hover : 1;
+			u32 released : 1;
+			u32 clicked : 1;
+			u32 pressed : 1;
+			u32 dragging : 1;
+		};
+	};
+};
 
 struct UI_Element
 {
@@ -76,11 +106,14 @@ struct UI_Element
 	u64 id;
 	
 	u64 frame_index;
+	Mplayer_UI_Interaction last_frame_interaction;
 	
 	Axis2 child_layout_axis;
 	UI_Size size[Axis2_COUNT];
 	
 	UI_Element_Flags flags;
+	
+	Cursor_Shape hover_cursor;
 	
 	Mplayer_Font *font;
 	String8 text;
@@ -98,7 +131,6 @@ struct UI_Element
 	Range2_F32 computed_rect;
 	
 	f32 roundness;
-	V2_F32 d_dim;
 	V2_F32 dim;
 	
 	V2_F32 child_bounds;
@@ -111,40 +143,15 @@ struct UI_Element
 	
 	V2_F32 view_target_scroll;
 	V2_F32 view_scroll;
-	V2_F32 d_view_scroll;
 	
 	f32 active_t;
 	f32 hot_t;
-	f32 active_dt;
-	f32 hot_dt;
 };
 
 struct UI_Elements_Bucket
 {
 	UI_Element *first;
 	UI_Element *last;
-};
-
-enum UI_Interaction_Flag
-{
-	UI_Interaction_Hover    = 1 << 0,
-	UI_Interaction_Released = 1 << 1,
-	UI_Interaction_Clicked  = 1 << 2,
-	UI_Interaction_Pressed  = 1 << 3,
-	UI_Interaction_Dragging = 1 << 4,
-};
-
-union Mplayer_UI_Interaction
-{
-	u32 flags;
-	struct
-	{
-		u32 hover : 1;
-		u32 released : 1;
-		u32 clicked : 1;
-		u32 pressed : 1;
-		u32 dragging : 1;
-	};
 };
 
 #define UI_STACK_MAX_SIZE 128
@@ -250,7 +257,9 @@ struct Mplayer_UI
 	UI_F32_Stack      roundness_stack;
 	UI_U32_Stack      flags_stack;
 	UI_V2_F32_Stack   scroll_steps;
-	UI_Size_Stack sizes[Axis2_COUNT];
+	UI_U32_Stack      hover_cursors;
+	UI_U32_Stack      childs_axis;
+	UI_Size_Stack     sizes[Axis2_COUNT];
 	
 	UI_Element *root;
 	UI_Element *curr_parent;
@@ -258,5 +267,7 @@ struct Mplayer_UI
 	UI_Element *free_elements;
 	UI_Elements_Bucket elements_table[UI_ELEMENETS_HASHTABLE_SIZE];
 };
+
+
 
 #endif //MPLAYER_UI_H

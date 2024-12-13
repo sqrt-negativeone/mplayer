@@ -11,6 +11,19 @@
 #include "mplayer_buffer.h"
 #include "mplayer_thread_context.cpp"
 
+enum Cursor_Shape
+{
+	Cursor_Arrow,
+	Cursor_Hand,
+	Cursor_Horizontal_Resize,
+	Cursor_Vertical_Resize,
+	Cursor_Wait,
+	Cursor_TextSelect,
+	Cursor_Unavailable,
+	
+	Cursor_COUNT,
+};
+
 typedef void Work_Proc(void *data);
 struct Work_Entry
 {
@@ -67,6 +80,8 @@ struct Directory
 	u32 count;
 };
 
+typedef void Set_Cursor_Proc(Cursor_Shape cursor);
+
 typedef i64 Atomic_Increment64_Proc(volatile i64 *addend);
 typedef i64 Atomic_Decrement64_Proc(volatile i64 *addend);
 typedef b32 Atomic_Compare_And_Exchange64_Proc(i64 volatile *dst, i64 expect, i64 exchange);
@@ -85,6 +100,8 @@ typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
 struct Mplayer_OS_Vtable
 {
+	Set_Cursor_Proc *set_cursor;
+	
 	Read_Directory_Proc  *read_directory;
 	Get_Current_Directory_Proc *get_current_directory;
 	Load_Entire_File     *load_entire_file;
@@ -345,6 +362,7 @@ struct Mplayer_Context
 	b32 show_path_popup;
 	Mplayer_Path_Lister path_lister;
 	
+	b32 show_library_locations;
 	MPlayer_Settings settings;
 };
 

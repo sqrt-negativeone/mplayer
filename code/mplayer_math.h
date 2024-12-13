@@ -620,6 +620,17 @@ operator*(M4 lhs, V4_F32 rhs)
 }
 
 internal inline Range2_F32
+range(f32 min_x, f32 max_x, f32 min_y, f32 max_y)
+{
+	Range2_F32 result;
+	result.min_x = min_x;
+	result.max_x = max_x;
+	result.min_y = min_y;
+	result.max_y = max_y;
+	return result;
+}
+
+internal inline Range2_F32
 range_min_max(V2_F32 min_p, V2_F32 max_p)
 {
 	Range2_F32 result;
@@ -813,7 +824,21 @@ internal inline f32
 map_into_range_zo(f32 min, f32 value, f32 max)
 {
   f32 result = 0;
+	value = CLAMP(min, value, max);
   f32 width = (max - min);
+  if (width != 0)
+  {
+    result = (value - min) / width;
+  }
+  return result;
+}
+
+internal inline f64
+map_into_range_zo(f64 min, f64 value, f64 max)
+{
+  f64 result = 0;
+	value = CLAMP(min, value, max);
+  f64 width = (max - min);
   if (width != 0)
   {
     result = (value - min) / width;
@@ -831,6 +856,7 @@ map_into_range_no(f32 min, f32 value, f32 max)
 internal inline f32
 map_into_range(f32 value, f32 old_min, f32 old_max, f32 new_min, f32 new_max)
 {
+	value = CLAMP(old_min, value, old_max);
 	f32 result = new_min + map_into_range_zo(old_min, value, old_max) * (new_max - new_min);
 	return result;
 }
@@ -846,6 +872,13 @@ internal inline V4_F32
 lerp(V4_F32 a, f32 t, V4_F32 b)
 {
 	V4_F32 result = (1 - t) * a + t * b;
+	return result;
+}
+
+internal inline V2_F32
+lerp(V2_F32 a, f32 t, V2_F32 b)
+{
+	V2_F32 result = (1 - t) * a + t * b;
 	return result;
 }
 
