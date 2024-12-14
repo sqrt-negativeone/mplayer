@@ -228,7 +228,6 @@ struct Mplayer_UI
 	
 	V2_F32 mouse_drag_start_pos;
 	V2_F32 mouse_pos;
-	b32 disable_input;
 	
 	u64 selected_id;
 	u64 active_id;

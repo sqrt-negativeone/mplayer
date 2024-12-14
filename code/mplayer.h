@@ -280,13 +280,6 @@ struct MPlayer_Settings
 
 #define DEFAUTL_SETTINGS MPlayer_Settings{.version = 1, .locations_count = 0, .locations = {}}
 
-struct Mplayer_Scroll_Data
-{
-	f32 t;
-	f32 dt;
-	f32 target;
-};
-
 enum Mplayer_Mode
 {
 	MODE_Music_Library,
@@ -307,8 +300,6 @@ struct Mplayer_Mode_Stack
 	Mplayer_Mode mode;
 	
 	Mplayer_Item_ID item_id;
-	
-	Mplayer_Scroll_Data scroll;
 };
 
 
