@@ -52,17 +52,20 @@ enum
 	UI_FLAG_OverflowX       = (1 << 10),
 	UI_FLAG_OverflowY       = (1 << 11),
 	
-	UI_FLAG_Clip            = (1 << 12),
+	UI_FLAG_FloatX          = (1 << 12),
+	UI_FLAG_FloatY          = (1 << 13),
 	
-	UI_FLAG_Defer_Handle_Input = (1 << 13),
+	UI_FLAG_Clip            = (1 << 14),
+	UI_FLAG_Selectable      = (1 << 14),
 	
+	UI_FLAG_Floating        = UI_FLAG_FloatX|UI_FLAG_FloatY,
 	UI_FLAG_Mouse_Clickable = UI_FLAG_Left_Mouse_Clickable,
 	UI_FLAG_Clickable       =  UI_FLAG_Mouse_Clickable,
 };
 typedef u32 UI_Element_Flags;
 
 struct UI_Element;
-#define UI_CUSTOM_DRAW_PROC(name) void name(Render_Group *group, UI_Element *element)
+#define UI_CUSTOM_DRAW_PROC(name) void name(struct Mplayer_UI *ui, Render_Group *group, UI_Element *element)
 
 typedef UI_CUSTOM_DRAW_PROC(UI_Custom_Draw_Proc);
 
@@ -73,6 +76,7 @@ enum UI_Interaction_Flag
 	UI_Interaction_Clicked  = 1 << 2,
 	UI_Interaction_Pressed  = 1 << 3,
 	UI_Interaction_Dragging = 1 << 4,
+	UI_Interaction_Selected = 1 << 5,
 };
 
 struct Mplayer_UI_Interaction
@@ -87,8 +91,15 @@ struct Mplayer_UI_Interaction
 			u32 clicked : 1;
 			u32 pressed : 1;
 			u32 dragging : 1;
+			u32 selected : 1;
 		};
 	};
+};
+
+enum UI_Layer
+{
+	UI_Layer_Default,
+	UI_Layer_Popup,
 };
 
 struct UI_Element
@@ -114,13 +125,13 @@ struct UI_Element
 	UI_Element_Flags flags;
 	
 	Cursor_Shape hover_cursor;
-	
 	Mplayer_Font *font;
 	String8 text;
 	Texture texture;
 	V4_F32 texture_tint_color;
 	V4_F32 background_color;
 	V4_F32 text_color;
+	UI_Layer layer;
 	
 	V4_F32 border_color;
 	f32 border_thickness;
@@ -219,10 +230,9 @@ struct Mplayer_UI
 	V2_F32 mouse_pos;
 	b32 disable_input;
 	
+	u64 selected_id;
 	u64 active_id;
 	u64 hot_id;
-	
-	u64 selected_id;
 	
 	f32 recent_click_time;
 	u32 input_cursor;
@@ -259,8 +269,10 @@ struct Mplayer_UI
 	UI_V2_F32_Stack   scroll_steps;
 	UI_U32_Stack      hover_cursors;
 	UI_U32_Stack      childs_axis;
+	UI_U32_Stack      layers;
 	UI_Size_Stack     sizes[Axis2_COUNT];
 	
+	UI_Element *popup_root;
 	UI_Element *root;
 	UI_Element *curr_parent;
 	

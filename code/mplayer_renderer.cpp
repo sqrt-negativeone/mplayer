@@ -346,6 +346,12 @@ push_image(Render_Group *group, V2_F32 pos, V2_F32 dim, Texture texture, V4_F32 
 }
 
 internal void
+push_image(Render_Group *group, V2_F32 pos, f32 z, V2_F32 dim, Texture texture, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0f, V2_F32 uv_scale = vec2(1, 1), V2_F32 uv_offset = vec2(0, 0))
+{
+	push_image(group, vec3(pos, z), dim, texture, color, roundness, uv_scale, uv_offset);
+}
+
+internal void
 push_rect(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
 	push_image(group, pos, dim, NULL_TEXTURE, color, roundness);
@@ -358,9 +364,21 @@ push_rect(Render_Group *group, Range2_F32 rect, V4_F32 color = vec4(1, 1, 1, 1),
 }
 
 internal void
+push_rect(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
+{
+	push_image(group, range_center(rect), z, range_dim(rect), NULL_TEXTURE, color, roundness);
+}
+
+internal void
 push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
 	push_image(group, vec3(pos, 0), dim, NULL_TEXTURE, color, roundness);
+}
+
+internal void
+push_rect(Render_Group *group, V2_F32 pos, f32 z, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
+{
+	push_image(group, vec3(pos, z), dim, NULL_TEXTURE, color, roundness);
 }
 
 

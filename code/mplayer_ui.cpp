@@ -58,6 +58,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_scroll_step(ui, scroll_step)   _defer_loop(ui_push_scroll_step(ui, scroll_step), ui_pop_scroll_step(ui))
 #define ui_pref_hover_cursor(ui, hover_cursor)   _defer_loop(ui_push_hover_cursor(ui, hover_cursor), ui_pop_hover_cursor(ui))
 #define ui_pref_childs_axis(ui, axis)   _defer_loop(ui_push_childs_axis(ui, axis), ui_pop_childs_axis(ui))
+#define ui_pref_layer(ui, layer)   _defer_loop(ui_push_layer(ui, layer), ui_pop_layer(ui))
 
 #define ui_auto_pop_style(ui) do {              \
 ui_auto_pop_stack(ui->fonts);               \
@@ -74,6 +75,7 @@ ui_auto_pop_stack(ui->roundness_stack);     \
 ui_auto_pop_stack(ui->scroll_steps);        \
 ui_auto_pop_stack(ui->hover_cursors);       \
 ui_auto_pop_stack(ui->childs_axis);         \
+ui_auto_pop_stack(ui->layers);         \
 } while (0)
 
 //- NOTE(fakhri): background color stack
@@ -337,6 +339,23 @@ ui_pop_childs_axis(Mplayer_UI *ui)
 	ui_stack_pop(ui->childs_axis);
 }
 
+//- NOTE(fakhri): texture tint color stack
+internal void
+ui_push_layer(Mplayer_UI *ui, u32 layer)
+{
+	ui_stack_push(ui->layers, layer);
+}
+internal void
+ui_next_layer(Mplayer_UI *ui, u32 layer)
+{
+	ui_stack_push_auto_pop(ui->layers, layer);
+}
+internal void
+ui_pop_layer(Mplayer_UI *ui)
+{
+	ui_stack_pop(ui->layers);
+}
+
 internal void
 ui_push_default_style(Mplayer_UI *ui)
 {
@@ -345,13 +364,14 @@ ui_push_default_style(Mplayer_UI *ui)
 	ui_push_text_color(ui, vec4(1));
 	ui_push_texture_tint_color(ui, vec4(1));
 	ui_push_background_color(ui, vec4(0));
-	ui_push_border_color(ui, vec4(0));
+	ui_push_border_color(ui, vec4(0,0,0,1));
 	ui_push_border_thickness(ui, 0);
 	ui_push_roundness(ui, 0);
 	ui_push_flags(ui, 0);
 	ui_push_scroll_step(ui, vec2(0, -50));
 	ui_push_hover_cursor(ui, Cursor_Arrow);
 	ui_push_childs_axis(ui, Axis2_Y);
+	ui_push_layer(ui, UI_Layer_Default);
 	ui_push_width(ui, ui_size_parent_remaining());
 	ui_push_height(ui, ui_size_parent_remaining());
 }
@@ -371,6 +391,7 @@ ui_reset_default_style(Mplayer_UI *ui)
 	ui->scroll_steps.top = 0;
 	ui->hover_cursors.top = 0;
 	ui->childs_axis.top = 0;
+	ui->layers.top = 0;
 	ui->sizes[Axis2_X].top = 0;
 	ui->sizes[Axis2_Y].top = 0;
 }
@@ -391,17 +412,54 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 		}
 	}
 	
+	
+	b32 ignore = 0;
+	
+	if (ui->popup_root)
+	{
+		b32 in_popup = 0;
+		for (UI_Element *p = element->parent; p; p = p->parent)
+		{
+			if (p == ui->popup_root)
+			{
+				in_popup = 1;
+				break;
+			}
+		}
+		
+		if (!in_popup)
+		{
+			ignore = 1;
+		}
+	}
+	
 	V2_F32 mouse_p = ui->mouse_pos;
-	b32 mouse_over = is_in_range(interaction_rect, mouse_p);
+	b32 mouse_over = is_in_range(interaction_rect, mouse_p) && !ignore;
+	
+	// TODO(fakhri): Bug: 
+	// - click an element
+	// - move the mouse over a child of that element
+	// - release the mouse, the parent element stays hot and is not reset.
+	// 
+	// If we click somewhere empty and drag the mouse over the element
+	// and release we get a click event. this should not happen.
 	
 	for (Mplayer_Input_Event *e = ui->input->first_event, *next = 0; e; e = next)
 	{
 		next = e->next;
 		b32 consumed = 0;
-		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && mouse_over && e->kind == Event_Kind_Mouse_Move)
+		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Move)
 		{
-			consumed = 1;
-			ui->active_id = id;
+			if (mouse_over)
+			{
+				consumed = 1;
+				ui->active_id = id;
+			}
+			else if (ui->active_id == id)
+			{
+				consumed = 0;
+				ui->active_id = 0;
+			}
 		}
 		
 		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Key && e->key == Mouse_Left)
@@ -431,6 +489,12 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 					set_flag(interaction.flags, UI_Interaction_Released);
 					ui->hot_id = 0;
 				}
+				
+				if (has_flag(element->flags, UI_FLAG_Selectable))
+				{
+					if (!mouse_over && ui->selected_id == id) ui->selected_id = 0;
+				}
+				
 			}
 		}
 		
@@ -467,6 +531,23 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 		set_flag(interaction.flags, UI_Interaction_Pressed);
 	}
 	
+	if (has_flag(element->flags, UI_FLAG_Selectable))
+	{
+		if (interaction.clicked)
+		{
+			ui->selected_id = id;
+		}
+		if (!mouse_over && interaction.released && ui->selected_id == id)
+		{
+			ui->selected_id = 0;
+		}
+		
+		if (ui->selected_id == id)
+		{
+			set_flag(interaction.flags, UI_Interaction_Selected);
+		}
+	}
+	
 	element->last_frame_interaction = interaction;
 }
 
@@ -490,10 +571,6 @@ ui_pop_parent(Mplayer_UI *ui)
 	if (parent)
 	{
 		ui->curr_parent = parent->parent;
-		if (has_flag(parent->flags, UI_FLAG_Defer_Handle_Input))
-		{
-			ui_interaction_from_element(ui, parent);
-		}
 	}
 }
 
@@ -621,6 +698,7 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	result->frame_index = ui->frame_index;
 	result->parent = result->next = result->prev = result->first = result->last = 0;
 	
+	result->layer = (UI_Layer)ui_stack_top(ui->layers);
 	result->hover_cursor = (Cursor_Shape)ui_stack_top(ui->hover_cursors);
 	result->child_layout_axis = (Axis2)ui_stack_top(ui->childs_axis);
 	result->flags |= ui_stack_top(ui->flags_stack);
@@ -710,6 +788,18 @@ ui_spacer(Mplayer_UI *ui, UI_Size size)
 #define ui_spacer_pixels(ui, px, strictness) ui_spacer(ui, ui_size_pixel(px, strictness))
 #define ui_padding(ui, size) _defer_loop(ui_spacer(ui, size), ui_spacer(ui, size))
 
+internal UI_Element *
+ui_label(Mplayer_UI *ui, String8 string)
+{
+	UI_Element *label = ui_element(ui, ZERO_STRUCT,
+		UI_FLAG_Draw_Text |
+		UI_FLAG_Draw_Border |
+		UI_FLAG_Draw_Background
+	);
+	
+	label->text = str8_clone(ui->frame_arena, ui_drawable_text_from_string(string));
+	return label;
+}
 
 internal Mplayer_UI_Interaction
 ui_button(Mplayer_UI *ui, String8 string)
@@ -724,6 +814,181 @@ ui_button(Mplayer_UI *ui, String8 string)
 	
 	return interaction;
 }
+
+internal Mplayer_UI_Interaction
+ui_button_f(Mplayer_UI *ui, const char *fmt, ...)
+{
+	va_list args;
+  va_start(args, fmt);
+	String8 string = str8_fv(ui->frame_arena, fmt, args);
+	va_end(args);
+	
+	Mplayer_UI_Interaction interaction = ui_button(ui, string);
+	return interaction;
+}
+
+
+struct UI_Input_Field_Draw_Data
+{
+	f32 cursor_offset_x;
+	V2_F32 cursor_dim;
+};
+
+UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
+{
+	UI_Input_Field_Draw_Data *data = (UI_Input_Field_Draw_Data *)element->custom_draw_data;
+	
+	// NOTE(fakhri): draw cursor
+	if (ui->selected_id == element->id)
+	{
+		V2_F32 pos = range_center(element->rect);
+		f32 blink_t = (sin_f(2 * PI32 * (ui->input->time - ui->recent_click_time)) + 1) / 2;
+		if (ui->input->time - ui->recent_click_time > 5)
+		{
+			blink_t = 1.0f;
+		}
+		
+		V4_F32 cursor_color = lerp(element->background_color,
+			blink_t,
+			vec4(0, 0, 0, 1));
+		
+		V3_F32 cursor_pos = vec3(pos.x + data->cursor_offset_x,
+			pos.y,
+			(f32)element->layer);
+		
+		push_rect(group, cursor_pos, data->cursor_dim, cursor_color, 0);
+	}
+}
+
+internal b32
+ui_input_field(Mplayer_UI *ui, String8 key, String8 *buffer, u64 max_capacity)
+{
+	b32 edited = 0;
+	ui_next_childs_axis(ui, Axis2_Y);
+	ui_next_hover_cursor(ui, Cursor_TextSelect);
+	UI_Element *text_input = ui_element(ui, key, 
+		UI_FLAG_Draw_Background|UI_FLAG_Draw_Border|UI_FLAG_Clickable|UI_FLAG_Selectable);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, text_input);
+	if (interaction.hover)
+	{
+		text_input->background_color = vec4(0.3f, 0.3f, 0.3f, 1);
+	}
+	
+	if (interaction.selected)
+	{
+		text_input->background_color = vec4(0.35f, 0.35f, 0.35f, 1);
+		
+		Mplayer_Font *font = ui_stack_top(ui->fonts);
+		V2_F32 text_dim = font_compute_text_dim(font, *buffer);
+		if (interaction.clicked || interaction.pressed)
+		{
+			V2_F32 pos = range_center(text_input->rect);
+			f32 test_x = pos.x - 0.5f * text_dim.width;
+			ui->input_cursor = 0;
+			for (u32 i = 0; i < buffer->len; i += 1)
+			{
+				f32 glyph_width = font_get_glyph_from_char(font, buffer->str[i]).advance;
+				if (test_x + 0.5f * glyph_width < ui->mouse_pos.x)
+				{
+					ui->input_cursor = i + 1;
+				}
+				else break;
+				
+				test_x += glyph_width;
+			}
+		}
+		
+		for (Mplayer_Input_Event *event = ui->input->first_event; event; event = event->next)
+		{
+			b32 consumed = 0;
+			switch(event->kind)
+			{
+				// TODO(fakhri): text selection
+				// TODO(fakhri): handle standard keyboard shortcuts (ctrl+arrows, ctrl+backspace...)
+				case Event_Kind_Text:
+				{
+					edited = 1;
+					consumed = true;
+					if (buffer->len < max_capacity)
+					{
+						if (ui->input_cursor < buffer->len)
+						{
+							memory_move(buffer->str + ui->input_cursor + 1,
+								buffer->str + ui->input_cursor,
+								buffer->len - ui->input_cursor);
+						}
+						
+						buffer->str[ui->input_cursor] = (u8)event->text_character;
+						buffer->len += 1;
+						ui->input_cursor += 1;
+					}
+				};
+				case Event_Kind_Keyboard_Key:
+				{
+					if (event->is_down)
+					{
+						if (event->key == Keyboard_Backspace)
+						{
+							edited = 1;
+							consumed = true;
+							if (ui->input_cursor && buffer->len)
+							{
+								memory_move(buffer->str + ui->input_cursor - 1,
+									buffer->str + ui->input_cursor,
+									buffer->len - ui->input_cursor);
+								buffer->len     -= 1;
+								ui->input_cursor -= 1;
+							}
+						}
+						else if (event->key == Keyboard_Left)
+						{
+							consumed = true;
+							if (ui->input_cursor)
+								ui->input_cursor -= 1;
+						}
+						else if (event->key == Keyboard_Right)
+						{
+							consumed = true;
+							if (ui->input_cursor < buffer->len)
+								ui->input_cursor += 1;
+						}
+					}
+					
+				} break;
+				
+				case Event_Kind_Mouse_Key: break;
+				case Event_Kind_Mouse_Wheel: break;
+				case Event_Kind_Mouse_Move: break;
+				case Event_Kind_Null: break;
+				invalid_default_case;
+			}
+			
+			if (consumed)
+			{
+				DLLRemove(ui->input->first_event, ui->input->last_event, event);
+			}
+		}
+		if (ui->input_cursor > buffer->len)
+		{
+			ui->input_cursor = (u32)buffer->len;
+		}
+		
+		
+		UI_Input_Field_Draw_Data *draw_data = m_arena_push_struct_z(ui->frame_arena, UI_Input_Field_Draw_Data);
+		draw_data->cursor_offset_x = -0.5f * text_dim.width + font_compute_text_dim(font, str8(buffer->str, MIN(buffer->len, ui->input_cursor))).width;
+		draw_data->cursor_dim = vec2(2.1f, 1.25f * text_dim.height);
+		ui_element_set_draw_proc(text_input, ui_input_field_default_draw, draw_data);
+	}
+	
+	ui_parent(ui, text_input) ui_padding(ui, ui_size_parent_remaining())
+	{
+		ui_next_height(ui, ui_size_text_dim(1));
+		UI_Element *text = ui_label(ui, *buffer);
+	}
+	
+	return edited;
+}
+
 
 struct UI_Slider_Draw_Data
 {
@@ -805,17 +1070,6 @@ ui_slider_u64(Mplayer_UI *ui, String8 string, u64 *val, u64 min, u64 max)
 	return interaction;
 }
 
-internal void
-ui_label(Mplayer_UI *ui, String8 string)
-{
-	UI_Element *label = ui_element(ui, ZERO_STRUCT,
-		UI_FLAG_Draw_Text |
-		UI_FLAG_Draw_Border |
-		UI_FLAG_Draw_Background
-	);
-	label->text = ui_drawable_text_from_string(string);
-}
-
 
 internal void
 ui_grid_push_row(Mplayer_UI *ui)
@@ -870,10 +1124,8 @@ ui_grid_item_end(Mplayer_UI *ui)
 internal u32
 ui_grid_begin(Mplayer_UI *ui, String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpadding)
 {
-	ui_next_scroll_step(ui, vec2(0, -50));
 	ui_next_childs_axis(ui, Axis2_Y);
 	UI_Element *grid = ui_element(ui, string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
-	ui_interaction_from_element(ui, grid);
 	ui_push_parent(ui, grid);
 	
 	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
@@ -967,10 +1219,8 @@ ui_list_item_end(Mplayer_UI *ui)
 internal u32
 ui_list_begin(Mplayer_UI *ui, String8 string, u32 items_count, f32 item_height, f32 vpadding)
 {
-	ui_next_scroll_step(ui, vec2(0, -50));
-	UI_Element *list = ui_element(ui, string, UI_FLAG_Draw_Background | UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
+	UI_Element *list = ui_element(ui, string, UI_FLAG_Draw_Border | UI_FLAG_Draw_Background | UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
 	list->child_layout_axis = Axis2_Y;
-	ui_interaction_from_element(ui, list);
 	ui_push_parent(ui, list);
 	
 	u32 visible_rows_count = u32(list->computed_dim.height / (item_height + vpadding)) + 2;
@@ -1096,6 +1346,8 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			f32 childs_sum_size = 0;
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
+				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
+				
 				total_fixup += child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
 				childs_sum_size += child->computed_dim.v[axis];
 			}
@@ -1106,6 +1358,8 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 				
 				for (UI_Element *child = node->first; child && childs_sum_size > parent_size; child = child->next)
 				{
+					if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
+					
 					f32 child_fixup = child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
 					f32 balanced_child_fixup = child_fixup * extra_size / total_fixup;
 					child_fixup = CLAMP(0, balanced_child_fixup, child_fixup);
@@ -1117,6 +1371,8 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 		{
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
+				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
+				
 				if (child->computed_dim.v[axis] > parent_size)
 				{
 					child->computed_dim.v[axis] = MAX(child->size[axis].strictness * child->computed_dim.v[axis], parent_size);
@@ -1133,8 +1389,9 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			node->child_bounds.v[axis] = 0;
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
+				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 				child->rel_top_left_pos.v[axis] = p;
-				p += child->computed_dim.v[axis];
+				p += (axis==Axis2_Y? -1:1)*child->computed_dim.v[axis];
 				node->child_bounds.v[axis] += child->computed_dim.v[axis];
 			}
 		}
@@ -1142,27 +1399,23 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 		{
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
+				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 				child->rel_top_left_pos.v[axis] = 0;
 				node->child_bounds.v[axis] = MAX(child->computed_dim.v[axis], child->computed_dim.v[axis]);
 			}
 		}
 		
 		// NOTE(fakhri): compute on screen position from relative positions
-		if (axis == Axis2_X)
+		f32 parent_origin = (axis == Axis2_X)? node->computed_rect.min_x:node->computed_rect.max_y;
+		parent_origin += ((axis == Axis2_Y)? 1:-1) * node->view_scroll.v[axis];
+		for (UI_Element *child = node->first; child; child = child->next)
 		{
-			for (UI_Element *child = node->first; child; child = child->next)
-			{
-				child->computed_rect.min_x = node->computed_rect.min_x + child->rel_top_left_pos.x - node->view_scroll.x;
-				child->computed_rect.max_x = child->computed_rect.min_x + child->computed_dim.width;
-			}
-		}
-		else // Y axis
-		{
-			for (UI_Element *child = node->first; child; child = child->next)
-			{
-				child->computed_rect.max_y = node->computed_rect.max_y - child->rel_top_left_pos.y + node->view_scroll.y;
-				child->computed_rect.min_y = child->computed_rect.max_y - child->computed_dim.height;
-			}
+			f32 start_offset = parent_origin;
+			if (axis == Axis2_Y)
+				start_offset -= child->computed_dim.height;
+			
+			child->computed_rect.minp.v[axis] = start_offset + child->rel_top_left_pos.v[axis];
+			child->computed_rect.maxp.v[axis]= child->computed_rect.minp.v[axis] + child->computed_dim.v[axis];
 		}
 	}
 	
@@ -1174,13 +1427,13 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 
 
 internal void
-ui_update_layout(Mplayer_UI *ui)
+ui_update_layout(Mplayer_UI *ui, UI_Element *root)
 {
 	for (u32 axis = Axis2_X; axis < Axis2_COUNT; axis += 1)
 	{
-		ui_layout_compute_preorder_sizes(ui->root, (Axis2)axis);
-		ui_layout_compute_postorder_sizes(ui->root, (Axis2)axis);
-		ui_layout_fix_sizes_violations(ui->root, (Axis2)axis);
+		ui_layout_compute_preorder_sizes(root, (Axis2)axis);
+		ui_layout_compute_postorder_sizes(root, (Axis2)axis);
+		ui_layout_fix_sizes_violations(root, (Axis2)axis);
 	}
 }
 
@@ -1198,22 +1451,22 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 	// NOTE(fakhri): only render the leaf nodes
 	if (has_flag(node->flags, UI_FLAG_Draw_Background))
 	{
-		push_rect(ui->group, pos, node->dim, node->background_color, node->roundness);
+		push_rect(ui->group, pos, (f32)node->layer, node->dim, node->background_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Image))
 	{
-		push_image(ui->group, pos, node->dim, node->texture, node->texture_tint_color, node->roundness);
+		push_image(ui->group, pos, (f32)node->layer, node->dim, node->texture, node->texture_tint_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
-		draw_text(ui->group, node->font, pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
+		draw_text(ui->group, node->font, pos, (f32)node->layer, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
 	{
-		node->custom_draw_proc(ui->group, node);
+		node->custom_draw_proc(ui, ui->group, node);
 	}
 	
 	for (UI_Element *child = node->first; child; child = child->next)
@@ -1223,7 +1476,7 @@ ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Border))
 	{
-		draw_outline(ui->group, pos, node->dim, node->border_color, node->border_thickness);
+		draw_outline(ui->group, pos, (f32)node->layer, node->dim, node->border_color, node->border_thickness);
 	}
 	
 	
@@ -1336,12 +1589,39 @@ ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
 internal void
 ui_handle_this_frame_input(Mplayer_UI *ui, UI_Element *node)
 {
+	// NOTE(fakhri): Process the input at the end of the frame after we have built the 
+	// hierarchy, this is done so that we can handle events in the correct order, when
+	// child ui elements also process events (childs should consume events first)
+	// This however introduces a 1-frame delay as the events from the current frame
+	// won't be processed until the next frame... 
+	
+	// TODO(fakhri): is there a better way to do this without having
+	// to introduce the 1-frame delay
+	
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
 		ui_handle_this_frame_input(ui, child);
 	}
 	
 	ui_update_element_interaction(ui, node);
+}
+
+internal void
+ui_popup_begin(Mplayer_UI *ui, String8 string)
+{
+	assert(!ui->popup_root);
+	
+	ui_push_layer(ui, UI_Layer_Popup);
+	UI_Element *popup_root = ui_element(ui, string, UI_FLAG_Floating | UI_FLAG_Clip);
+	ui->popup_root = popup_root;
+	ui_push_parent(ui, popup_root);
+}
+
+internal void
+ui_popup_end(Mplayer_UI *ui)
+{
+	ui_pop_parent(ui);
+	ui_pop_layer(ui);
 }
 
 internal void
@@ -1380,13 +1660,14 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 	ui_reset_default_style(ui);
 	ui_push_default_style(ui);
 	
-	ui_next_width(ui, ui_size_pixel(group->render_ctx->draw_dim.width, 1));
-	ui_next_height(ui, ui_size_pixel(group->render_ctx->draw_dim.height, 1));
+	//ui_next_width(ui, ui_size_pixel(group->render_ctx->draw_dim.width, 1));
+	//ui_next_height(ui, ui_size_pixel(group->render_ctx->draw_dim.height, 1));
 	UI_Element *root = ui_element(ui, str8_lit("root_ui_element"), 0);
 	root->child_layout_axis = Axis2_Y;
 	ui->root = root;
 	ui_push_parent(ui, root);
 	
+	ui->popup_root = 0;
 }
 
 
@@ -1407,13 +1688,18 @@ ui_end(Mplayer_UI *ui)
 	
 	if (ui->root)
 	{
-		ui->root->computed_dim = ui->group->render_ctx->draw_dim;
+		ui->root->size[Axis2_X] = ui_size_pixel(ui->group->render_ctx->draw_dim.x, 1);
+		ui->root->size[Axis2_Y] = ui_size_pixel(ui->group->render_ctx->draw_dim.y, 1);
 		ui->root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
 	}
 	
-	ui_update_layout(ui);
-	ui_animate_elements(ui, ui->root);
+	if (ui->popup_root)
+	{
+		ui->popup_root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
+	}
 	
+	ui_update_layout(ui, ui->root);
+	ui_animate_elements(ui, ui->root);
 	ui_handle_this_frame_input(ui, ui->root);
 	ui_draw_elements(ui, ui->root);
 }
