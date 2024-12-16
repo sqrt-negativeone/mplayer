@@ -29,7 +29,9 @@ struct Memory_Checkpoint
 };
 
 #define m_arena_push_array(arena, T, count) (T *)m_arena_push(arena, sizeof(T) * (count))
+#define m_arena_push_array_aligned(arena, T, count, alignment) (T *)m_arena_push_aligned(arena, sizeof(T) * (count), alignment)
 #define m_arena_push_struct(arena, T) m_arena_push_array(arena, T, 1)
+#define m_arena_push_struct_aligned(arena, T, alignment) m_arena_push_array_aligned(arena, T, 1, alignment)
 
 #define m_arena_push_array_z(arena, T, count) (T *)m_arena_push_z(arena, sizeof(T) * (count))
 #define m_arena_push_struct_z(arena, T) m_arena_push_array_z(arena, T, 1)

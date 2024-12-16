@@ -682,7 +682,8 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 		}
 		else
 		{
-			result = m_arena_push_struct_z(ui->arena, UI_Element);
+			result = m_arena_push_struct_aligned(ui->arena, UI_Element, 16);
+			memory_zero_struct(result);
 		}
 		
 		// NOTE(fakhri): push to the hash table
