@@ -289,6 +289,8 @@ enum Mplayer_Mode
 	MODE_Artist_Albums,
 	MODE_Album_Tracks,
 	
+	MODE_Queue,
+	
 	MODE_Lyrics,
 	MODE_Settings,
 };
@@ -316,6 +318,25 @@ struct Mplayer_Path_Lister
 	u32 filtered_paths_count;
 };
 
+struct Mplayer_Queue_Entry
+{
+	Mplayer_Queue_Entry *next;
+	Mplayer_Queue_Entry *prev;
+	Mplayer_Item_ID track_id;
+};
+
+struct Mplayer_Queue
+{
+	Mplayer_Queue_Entry *first;
+	Mplayer_Queue_Entry *last;
+	Mplayer_Queue_Entry *free_list;
+	
+	Mplayer_Queue_Entry *current;
+	
+	b32 playing;
+};
+
+
 struct Mplayer_Context
 {
 	Memory_Arena main_arena;
@@ -323,8 +344,7 @@ struct Mplayer_Context
 	Render_Context *render_ctx;
 	Mplayer_UI ui;
 	Mplayer_Input input;
-	
-	b32 play_track;
+	Mplayer_Queue queue;
 	
 	Mplayer_Font timestamp_font;
 	Mplayer_Font header_label_font;
@@ -344,13 +364,12 @@ struct Mplayer_Context
 	
 	Mplayer_Library library;
 	
-	Mplayer_Item_ID current_music_id;
 	Mplayer_Item_ID selected_artist_id;
 	Mplayer_Item_ID selected_album_id;
 	
 	f32 track_name_hover_t;
 	
-	b32 show_path_popup;
+	b32 show_path_modal;
 	Mplayer_Path_Lister path_lister;
 	
 	b32 show_library_locations;

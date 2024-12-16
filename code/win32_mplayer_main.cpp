@@ -926,7 +926,7 @@ w32_update_code(Mplayer_Context *mplayer, Mplayer_Code *code)
 	FILETIME last_write_time = w32_get_last_write_time(w32_app_dll_path);
 	if (CompareFileTime(&last_write_time, &code->last_write_time))
 	{
-		// TODO(fakhri): wait for all worker threads to finish their work before hot reloading
+		// TODO(fakhri): wait for all worker threads to finish their work before active reloading
 		w32_code_unload(code);
 		w32_load_app_code(code);
 		code->mplayer_hotload(mplayer);

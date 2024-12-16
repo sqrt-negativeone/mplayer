@@ -155,8 +155,8 @@ struct UI_Element
 	V2_F32 view_target_scroll;
 	V2_F32 view_scroll;
 	
-	f32 active_t;
 	f32 hot_t;
+	f32 active_t;
 };
 
 struct UI_Elements_Bucket
@@ -230,8 +230,8 @@ struct Mplayer_UI
 	V2_F32 mouse_pos;
 	
 	u64 selected_id;
-	u64 active_id;
 	u64 hot_id;
+	u64 active_id;
 	
 	f32 recent_click_time;
 	u32 input_cursor;
@@ -271,7 +271,7 @@ struct Mplayer_UI
 	UI_U32_Stack      layers;
 	UI_Size_Stack     sizes[Axis2_COUNT];
 	
-	UI_Element *popup_root;
+	UI_Element *modal_root;
 	UI_Element *root;
 	UI_Element *curr_parent;
 	

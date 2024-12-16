@@ -892,11 +892,14 @@ flac_build_seek_table(Flac_Stream *flac_stream, Memory_Arena *arena, Seek_Table_
 internal void
 uninit_flac_stream(Flac_Stream *flac_stream)
 {
-	m_arena_free_all(&flac_stream->block_arena);
-	if (flac_stream->src_ctx)
+	//if (flac_stream)
 	{
-		src_delete(flac_stream->src_ctx);
-		flac_stream->src_ctx = 0;
+		m_arena_free_all(&flac_stream->block_arena);
+		if (flac_stream->src_ctx)
+		{
+			src_delete(flac_stream->src_ctx);
+			flac_stream->src_ctx = 0;
+		}
 	}
 }
 

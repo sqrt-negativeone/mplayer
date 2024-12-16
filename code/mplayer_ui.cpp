@@ -415,19 +415,19 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 	
 	b32 ignore = 0;
 	
-	if (ui->popup_root)
+	if (ui->modal_root)
 	{
-		b32 in_popup = 0;
+		b32 in_modal = 0;
 		for (UI_Element *p = element->parent; p; p = p->parent)
 		{
-			if (p == ui->popup_root)
+			if (p == ui->modal_root)
 			{
-				in_popup = 1;
+				in_modal = 1;
 				break;
 			}
 		}
 		
-		if (!in_popup)
+		if (!in_modal)
 		{
 			ignore = 1;
 		}
@@ -439,7 +439,7 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 	// TODO(fakhri): Bug: 
 	// - click an element
 	// - move the mouse over a child of that element
-	// - release the mouse, the parent element stays hot and is not reset.
+	// - release the mouse, the parent element stays active and is not reset.
 	// 
 	// If we click somewhere empty and drag the mouse over the element
 	// and release we get a click event. this should not happen.
@@ -453,12 +453,12 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 			if (mouse_over)
 			{
 				consumed = 1;
-				ui->active_id = id;
+				ui->hot_id = id;
 			}
-			else if (ui->active_id == id)
+			else if (ui->hot_id == id)
 			{
 				consumed = 0;
-				ui->active_id = 0;
+				ui->hot_id = 0;
 			}
 		}
 		
@@ -467,27 +467,27 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 			if (mouse_over && e->is_down)
 			{
 				consumed = 1;
-				ui->hot_id = id;
 				ui->active_id = id;
+				ui->hot_id = id;
 				ui->mouse_drag_start_pos = mouse_p;
 				ui->recent_click_time = ui->input->time;
 				set_flag(interaction.flags, UI_Interaction_Pressed);
 			}
 			if (!e->is_down)
 			{
-				if (ui->active_id == id)
-				{
-					consumed = 1;
-					if (ui->hot_id == id)
-						set_flag(interaction.flags, UI_Interaction_Clicked);
-					ui->active_id = 0;
-				}
-				
 				if (ui->hot_id == id)
 				{
 					consumed = 1;
-					set_flag(interaction.flags, UI_Interaction_Released);
+					if (ui->active_id == id)
+						set_flag(interaction.flags, UI_Interaction_Clicked);
 					ui->hot_id = 0;
+				}
+				
+				if (ui->active_id == id)
+				{
+					consumed = 1;
+					set_flag(interaction.flags, UI_Interaction_Released);
+					ui->active_id = 0;
 				}
 				
 				if (has_flag(element->flags, UI_FLAG_Selectable))
@@ -520,13 +520,13 @@ ui_update_element_interaction(Mplayer_UI *ui, UI_Element *element)
 	}
 	else
 	{
-		if (ui->active_id == id)
+		if (ui->hot_id == id)
 		{
-			ui->active_id = 0;
+			ui->hot_id = 0;
 		}
 	}
 	
-	if (ui->hot_id == id)
+	if (ui->active_id == id)
 	{
 		set_flag(interaction.flags, UI_Interaction_Pressed);
 	}
@@ -575,6 +575,8 @@ ui_pop_parent(Mplayer_UI *ui)
 }
 
 // NOTE(fakhri): from http://www.cse.yorku.ca/~oz/hash.html
+// TODO(fakhri): I just noticed this is the same as str8_hash function from mplayer.cpp but seeded with 5381 (choosen randomly lol)
+// change str8_hash to make it accept a seed and use that instead of having two string hashing functions that do the same thing
 internal u64
 ui_hash_key(String8 key)
 {
@@ -1002,8 +1004,8 @@ UI_CUSTOM_DRAW_PROC(ui_slider_default_draw_proc)
 	UI_Slider_Draw_Data *slider_data = (UI_Slider_Draw_Data *)element->custom_draw_data;
 	
 	V2_F32 slider_dim = element->dim;
-	slider_dim.height = lerp(element->dim.height, element->active_t, 1.3f * element->dim.height);
-	slider_dim.height = lerp(slider_dim.height, element->hot_t, 0.9f * element->dim.height);
+	slider_dim.height = lerp(element->dim.height, element->hot_t, 1.3f * element->dim.height);
+	slider_dim.height = lerp(slider_dim.height, element->active_t, 0.9f * element->dim.height);
 	
 	V2_F32 slider_pos = range_center(element->rect);
 	
@@ -1569,14 +1571,14 @@ ui_animate_elements(Mplayer_UI *ui, UI_Element *node)
 		node->rect = node->computed_rect;
 	}
 	
-	// TODO(fakhri): active animations
 	// TODO(fakhri): hot animations
+	// TODO(fakhri): active animations
 	
-	b32 is_hot    = ui->hot_id == node->id;
-	b32 is_active = ui->active_id == node->id;
+	b32 ishot    = ui->active_id == node->id;
+	b32 is_hot = ui->hot_id == node->id;
 	
-	node->hot_t    += (!!is_hot - node->hot_t) * step69;
-	node->active_t += (!!is_active - node->active_t) * step69;
+	node->active_t    += (!!ishot - node->active_t) * step69;
+	node->hot_t += (!!is_hot - node->hot_t) * step69;
 	
 	node->rect = range_center_dim(range_center(node->rect), node->dim);
 	
@@ -1608,18 +1610,18 @@ ui_handle_this_frame_input(Mplayer_UI *ui, UI_Element *node)
 }
 
 internal void
-ui_popup_begin(Mplayer_UI *ui, String8 string)
+ui_modal_begin(Mplayer_UI *ui, String8 string)
 {
-	assert(!ui->popup_root);
+	assert(!ui->modal_root);
 	
 	ui_push_layer(ui, UI_Layer_Popup);
-	UI_Element *popup_root = ui_element(ui, string, UI_FLAG_Floating | UI_FLAG_Clip);
-	ui->popup_root = popup_root;
-	ui_push_parent(ui, popup_root);
+	UI_Element *modal_root = ui_element(ui, string, UI_FLAG_Floating | UI_FLAG_Clip);
+	ui->modal_root = modal_root;
+	ui_push_parent(ui, modal_root);
 }
 
 internal void
-ui_popup_end(Mplayer_UI *ui)
+ui_modal_end(Mplayer_UI *ui)
 {
 	ui_pop_parent(ui);
 	ui_pop_layer(ui);
@@ -1649,8 +1651,8 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 			{
 				DLLRemove_NP(bucket->first, bucket->last, element, next_hash, prev_hash);
 				StackPush_N(ui->free_elements, element, next_free);
-				if (ui->active_id == element->id) ui->active_id = 0;
 				if (ui->hot_id == element->id) ui->hot_id = 0;
+				if (ui->active_id == element->id) ui->active_id = 0;
 				if (ui->selected_id == element->id) ui->selected_id = 0;
 			}
 		}
@@ -1668,7 +1670,7 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 	ui->root = root;
 	ui_push_parent(ui, root);
 	
-	ui->popup_root = 0;
+	ui->modal_root = 0;
 }
 
 
@@ -1677,10 +1679,10 @@ ui_end(Mplayer_UI *ui)
 {
 	ui_pop_parent(ui);
 	
-	if (ui->active_id)
+	if (ui->hot_id)
 	{
-		UI_Element *active_element = ui_element_by_id(ui, ui->active_id);
-		platform->set_cursor(active_element->hover_cursor);
+		UI_Element *hot_element = ui_element_by_id(ui, ui->hot_id);
+		platform->set_cursor(hot_element->hover_cursor);
 	}
 	else
 	{
@@ -1694,9 +1696,9 @@ ui_end(Mplayer_UI *ui)
 		ui->root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
 	}
 	
-	if (ui->popup_root)
+	if (ui->modal_root)
 	{
-		ui->popup_root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
+		ui->modal_root->computed_rect = range_center_dim(vec2(0, 0), ui->root->computed_dim);
 	}
 	
 	ui_update_layout(ui, ui->root);
