@@ -284,34 +284,6 @@ mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Track *music)
 	music->header.image.texture.state = Texture_State_Unloaded;
 }
 
-#if 0
-internal void
-mplayer_play_music_track(Mplayer_Context *mplayer, Mplayer_Item_ID music_track_id)
-{
-	if (music_track_id)
-	{
-		Mplayer_Track *music_track = mplayer_track_by_id(&mplayer->library, music_track_id);
-		
-		if (mplayer->current_music_id != music_track_id)
-		{
-			Mplayer_Item_ID prev_music_id = mplayer->current_music_id;
-			
-			if (prev_music_id)
-			{
-				mplayer_unload_music_track(mplayer, 
-					mplayer_track_by_id(&mplayer->library, prev_music_id));
-			}
-			
-			mplayer_load_music_track(mplayer, music_track);
-		}
-		
-		mplayer_music_reset(music_track);
-		mplayer->current_music_id = music_track->header.id;
-		mplayer->play_track = true;
-	}
-}
-#endif
-
 internal b32
 is_music_track_still_playing(Mplayer_Track *music_track)
 {
@@ -1219,14 +1191,8 @@ internal void
 mplayer_index_library(Mplayer_Context *mplayer)
 {
 	Mplayer_Library *library = &mplayer->library;
-	#if 0
-		if (mplayer->current_music_id)
-	{
-		Mplayer_Track *current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
-		mplayer_unload_music_track(mplayer, current_music);
-	}
-	#endif
-		mplayer_clear_queue(mplayer);
+	
+	mplayer_clear_queue(mplayer);
 	mplayer_reset_library(library);
 	
 	for (u32 i = 0; i < mplayer->settings.locations_count; i += 1)
@@ -1580,10 +1546,6 @@ mplayer_ui_track_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID 
 	{
 		mplayer_queue_play_track(mplayer, track_id);
 		mplayer_queue_resume(mplayer);
-		#if 0
-			mplayer_play_music_track(mplayer, selected_track_id);
-		current_music = mplayer_track_by_id(&mplayer->library, mplayer->current_music_id);
-		#endif
 	}
 	
 	ui_parent(ui, track_el) ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())

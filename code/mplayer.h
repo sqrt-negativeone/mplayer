@@ -171,21 +171,6 @@ struct Mplayer_Item_Image
 	Texture texture;
 };
 
-enum Mplayer_Item_Kind
-{
-	Item_Kind_Track,
-	Item_Kind_Album,
-	Item_Kind_Artist,
-};
-
-enum Mplayer_Items_Links
-{
-	Links_Library,
-	Links_Artist,
-	Links_Album,
-	Links_Count,
-};
-
 typedef u32 Mplayer_Item_ID;
 
 struct Mplayer_Items_Array
@@ -205,7 +190,6 @@ struct Mplayer_Item_Header
 struct Mplayer_Track
 {
 	Mplayer_Item_Header header;
-	Mplayer_Item_ID next_links[Links_Count];
 	
 	String8 path;
 	String8 title;
