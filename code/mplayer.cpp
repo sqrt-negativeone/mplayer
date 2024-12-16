@@ -1535,6 +1535,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						}
 						
 						mplayer_close_path_lister(mplayer, &mplayer->path_lister);
+						mplayer_save_settings(mplayer);
 					}
 					
 					ui_spacer(ui, ui_size_parent_remaining());
@@ -1635,7 +1636,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								
 								UI_Element_Flags flags = 0;
 								
-								if (mplayer_item_image_ready(artist->header.image.texture))
+								b32 image_ready = mplayer_item_image_ready(artist->header.image.texture);
+								if (image_ready)
 								{
 									flags |= UI_FLAG_Draw_Image;
 									ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
@@ -1658,6 +1660,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								if (interaction.clicked)
 								{
 									selected_artist_id = artist_id;
+								}
+								if (interaction.hover && image_ready)
+								{
+									artist_el->texture_tint_color = vec4(1, 1, 1, 1);
 								}
 								
 								ui_parent(ui, artist_el)
@@ -1706,7 +1712,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								mplayer_load_item_image(mplayer, &album->header.transient_arena, &album->header.image);
 								
 								UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
-								if (mplayer_item_image_ready(album->header.image.texture))
+								b32 image_ready = mplayer_item_image_ready(album->header.image.texture);
+								if (image_ready)
 								{
 									flags |= UI_FLAG_Draw_Image;
 									ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
@@ -1727,14 +1734,20 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								{
 									selected_album_id = album_id;
 								}
+								if (interaction.hover && image_ready)
+								{
+									album_el->texture_tint_color = vec4(1, 1, 1, 0.9f);
+								}
 								
 								ui_parent(ui, album_el)
 								{
-									ui_spacer_pixels(ui, 10, 1);
+									//ui_spacer_pixels(ui, 10, 1);
 									
 									ui_next_width(ui, ui_size_percent(1, 1));
-									ui_next_height(ui, ui_size_text_dim(1));
-									ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+									ui_next_height(ui, ui_size_pixel(50, 1));
+									ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 0.3f));
+									ui_next_roundness(ui, 5);
+									ui_element_f(ui, UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
 										STR8_EXPAND(album->name), album);
 								}
 							}
@@ -1851,20 +1864,25 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_hover_cursor(ui, Cursor_Hand);
 								ui_next_roundness(ui, 10);
 								UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
+								b32 image_ready = mplayer_item_image_ready(album->header.image.texture);
 								album_el->child_layout_axis = Axis2_Y;
 								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
 								if (interaction.clicked)
 								{
 									selected_album_id = album_id;
 								}
+								if (interaction.hover && image_ready)
+								{
+									album_el->texture_tint_color = vec4(1, 1, 1, 0.9f);
+								}
 								
 								ui_parent(ui, album_el)
 								{
-									ui_spacer_pixels(ui, 10, 1);
-									
 									ui_next_width(ui, ui_size_percent(1, 1));
-									ui_next_height(ui, ui_size_text_dim(1));
-									ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+									ui_next_height(ui, ui_size_pixel(50, 1));
+									ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 0.3f));
+									ui_next_roundness(ui, 5);
+									ui_element_f(ui, UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
 										STR8_EXPAND(album->name), album);
 								}
 							}
@@ -2155,6 +2173,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 												if (ui_button_f(ui, "X###delete-location-%p", location).clicked)
 												{
 													location_to_delete = location_index;
+													mplayer_save_settings(mplayer);
 												}
 											}
 										}

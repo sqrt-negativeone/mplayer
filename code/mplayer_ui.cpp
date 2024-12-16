@@ -1439,51 +1439,51 @@ ui_update_layout(Mplayer_UI *ui, UI_Element *root)
 }
 
 internal void
-ui_draw_elements(Mplayer_UI *ui, UI_Element *node)
+ui_draw_elements(Mplayer_UI *ui, Render_Group *group, UI_Element *node)
 {
-	Range2_F32 old_cull = ui->group->config.cull_range;
+	Range2_F32 old_cull = group->config.cull_range;
 	
 	if (has_flag(node->flags, UI_FLAG_Clip))
 	{
-		render_group_add_cull_range(ui->group, node->rect);
+		render_group_add_cull_range(group, node->rect);
 	}
 	
-	V2_F32 pos = range_center(node->rect);
+	V3_F32 pos = vec3(range_center(node->rect), (f32)node->layer);
 	// NOTE(fakhri): only render the leaf nodes
 	if (has_flag(node->flags, UI_FLAG_Draw_Background))
 	{
-		push_rect(ui->group, pos, (f32)node->layer, node->dim, node->background_color, node->roundness);
+		push_rect(group, pos, node->dim, node->background_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Image))
 	{
-		push_image(ui->group, pos, (f32)node->layer, node->dim, node->texture, node->texture_tint_color, node->roundness);
+		push_image(group, pos, node->dim, node->texture, node->texture_tint_color, node->roundness);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
-		draw_text(ui->group, node->font, pos, (f32)node->layer, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
+		draw_text(group, node->font, pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
 	{
-		node->custom_draw_proc(ui, ui->group, node);
+		node->custom_draw_proc(ui, group, node);
 	}
 	
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
-		ui_draw_elements(ui, child);
+		ui_draw_elements(ui, group, child);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Border))
 	{
-		draw_outline(ui->group, pos, (f32)node->layer, node->dim, node->border_color, node->border_thickness);
+		draw_outline(group, pos, node->dim, node->border_color, node->border_thickness);
 	}
 	
 	
 	if (has_flag(node->flags, UI_FLAG_Clip))
 	{
-		render_group_set_cull_range(ui->group, old_cull);
+		render_group_set_cull_range(group, old_cull);
 	}
 	
 }
@@ -1702,5 +1702,5 @@ ui_end(Mplayer_UI *ui)
 	ui_update_layout(ui, ui->root);
 	ui_animate_elements(ui, ui->root);
 	ui_handle_this_frame_input(ui, ui->root);
-	ui_draw_elements(ui, ui->root);
+	ui_draw_elements(ui, ui->group, ui->root);
 }
