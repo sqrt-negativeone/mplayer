@@ -664,9 +664,8 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	{
 		for (UI_Element *ht_node = ui->elements_table[bucket_index].first; ht_node; ht_node = ht_node->next_hash)
 		{
-			if (ht_node->id == id)
+			if (ht_node->id == id && ht_node->frame_index < ui->frame_index)
 			{
-				assert(ht_node->frame_index < ui->frame_index);
 				result = ht_node;
 				break;
 			}

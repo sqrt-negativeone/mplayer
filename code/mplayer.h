@@ -334,15 +334,15 @@ struct Mplayer_Queue_Entry
 	Mplayer_Item_ID track_id;
 };
 
+
+typedef u16 Mplayer_Queue_Index;
+
 struct Mplayer_Queue
 {
-	Mplayer_Queue_Entry *first;
-	Mplayer_Queue_Entry *last;
-	Mplayer_Queue_Entry *free_list;
-	
-	Mplayer_Queue_Entry *current;
-	
 	b32 playing;
+	Mplayer_Queue_Index current_index;
+	u16 count;
+	Mplayer_Item_ID tracks[65536];
 };
 
 

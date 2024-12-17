@@ -67,9 +67,6 @@ mplayer_track_by_id(Mplayer_Library *library, Mplayer_Item_ID id)
 	return track;
 }
 
-// TODO(fakhri): this is just a hack, if the image texture in the header
-// is valid then we are leaking GPU memeory by not freeing or reusing that memory
-
 internal Mplayer_Track *
 mplayer_make_track(Mplayer_Library *library)
 {
@@ -249,8 +246,6 @@ WORK_SIG(decode_texture_data_work)
 	m_arena_free_all(&arena);
 }
 
-// TODO(fakhri): handle image memory usage!!
-
 internal b32
 mplayer_is_valid_image(Mplayer_Item_Image image)
 {
@@ -311,6 +306,8 @@ mplayer_music_reset(Mplayer_Track *music_track)
 internal void
 mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Track *music_track)
 {
+	if (!music_track) return;
+	
 	if (!music_track->file_loaded)
 	{
 		music_track->flac_file_buffer = mplayer->os.load_entire_file(music_track->path, &mplayer->library.track_transient_arena);
@@ -707,39 +704,54 @@ draw_outline(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color, f32 thic
 #include "mplayer_ui.cpp"
 
 //~ NOTE(fakhri): Queue stuff
+#define NULL_QUEUE_INDEX {}
+internal b32
+is_valid(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
+{
+	b32 result = (index && (index < mplayer->queue.count) && 
+		mplayer->queue.tracks[index] && (mplayer->queue.tracks[index] < mplayer->library.tracks_count));
+	return result;
+}
+
+internal Mplayer_Track *
+mplayer_queue_get_track_from_queue_index(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
+{
+	assert(index < mplayer->queue.count);
+	Mplayer_Queue *queue = &mplayer->queue;
+	Mplayer_Track *result = mplayer_track_by_id(&mplayer->library, queue->tracks[index]);
+	return result;
+}
 
 internal Mplayer_Track *
 mplayer_queue_get_current_track(Mplayer_Context *mplayer)
 {
+	Mplayer_Queue *queue = &mplayer->queue;
+	
 	Mplayer_Track *result = 0;
-	Mplayer_Queue_Entry *current_entry = mplayer->queue.current;
-	if (current_entry && current_entry->track_id)
+	if (is_valid(mplayer, queue->current_index))
 	{
-		result = mplayer_track_by_id(&mplayer->library, mplayer->queue.current->track_id);
+		result = mplayer_queue_get_track_from_queue_index(mplayer, queue->current_index);
 	}
 	return result;
 }
 
 internal void
-mplayer_init_queue(Mplayer_Context *mplayer)
-{
-	memory_zero_struct(&mplayer->queue);
-}
-
-internal void
-mplayer_set_current(Mplayer_Context *mplayer, Mplayer_Queue_Entry *entry)
+mplayer_set_current(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
 	
-	Mplayer_Track *old_current_track = mplayer_queue_get_current_track(mplayer);
-	mplayer_unload_music_track(mplayer, old_current_track);
+	if (is_valid(mplayer, queue->current_index))
+	{
+		mplayer_unload_music_track(mplayer, 
+			mplayer_queue_get_current_track(mplayer));
+	}
 	
-	queue->current = entry;
+	queue->current_index = CLAMP(0, index, queue->count - 1);
 	
-	if (entry)
+	if (is_valid(mplayer, index))
 	{
 		mplayer_load_music_track(mplayer, 
-			mplayer_track_by_id(&mplayer->library, entry->track_id));
+			mplayer_track_by_id(&mplayer->library, queue->tracks[index]));
 	}
 }
 
@@ -747,46 +759,42 @@ internal void
 mplayer_clear_queue(Mplayer_Context *mplayer)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
-	queue->playing = 0;
 	
-	mplayer_set_current(mplayer, 0);
-	if (queue->last)
-	{
-		queue->last->next = queue->free_list;
-		queue->free_list = queue->first;
-		
-		queue->first = queue->last = 0;
-		queue->playing = 0;
-	}
+	queue->tracks[0] = 0;
+	queue->playing = 0;
+	queue->count = 1;
+	mplayer_set_current(mplayer, NULL_QUEUE_INDEX);
+}
+
+internal void
+mplayer_init_queue(Mplayer_Context *mplayer)
+{
+	memory_zero_struct(&mplayer->queue);
+	mplayer_clear_queue(mplayer);
 }
 
 internal void
 mplayer_play_next_in_queue(Mplayer_Context *mplayer)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
-	if (queue->current)
-	{
-		mplayer_set_current(mplayer, queue->current->next);
-	}
+	
+	mplayer_set_current(mplayer, queue->current_index + 1);
 }
 
 internal void
 mplayer_play_prev_in_queue(Mplayer_Context *mplayer)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
-	if (queue->current)
-	{
-		mplayer_set_current(mplayer, queue->current->prev);
-	}
+	mplayer_set_current(mplayer, queue->current_index - 1);
 }
 
 internal void
 mplayer_update_queue(Mplayer_Context *mplayer)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
-	if (!queue->current)
+	if (!is_valid(mplayer, queue->current_index))
 	{
-		mplayer_set_current(mplayer, queue->first);
+		mplayer_set_current(mplayer, 1);
 	}
 	
 	if (queue->playing)
@@ -831,38 +839,37 @@ mplayer_is_queue_playing(Mplayer_Context *mplayer)
 	return result;
 }
 
-
-internal Mplayer_Queue_Entry *
-mplayer_make_queue_entry(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+internal void
+mplayer_queue_insert_at(Mplayer_Context *mplayer, Mplayer_Queue_Index index, Mplayer_Item_ID track_id)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
 	
-	Mplayer_Queue_Entry *entry = queue->free_list;
-	if (entry)
+	if (queue->count < array_count(queue->tracks) && index <= queue->count)
 	{
-		StackPop(queue->free_list);
+		if (index + 1 < queue->count)
+		{
+			memory_move(queue->tracks + index + 1, 
+				queue->tracks + index,
+				sizeof(queue->tracks[0]) * (queue->count - index));
+		}
+		
+		queue->tracks[index] = track_id;
+		queue->count += 1;
 	}
-	if (!entry)
-	{
-		entry = m_arena_push_struct(&mplayer->main_arena, Mplayer_Queue_Entry);
-	}
-	
-	assert(entry);
-	memory_zero_struct(entry);
-	
-	entry->track_id = track_id;
-	
-	return entry;
 }
 
 internal void
 mplayer_queue_next(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
 {
 	if (!track_id) return;
-	
-	Mplayer_Queue *queue = &mplayer->queue;
-	Mplayer_Queue_Entry *entry = mplayer_make_queue_entry(mplayer, track_id);
-	DLLInsert(queue->first, queue->last, queue->current, entry);
+	mplayer_queue_insert_at(mplayer, mplayer->queue.current_index + 1, track_id);
+}
+
+internal void
+mplayer_queue_last(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+{
+	if (!track_id) return;
+	mplayer_queue_insert_at(mplayer, mplayer->queue.count, track_id);
 }
 
 internal void
@@ -870,13 +877,9 @@ mplayer_empty_queue_after_current(Mplayer_Context *mplayer)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
 	
-	if (queue->current && queue->current->next)
+	if (queue->count > queue->current_index)
 	{
-		queue->last->next = queue->free_list;
-		queue->free_list = queue->current->next;
-		
-		queue->current->next = 0;
-		queue->last = queue->current;
+		queue->count = queue->current_index + 1;
 	}
 }
 
@@ -891,9 +894,9 @@ internal Mplayer_Item_ID
 mplayer_queue_current_track_id(Mplayer_Context *mplayer)
 {
 	Mplayer_Item_ID result = 0;
-	if (mplayer->queue.current)
+	if (is_valid(mplayer, mplayer->queue.current_index))
 	{
-		result = mplayer->queue.current->track_id;
+		result = mplayer->queue.tracks[mplayer->queue.current_index];
 	}
 	return result;
 }
@@ -1794,7 +1797,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	load_font(mplayer, &mplayer->debug_font, str8_lit("data/fonts/arial.ttf"), 20);
 	load_font(mplayer, &mplayer->big_debug_font, str8_lit("data/fonts/arial.ttf"), 50);
 	load_font(mplayer, &mplayer->timestamp_font, str8_lit("data/fonts/arial.ttf"), 20);
-	load_font(mplayer, &mplayer->header_label_font, str8_lit("data/fonts/arial.ttf"), 40);
+	load_font(mplayer, &mplayer->header_label_font, str8_lit("data/fonts/arial.ttf"), 50);
 	load_font(mplayer, &mplayer->small_font, str8_lit("data/fonts/arial.ttf"), 15);
 	
 	mplayer->volume = 1.0f;
@@ -2000,6 +2003,13 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							mplayer_change_mode(mplayer, MODE_Lyrics, 0);
 					}
 					
+					ui_spacer_pixels(ui, 2, 1);
+					if (ui_button(ui, str8_lit("Queue")).clicked)
+					{
+						if (mplayer->mode_stack->mode != MODE_Queue)
+							mplayer_change_mode(mplayer, MODE_Queue, 0);
+					}
+					
 					ui_spacer(ui, ui_size_parent_remaining());
 					if (ui_button(ui, str8_lit("Settings")).clicked)
 					{
@@ -2075,16 +2085,42 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					{
 						// NOTE(fakhri): header
 						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_next_height(ui, ui_size_pixel(90, 1));
 						ui_horizontal_layout(ui)
 						{
 							ui_spacer_pixels(ui, 50, 1);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_next_font(ui, &mplayer->header_label_font);
-							ui_label(ui, str8_lit("Songs"));
+							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							{
+								ui_next_background_color(ui, vec4(1, 1, 1, 0));
+								ui_next_text_color(ui, vec4(1, 1, 1, 1));
+								ui_next_width(ui, ui_size_text_dim(1));
+								ui_next_height(ui, ui_size_text_dim(1));
+								ui_next_font(ui, &mplayer->header_label_font);
+								ui_label(ui, str8_lit("Songs"));
+								
+								ui_spacer(ui, ui_size_parent_remaining());
+								
+								ui_next_height(ui, ui_size_by_childs(1));
+								ui_horizontal_layout(ui)
+									ui_pref_height(ui, ui_size_text_dim(1))
+									ui_pref_width(ui, ui_size_text_dim(1))
+								{
+									if (mplayer_ui_underlined_button(ui, str8_lit("Queue All")).clicked)
+									{
+										for (u32 track_id = 1; track_id < mplayer->library.tracks_count; track_id += 1)
+										{
+											mplayer_queue_last(mplayer, track_id);
+										}
+										mplayer_queue_resume(mplayer);
+									}
+									
+									ui_spacer_pixels(ui, 10, 1);
+									
+								}
+							}
+							
+							
 						}
 						
 						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
@@ -2212,7 +2248,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_horizontal_layout(ui)
 						{
 							ui_spacer_pixels(ui, 50, 0);
-							u32 selected_track_id = 0;
 							ui_for_each_list_item(ui, str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index)
 							{
 								Mplayer_Item_ID track_id = album->tracks.items[track_index];
@@ -2388,7 +2423,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						}
 					} break;
 					
-					
 					case MODE_Queue:
 					{
 						// NOTE(fakhri): header
@@ -2405,7 +2439,49 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_label(ui, str8_lit("Queue"));
 						}
 						
-						// TODO(fakhri): render queue
+						
+						ui_next_width(ui, ui_size_parent_remaining());
+						ui_next_height(ui, ui_size_parent_remaining());
+						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
+						{
+							ui_for_each_list_item(ui, str8_lit("queue-tracks-list"), mplayer->queue.count-1, 50.0f, 1.0f, index)
+							{
+								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index + 1;
+								Mplayer_Item_ID track_id = mplayer->queue.tracks[queue_index];
+								Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
+								
+								V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+								if (track_id == mplayer_queue_current_track_id(mplayer))
+								{
+									bg_color = vec4(0, 0, 0, 1);
+								}
+								
+								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
+								
+								ui_next_background_color(ui, bg_color);
+								ui_next_border_color(ui, vec4(0, 0, 0, 1));
+								ui_next_border_thickness(ui, 1);
+								ui_next_hover_cursor(ui, Cursor_Hand);
+								UI_Element *track_el = ui_element_f(ui, flags, "queue_track_%p", track);
+								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, track_el);
+								if (interaction.clicked)
+								{
+									mplayer_set_current(mplayer, Mplayer_Queue_Index(queue_index));
+								}
+								
+								ui_parent(ui, track_el) ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+									ui_horizontal_layout(ui)
+								{
+									ui_spacer_pixels(ui, 10, 1);
+									
+									ui_next_width(ui, ui_size_text_dim(1));
+									ui_next_height(ui, ui_size_text_dim(1));
+									ui_element_f(ui, UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
+										STR8_EXPAND(track->title), track);
+								}
+							}
+						}
+						
 					} break;
 					
 				}
