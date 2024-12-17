@@ -184,6 +184,7 @@ gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_sh
 internal u32
 gl_get_texture_handle(OpenGL *opengl, Texture texture)
 {
+	assert(texture.index);
 	assert(texture.index < opengl->render_ctx.textures_count);
 	u32 handle = opengl->textures2d_array[texture.index];
 	return handle;
@@ -226,50 +227,6 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 	}
 }
 
-WORK_SIG(upload_texture_to_gpu_work)
-{
-	assert(input);
-	Upload_Texture_To_GPU_Data *upload_data = (Upload_Texture_To_GPU_Data *)input;
-	
-	Render_Context *render_ctx = upload_data->render_ctx;
-	Texture *texture           = upload_data->texture;
-	Buffer texture_data        = upload_data->texture_data;
-	
-	Textures_Upload_Buffer *upload_buffer = &render_ctx->upload_buffer;
-	if (texture->state == Texture_State_Loading)
-	{
-		int req_channels = 4;
-		int width, height, channels;
-		u8 *pixels = stbi_load_from_memory(texture_data.data, int(texture_data.size), &width, &height, &channels, req_channels);
-		assert(pixels);
-		if (pixels)
-		{
-			texture->width  = u16(width);
-			texture->height = u16(height);
-			
-			Buffer pixels_buf = make_buffer(pixels, width * height * req_channels); 
-			push_texture_upload_request(upload_buffer, *texture, pixels_buf, 1);
-			
-			#if 0
-				stbi_image_free(pixels);
-			#endif
-		}
-		
-		CompletePreviousWritesBeforeFutureWrites();
-		texture->state = Texture_State_Loaded;
-	}
-	
-	for (;;)
-	{
-		upload_data->next = render_ctx->free_texture_upload_data;
-		
-		if (platform->atomic_compare_and_exchange_pointer((volatile Address *)&render_ctx->free_texture_upload_data, upload_data->next, upload_data))
-		{
-			break;
-		}
-	}
-}
-
 internal void
 init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 {
@@ -280,9 +237,7 @@ init_opengl_renderer(OpenGL *opengl, Memory_Arena *arena)
 	opengl->render_ctx.vertex_array = m_arena_push_array(arena, Rect_Vertex_Data, opengl->render_ctx.max_vertices_count);
 	opengl->render_ctx.index_array  = m_arena_push_array(arena, u16, opengl->render_ctx.max_indices_count);
 	
-	opengl->render_ctx.upload_texture_to_gpu_work = upload_texture_to_gpu_work;
-	
-	opengl->render_ctx.textures_count = 0;
+	opengl->render_ctx.textures_count = 1;
 	
 	// TODO(fakhri): should we use a texture array instead of individual textures?
 	opengl->render_ctx.textures_capacity = 4096;
@@ -352,15 +307,58 @@ gl_end_frame(OpenGL *opengl)
 	glClearColor(1, 0, 1, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 	
+	// NOTE(fakhri): process release requests
+	for(u32 i = 0; i < opengl->render_ctx.release_buffer.count; i += 1)
+	{
+		Texture to_release = opengl->render_ctx.release_buffer.textures[i];
+		
+		u32 tex_handle = gl_get_texture_handle(opengl, to_release);
+		if (tex_handle != 0)
+		{
+			Texture_Available_Index *available_index = opengl->render_ctx.free_available_indices;
+			if (!is_nil(&opengl->render_ctx, available_index))
+			{
+				opengl->render_ctx.free_available_indices = available_index->next;
+			}
+			else
+			{
+				available_index = m_arena_push_struct_z(opengl->render_ctx.arena, Texture_Available_Index);
+			}
+			
+			assert(available_index);
+			available_index->index = to_release.index;
+			available_index->next = opengl->render_ctx.first_available_index;
+			opengl->render_ctx.first_available_index = available_index;
+			
+			glBindTexture(GL_TEXTURE_2D, tex_handle);
+			
+			u32 format = GL_RED;
+			glTexImage2D(GL_TEXTURE_2D,
+				0,
+				i32(format), 
+				0,
+				0,
+				0,
+				u32(format),
+				GL_UNSIGNED_BYTE,
+				0);
+			
+		}
+	}
+	opengl->render_ctx.release_buffer.count = 0;
+	
+  
 	// NOTE(fakhri): process upload requests
 	while (opengl->render_ctx.upload_buffer.tail < opengl->render_ctx.upload_buffer.head)
 	{
-		u64 entry_index = opengl->render_ctx.upload_buffer.tail % opengl->render_ctx.upload_buffer.capacity;
+		u64 entry_index = opengl->render_ctx.upload_buffer.tail % TEXTURE_UPLOAD_BUFFER_CAPACITY;
 		Texture_Upload_Entry entry = opengl->render_ctx.upload_buffer.entries[entry_index];
 		platform->atomic_increment64((volatile i64 *)&opengl->render_ctx.upload_buffer.tail);
-		gl_upload_texture(opengl, entry.texture, entry.tex_buf);
+		gl_upload_texture(opengl, *entry.texture, entry.tex_buf);
 		if (entry.should_free)
 			free(entry.tex_buf.data);
+		
+		entry.texture->state = Texture_State_Loaded;
 	}
   
 	Render_Context *render_ctx = (Render_Context *)opengl;

@@ -162,13 +162,35 @@ struct Mplayer_Font
 
 #include "mplayer_ui.h"
 
+
+enum Image_Data_State
+{
+	Image_State_Unloaded,
+	Image_State_Loading,
+	Image_State_Loaded,
+	Image_State_Invalid,
+};
+
+struct Mplayer_Image_ID
+{
+	u32 index;
+};
+
 struct Mplayer_Item_Image
 {
+	Image_Data_State state;
 	b32 in_disk;
 	String8 path;
-	// NOTE(fakhri): for cover and artist picture if we have it
 	Buffer texture_data;
+	// NOTE(fakhri): for cover and artist picture if we have it
 	Texture texture;
+};
+
+struct Decode_Texture_Data_Input
+{
+	Memory_Arena work_arena;
+	struct Mplayer_Context *mplayer;
+	Mplayer_Item_Image *image;
 };
 
 typedef u32 Mplayer_Item_ID;
@@ -182,9 +204,8 @@ struct Mplayer_Items_Array
 struct Mplayer_Item_Header
 {
 	Mplayer_Item_ID id;
-	Mplayer_Item_Image image;
+	Mplayer_Image_ID image_id;
 	u64 hash;
-	Memory_Arena transient_arena;
 };
 
 struct Mplayer_Track
@@ -238,6 +259,7 @@ struct Mplayer_Album
 struct Mplayer_Library
 {
 	Memory_Arena arena;
+	Memory_Arena track_transient_arena;
 	
 	u32 tracks_count;
 	u32 albums_count;
@@ -246,6 +268,9 @@ struct Mplayer_Library
 	Mplayer_Artist artists[MAX_ARTISTS_COUNT];
 	Mplayer_Album albums[MAX_ALBUMS_COUNT];
 	Mplayer_Track tracks[MAX_TRACKS_COUNT];
+	
+	Mplayer_Item_Image images[8192];
+	u32 images_count;
 };
 
 struct Mplayer_Library_Location

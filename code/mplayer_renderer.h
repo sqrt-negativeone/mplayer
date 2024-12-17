@@ -15,6 +15,7 @@ enum Texture_State
 	Texture_State_Unloaded,
 	Texture_State_Loading,
 	Texture_State_Loaded,
+	Texture_State_Load_Error,
 };
 
 
@@ -47,27 +48,32 @@ struct Rect_Vertex_Data
 
 struct Texture_Upload_Entry
 {
-	Texture texture;
+	Texture *texture;
 	Buffer tex_buf;
 	b32 should_free;
 };
 
+#define TEXTURE_UPLOAD_BUFFER_CAPACITY 1024
 struct Textures_Upload_Buffer
 {
 	Texture_Upload_Entry *entries;
-	u64 capacity;
 	
 	volatile u64 head;
 	volatile u64 tail;
 	volatile u64 claimed_head;
 };
 
-struct Upload_Texture_To_GPU_Data
+#define TEXTURE_RELEASE_BUFFER_CAPACITY 1024
+struct Textures_Release_Buffer
 {
-	Upload_Texture_To_GPU_Data *next;
-	struct Render_Context *render_ctx;
-	Texture *texture;
-	Buffer texture_data;
+	Texture *textures;
+	u64 count;
+};
+
+struct Texture_Available_Index
+{
+	Texture_Available_Index *next;
+	u16 index;
 };
 
 struct Render_Context
@@ -79,6 +85,7 @@ struct Render_Context
 	V2_F32 draw_dim;
 	
 	Textures_Upload_Buffer upload_buffer;
+	Textures_Release_Buffer release_buffer;
 	u64 textures_count;
 	u64 textures_capacity;
 	
@@ -93,8 +100,11 @@ struct Render_Context
 	u32 max_rects;
 	u32 rects_count;
 	
-	Work_Proc *upload_texture_to_gpu_work;
-	Upload_Texture_To_GPU_Data *free_texture_upload_data;
+	Texture_Available_Index nil_available_index;
+	Texture_Available_Index *first_available_index;
+	Texture_Available_Index *free_available_indices;
+	Texture white_texture;
+	u32 white_color;
 };
 
 struct Render_Config

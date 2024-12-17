@@ -15,49 +15,21 @@ struct Render_Entry_Clear_Color
 	V4_F32 color;
 };
 
-internal Upload_Texture_To_GPU_Data *
-make_texure_upload_data(Render_Context *render_ctx, Texture *texture, Buffer texture_data)
-{
-	Upload_Texture_To_GPU_Data *result = 0;
-	
-	// NOTE(fakhri): reuse upload data if it exist
-	for (;;)
-	{
-		result = render_ctx->free_texture_upload_data;
-		
-		if (render_ctx->free_texture_upload_data)
-		{
-			if (platform->atomic_compare_and_exchange_pointer((volatile Address *)&render_ctx->free_texture_upload_data, result, result->next))
-			{
-				break;
-			}
-		}
-		else
-		{
-			result = 0;
-			break;
-		}
-	}
-	
-	if (!result)
-	{
-		result = m_arena_push_struct_z(render_ctx->arena, Upload_Texture_To_GPU_Data);
-	}
-	
-	assert(result);
-	result->render_ctx = render_ctx;
-	result->texture = texture;
-	result->texture_data = texture_data;
-	
-	return result;
-}
-
 internal b32
 is_texture_valid(Texture texure)
 {
 	b32 result = texure.state != Texture_State_Invalid;
 	return result;
 }
+
+
+internal b32
+is_nil(Render_Context *render_ctx, Texture_Available_Index *index)
+{
+	b32 result = (index == &render_ctx->nil_available_index);
+	return result;
+}
+
 
 internal M4_Inv
 compute_clip_matrix(V2_F32 pos, V2_F32 dim)
@@ -82,15 +54,35 @@ compute_clip_matrix(V2_F32 pos, V2_F32 dim)
 internal Texture
 reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 {
+	assert(render_ctx->textures_count);
+	
 	Texture texture = ZERO_STRUCT;
-	assert(render_ctx->textures_count < render_ctx->textures_capacity);
+	
+	u16 index = 0;
+	if (!is_nil(render_ctx, render_ctx->first_available_index))
+	{
+		index = render_ctx->first_available_index->index;
+		
+		// NOTE(fakhri): push to the free list
+		render_ctx->first_available_index->next = render_ctx->free_available_indices;
+		render_ctx->free_available_indices = render_ctx->first_available_index;
+		
+		// NOTE(fakhri): update available indices list
+		render_ctx->first_available_index = render_ctx->first_available_index->next;
+	}
+	
+	if (!index)
+	{
+		assert(render_ctx->textures_count < render_ctx->textures_capacity);
+		index = (u16)render_ctx->textures_count;
+		render_ctx->textures_count += 1;
+	}
 	
 	texture.flags  = 0;
 	texture.state  = Texture_State_Unloaded;
-	texture.index  = u16(render_ctx->textures_count);
+	texture.index  = index;
 	texture.width  = width;
 	texture.height = height;
-	render_ctx->textures_count += 1;
 	
 	return texture;
 }
@@ -104,11 +96,33 @@ reserve_texture_handle(Render_Context *render_ctx)
 
 
 internal void
+push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture *texture, Buffer tex_buf, b32 should_free)
+{
+	assert(upload_buffer);
+	
+	u64 claimed_head = platform->atomic_increment64((volatile i64 *)&upload_buffer->claimed_head);
+	assert(claimed_head - upload_buffer->tail < TEXTURE_UPLOAD_BUFFER_CAPACITY);
+	
+	u64 entry_index = claimed_head % TEXTURE_UPLOAD_BUFFER_CAPACITY;
+	Texture_Upload_Entry *entry = upload_buffer->entries + entry_index;
+	entry->texture = texture;
+	entry->tex_buf = tex_buf;
+	entry->should_free = should_free;
+	
+	while (!platform->atomic_compare_and_exchange64((volatile i64 *)&upload_buffer->head, claimed_head, claimed_head + 1));
+}
+
+internal void
 init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 {
 	assert(render_ctx);
 	assert(arena);
 	render_ctx->arena = arena;
+	
+	
+	render_ctx->nil_available_index.next = &render_ctx->nil_available_index;
+	render_ctx->first_available_index = &render_ctx->nil_available_index;
+	render_ctx->free_available_indices = &render_ctx->nil_available_index;
 	
 	render_ctx->commands = arena_push_buffer(arena, megabytes(16));
 	render_ctx->command_offset = 0;
@@ -116,10 +130,15 @@ init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 	render_ctx->upload_buffer.head    = 0;
 	render_ctx->upload_buffer.claimed_head = 0;
 	render_ctx->upload_buffer.tail    = 0;
-	render_ctx->upload_buffer.capacity = 1024;
 	render_ctx->upload_buffer.entries  = m_arena_push_array(arena, Texture_Upload_Entry, 
-		render_ctx->upload_buffer.capacity);
+		TEXTURE_UPLOAD_BUFFER_CAPACITY);
+	render_ctx->release_buffer.count    = 0;
+	render_ctx->release_buffer.textures = m_arena_push_array(arena, Texture,
+		TEXTURE_RELEASE_BUFFER_CAPACITY);
 	
+	render_ctx->white_color = 0xFFFFFFFF;
+	render_ctx->white_texture = reserve_texture_handle(render_ctx, 1, 1);
+	push_texture_upload_request(&render_ctx->upload_buffer, &render_ctx->white_texture, make_buffer((u8*)&render_ctx->white_color, 4), 0);
 }
 
 
@@ -354,47 +373,41 @@ push_image(Render_Group *group, V2_F32 pos, f32 z, V2_F32 dim, Texture texture, 
 internal void
 push_rect(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, pos, dim, NULL_TEXTURE, color, roundness);
+	push_image(group, pos, dim, group->render_ctx->white_texture, color, roundness);
 }
 
 internal void
 push_rect(Render_Group *group, Range2_F32 rect, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, range_center(rect), range_dim(rect), NULL_TEXTURE, color, roundness);
+	push_image(group, range_center(rect), range_dim(rect), group->render_ctx->white_texture, color, roundness);
 }
 
 internal void
 push_rect(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, range_center(rect), z, range_dim(rect), NULL_TEXTURE, color, roundness);
+	push_image(group, range_center(rect), z, range_dim(rect), group->render_ctx->white_texture, color, roundness);
 }
 
 internal void
 push_rect(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, vec3(pos, 0), dim, NULL_TEXTURE, color, roundness);
+	push_image(group, vec3(pos, 0), dim, group->render_ctx->white_texture, color, roundness);
 }
 
 internal void
 push_rect(Render_Group *group, V2_F32 pos, f32 z, V2_F32 dim, V4_F32 color = vec4(1, 1, 1, 1), f32 roundness = 0.0)
 {
-	push_image(group, vec3(pos, z), dim, NULL_TEXTURE, color, roundness);
+	push_image(group, vec3(pos, z), dim, group->render_ctx->white_texture, color, roundness);
 }
 
 
 internal void
-push_texture_upload_request(Textures_Upload_Buffer *upload_buffer, Texture texture, Buffer tex_buf, b32 should_free)
+push_texture_release_request(Textures_Release_Buffer *release_buffer, Texture texture)
 {
-	assert(upload_buffer);
-	
-	u64 claimed_head = platform->atomic_increment64((volatile i64 *)&upload_buffer->claimed_head);
-	assert(claimed_head - upload_buffer->tail < upload_buffer->capacity);
-	
-	u64 entry_index = claimed_head % upload_buffer->capacity;
-	Texture_Upload_Entry *entry = upload_buffer->entries + entry_index;
-	entry->texture = texture;
-	entry->tex_buf = tex_buf;
-	entry->should_free = should_free;
-	
-	while (!platform->atomic_compare_and_exchange64((volatile i64 *)&upload_buffer->head, claimed_head, claimed_head + 1));
+	if (texture.index)
+	{
+		assert(release_buffer);
+		assert(release_buffer->count < TEXTURE_RELEASE_BUFFER_CAPACITY);
+		release_buffer->textures[release_buffer->count++] = texture;
+	}
 }
