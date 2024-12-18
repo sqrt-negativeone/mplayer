@@ -5,6 +5,7 @@
 
 #include "mplayer_base.h"
 #include "mplayer_math.h"
+#include "mplayer_random.h"
 
 #include "mplayer_memory.h"
 #include "mplayer_string.cpp"
@@ -353,7 +354,7 @@ struct Mplayer_Context
 	Render_Context *render_ctx;
 	Mplayer_UI ui;
 	Mplayer_Input input;
-	Mplayer_Queue queue;
+	Random_Generator entropy;
 	
 	Mplayer_Font timestamp_font;
 	Mplayer_Font header_label_font;
@@ -380,6 +381,8 @@ struct Mplayer_Context
 	
 	b32 show_path_modal;
 	Mplayer_Path_Lister path_lister;
+	
+	Mplayer_Queue queue;
 	
 	b32 show_library_locations;
 	MPlayer_Settings settings;

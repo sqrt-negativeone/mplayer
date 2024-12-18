@@ -713,6 +713,30 @@ is_valid(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 	return result;
 }
 
+internal void
+mplayer_queue_shuffle(Mplayer_Context *mplayer)
+{
+	Mplayer_Queue *queue = &mplayer->queue;
+	Mplayer_Queue_Index current_new_index = queue->current_index;
+	for (Mplayer_Queue_Index i = 1; i < queue->count; i += 1)
+	{
+		u16 swap_index = (u16)rng_next_minmax(&mplayer->entropy, i, queue->count);
+		SWAP(Mplayer_Item_ID, queue->tracks[i], queue->tracks[swap_index]);
+		
+		// TODO(fakhri): can we afford to just do another loop to look for
+		// the new index of the current track playing track?
+		if (swap_index == current_new_index)
+		{
+			current_new_index = i;
+		}
+		else if (i == current_new_index)
+		{
+			current_new_index = swap_index;
+		}
+	}
+	queue->current_index = current_new_index;
+}
+
 internal Mplayer_Track *
 mplayer_queue_get_track_from_queue_index(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 {
@@ -1793,6 +1817,8 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 exported void
 mplayer_initialize(Mplayer_Context *mplayer)
 {
+	mplayer->entropy = rng_make_linear(1249817);
+	
 	load_font(mplayer, &mplayer->font, str8_lit("data/fonts/arial.ttf"), 20);
 	load_font(mplayer, &mplayer->debug_font, str8_lit("data/fonts/arial.ttf"), 20);
 	load_font(mplayer, &mplayer->big_debug_font, str8_lit("data/fonts/arial.ttf"), 50);
@@ -2119,8 +2145,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									
 								}
 							}
-							
-							
 						}
 						
 						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
@@ -2452,16 +2476,44 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					{
 						// NOTE(fakhri): header
 						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_next_height(ui, ui_size_pixel(100, 1));
 						ui_horizontal_layout(ui)
 						{
-							ui_spacer_pixels(ui, 50, 0);
+							ui_spacer_pixels(ui, 50, 1);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_next_font(ui, &mplayer->header_label_font);
-							ui_label(ui, str8_lit("Queue"));
+							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							{
+								ui_next_background_color(ui, vec4(1, 1, 1, 0));
+								ui_next_text_color(ui, vec4(1, 1, 1, 1));
+								ui_next_width(ui, ui_size_text_dim(1));
+								ui_next_height(ui, ui_size_text_dim(1));
+								ui_next_font(ui, &mplayer->header_label_font);
+								
+								String8 title = str8_f(&mplayer->frame_arena, "Queue(%d)", mplayer->queue.count - 1);
+								ui_label(ui, title);
+								
+								ui_spacer(ui, ui_size_parent_remaining());
+								
+								ui_next_height(ui, ui_size_by_childs(1));
+								ui_horizontal_layout(ui)
+									ui_pref_height(ui, ui_size_text_dim(1))
+									ui_pref_width(ui, ui_size_text_dim(1))
+								{
+									if (mplayer_ui_underlined_button(ui, str8_lit("Shuffle Queue")).clicked)
+									{
+										mplayer_queue_shuffle(mplayer);
+										mplayer_set_current(mplayer, 1);
+									}
+									ui_spacer_pixels(ui, 30, 1);
+									
+									if (mplayer_ui_underlined_button(ui, str8_lit("Clear Queue")).clicked)
+									{
+										mplayer_clear_queue(mplayer);
+									}
+									ui_spacer_pixels(ui, 10, 1);
+									
+								}
+							}
 						}
 						
 						
