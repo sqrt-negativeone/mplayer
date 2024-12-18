@@ -2213,7 +2213,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										ui_next_font(ui, &mplayer->header_label_font);
 										ui_label(ui, album->name);
 										
-										ui_spacer_pixels(ui, 10, 1);
+										//ui_spacer_pixels(ui, 1, 1);
 										
 										// NOTE(fakhri): artist button
 										{
@@ -2238,6 +2238,31 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 												mplayer_change_mode(mplayer, MODE_Artist_Albums, album->artist_id);
 											}
 										}
+										
+										ui_spacer_pixels(ui, 10, 1);
+										
+										// NOTE(fakhri): queue album button
+										{
+											ui_next_width(ui, ui_size_text_dim(1));
+											ui_next_height(ui, ui_size_text_dim(1));
+											ui_next_font(ui, &mplayer->font);
+											ui_next_text_color(ui, vec4(0.6f, 0.6f, 0.6f, 1));
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f(ui, "Queue Album");
+											if (interaction.pressed)
+											{
+												interaction.element->text_color = vec4(1, 1, 1, 1);
+											}
+											
+											if (interaction.clicked)
+											{
+												for (u32 track_index = 0; track_index < album->tracks.count; track_index += 1)
+												{
+													mplayer_queue_last(mplayer, album->tracks.items[track_index]);
+												}
+												mplayer_queue_resume(mplayer);
+											}
+										}
+										
 									}
 								}
 								ui_spacer_pixels(ui, 10, 1);
