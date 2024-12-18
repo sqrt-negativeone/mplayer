@@ -2060,11 +2060,15 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						{
 							ui_spacer_pixels(ui, 50, 0);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_next_font(ui, &mplayer->header_label_font);
-							ui_label(ui, str8_lit("Artists"));
+							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							{
+								ui_next_background_color(ui, vec4(1, 1, 1, 0));
+								ui_next_text_color(ui, vec4(1, 1, 1, 1));
+								ui_next_width(ui, ui_size_text_dim(1));
+								ui_next_height(ui, ui_size_text_dim(1));
+								ui_next_font(ui, &mplayer->header_label_font);
+								ui_label(ui, str8_lit("Artists"));
+							}
 						}
 						
 						
@@ -2076,8 +2080,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								Mplayer_Item_ID artist_id = 1 + artist_index;
 								mplayer_ui_aritst_item(ui, mplayer, artist_id);
 							}
-							
 						}
+						
 					} break;
 					
 					case MODE_Album_Library:
@@ -2163,14 +2167,41 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						// NOTE(fakhri): header
 						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
+						ui_next_height(ui, ui_size_pixel(90, 1));
 						ui_horizontal_layout(ui)
 						{
 							ui_spacer_pixels(ui, 50, 1);
 							
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_next_font(ui, &mplayer->header_label_font);
-							ui_label(ui, artist->name);
+							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							{
+								ui_next_background_color(ui, vec4(1, 1, 1, 0));
+								ui_next_text_color(ui, vec4(1, 1, 1, 1));
+								ui_next_width(ui, ui_size_text_dim(1));
+								ui_next_height(ui, ui_size_text_dim(1));
+								ui_next_font(ui, &mplayer->header_label_font);
+								ui_label(ui, artist->name);
+								
+								ui_spacer(ui, ui_size_parent_remaining());
+								
+								ui_next_height(ui, ui_size_by_childs(1));
+								ui_horizontal_layout(ui)
+									ui_pref_height(ui, ui_size_text_dim(1))
+									ui_pref_width(ui, ui_size_text_dim(1))
+								{
+									if (mplayer_ui_underlined_button(ui, str8_lit("Queue All")).clicked)
+									{
+										for (u32 track_index = 0; track_index < artist->tracks.count; track_index += 1)
+										{
+											Mplayer_Item_ID track_id = artist->tracks.items[track_index];
+											mplayer_queue_last(mplayer, track_id);
+										}
+										mplayer_queue_resume(mplayer);
+									}
+									
+									ui_spacer_pixels(ui, 10, 1);
+									
+								}
+							}
 						}
 						
 						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
