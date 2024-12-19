@@ -916,7 +916,15 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 	// STREAMINFO block
 	// ... metadata blocks (127 different kinds of metadata blocks)
 	// audio frames
-	assert(bitstream_read_u32be(bitstream) == 0x664c6143); // "fLaC" marker
+	// TODO(fakhri): this is just a hack for now, maybe we should just refuse to deal with files that 
+	// don't have flac marker?
+	if (bitstream_read_u32be(bitstream) != 0x664c6143)
+	{
+		// NOTE(fakhri): try to decode anyways?
+		bitstream->pos.byte_index -= 4;
+		//assert(bitstream_read_u32be(bitstream) == 0x664c6143); // "fLaC" marker
+	}
+	
 	// NOTE(fakhri): parse meta data blocks
 	for (;!is_last_md_block;)
 	{
