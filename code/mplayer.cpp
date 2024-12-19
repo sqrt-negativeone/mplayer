@@ -770,7 +770,10 @@ mplayer_set_current(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 			mplayer_queue_get_current_track(mplayer));
 	}
 	
-	queue->current_index = CLAMP(0, index, queue->count - 1);
+	if (index >= queue->count) 
+		index = 0;
+	
+	queue->current_index = index;
 	
 	if (is_valid(mplayer, index))
 	{
