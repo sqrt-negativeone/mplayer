@@ -112,7 +112,7 @@ w32_open_file(String8 path, u32 flags)
 	DWORD flags_and_attributes = 0;
 	HANDLE template_file = 0;
 	
-	Memory_Checkpoint scratch = get_scratch(0, 0);
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	String16 cpath16 = str16_from_8(scratch.arena, path);
 	
 	result = CreateFileW((LPCWSTR)cpath16.str,
@@ -204,7 +204,7 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 	DWORD flags_and_attributes = 0;
 	HANDLE template_file = 0;
 	
-	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	Memory_Checkpoint_Scoped scratch(get_scratch(&arena, 1));
 	String16 cpath16 = str16_from_8(scratch.arena, file_path);
 	
 	HANDLE file = w32_open_file(file_path, File_Open_Read);
@@ -535,7 +535,7 @@ struct W32_File_Iterator
 internal b32
 w32_file_iter_begin(File_Iterator_Handle *it, String8 path)
 {
-	Memory_Checkpoint scratch = get_scratch(0, 0);
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	String8 cpath;
 	if (path.str[path.len - 1] == '/' || 
 		path.str[path.len - 1] == '\\' )
@@ -634,7 +634,7 @@ internal Directory
 w32_read_directory(Memory_Arena *arena, String8 path)
 {
 	Directory result = ZERO_STRUCT;
-	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	Memory_Checkpoint_Scoped scratch(get_scratch(&arena, 1));
 	
 	String8 search_path;
 	if (path.str[path.len - 1] == '/' || 
@@ -695,7 +695,7 @@ global SRWLOCK g_w32_cwd_lock;
 internal String8
 w32_get_current_directory(Memory_Arena *arena)
 {
-	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	Memory_Checkpoint_Scoped scratch(get_scratch(&arena, 1));
 	
 	String8 cwd = ZERO_STRUCT;
 	AcquireSRWLockShared(&g_w32_cwd_lock);
@@ -1132,6 +1132,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	init_thread_context();
 	timeBeginPeriod(1);
 	QueryPerformanceFrequency(&w32_timer_freq);
+	
+	SetProcessDPIAware();
 	
 	// NOTE(fakhri): Calculate executable name and path to DLL
 	{

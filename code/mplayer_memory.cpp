@@ -100,10 +100,10 @@ _m_arena_bootstrap_push(u64 struct_size, u64 offset_to_arena)
 
 
 
-internal Memory_Checkpoint
+internal _Memory_Checkpoint
 m_checkpoint_begin(Memory_Arena *arena)
 {
-	Memory_Checkpoint result;
+	_Memory_Checkpoint result;
 	result.arena = arena;
 	result.chunk = arena->current_chunk;
 	result.old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
@@ -111,7 +111,7 @@ m_checkpoint_begin(Memory_Arena *arena)
 }
 
 internal void
-m_checkpoint_end(Memory_Checkpoint checkpoint)
+m_checkpoint_end(_Memory_Checkpoint checkpoint)
 {
 	assert(checkpoint.arena);
 	for (;checkpoint.chunk != checkpoint.arena->current_chunk;)
@@ -126,23 +126,20 @@ m_checkpoint_end(Memory_Checkpoint checkpoint)
 }
 
 
-Memory_Checkpoint::Memory_Checkpoint(Memory_Arena *arena)
+Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(Memory_Arena *arena)
 {
+	this->checkpoint = m_checkpoint_begin(arena);
 	this->arena = arena;
-	this->chunk = arena->current_chunk;
-	this->old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
 }
 
-Memory_Checkpoint::~Memory_Checkpoint()
+
+Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(_Memory_Checkpoint checkpoint)
 {
-	assert(arena);
-	for (;chunk != arena->current_chunk;)
-	{
-		m_arena_free_last_chunk(arena);
-	}
-	
-	if (chunk)
-	{
-		chunk->used_memory = old_used_memory;
-	}
+	this->checkpoint = checkpoint;
+	this->arena = checkpoint.arena;
+}
+
+Memory_Checkpoint_Scoped::~Memory_Checkpoint_Scoped()
+{
+	m_checkpoint_end(checkpoint);
 }

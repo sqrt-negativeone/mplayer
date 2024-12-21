@@ -41,6 +41,7 @@ struct String_Join
 };
 
 
+
 internal b32
 char_is_alpha_upper(u8 c)
 {
@@ -718,4 +719,40 @@ str8_chop_last_slash(String8 string)
 		string.len = slash_pos+1;
 	}
 	return string;
+}
+
+struct String8_UTF8_Iterator
+{
+	u8 *str;
+	u64 max;
+	Decoded_Codepoint utf8;
+	u64 offset;
+};
+
+internal b32
+str8_utf8_it_valid(String8_UTF8_Iterator *it)
+{
+	b32 result = 0;
+	if (it->offset < it->max)
+	{
+		result = 1;
+		it->utf8 = decode_codepoint_from_utf8(it->str + it->offset, it->max - it->offset);
+	}
+	return result;
+}
+
+internal void
+str8_utf8_advance(String8_UTF8_Iterator *it)
+{
+	it->offset += it->utf8.advance;
+}
+
+internal String8_UTF8_Iterator
+str8_utf8_iterator(String8 string)
+{
+	String8_UTF8_Iterator it = ZERO_STRUCT;
+	it.str = string.str;
+	it.max = string.len;
+	
+	return it;
 }

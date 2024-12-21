@@ -135,9 +135,6 @@ global Mplayer_OS_Vtable *platform = 0;
 #include "mplayer_flac.h"
 
 
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "third_party/stb_truetype.h"
-
 struct Mplayer_Glyph
 {
 	V2_F32 uv_scale;
@@ -161,6 +158,7 @@ struct Mplayer_Font
 	f32 descent;
 };
 
+#include "mplayer_font.h"
 #include "mplayer_ui.h"
 
 
@@ -354,16 +352,13 @@ struct Mplayer_Context
 	Render_Context *render_ctx;
 	Mplayer_UI ui;
 	Mplayer_Input input;
+	Fonts_Context *fonts_ctx;
 	Random_Generator entropy;
 	
-	Mplayer_Font timestamp_font;
-	Mplayer_Font header_label_font;
-	Mplayer_Font font;
-	Mplayer_Font small_font;
-	Mplayer_Font debug_font;
-	Mplayer_Font big_debug_font;
+	Font *font;
+	
+	f32 time_since_last_play;
 	f32 volume;
-	f32 seek_percentage;
 	
 	Mplayer_OS_Vtable os;
 	

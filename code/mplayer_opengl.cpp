@@ -132,7 +132,7 @@ gl_compile_shader_program(OpenGL *opengl, const char *source_code)
 internal b32
 gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_shader)
 {
-	Memory_Checkpoint scratch = begin_scratch(0, 0);
+	Memory_Checkpoint_Scoped scratch(begin_scratch(0, 0));
 	// TODO(fakhri): bake the shader into the executable
 	const char *rect_shader_source = (char *)opengl->load_entire_file(str8_lit("data/shaders/rectangle_shader_instanced.glsl"), scratch.arena).data;
 	
@@ -177,7 +177,6 @@ gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_sh
 	rect_shader->uniforms.roundness = glGetUniformLocation(rect_shader->prog_id, "roundness");
 	
 	exit:;
-	end_scratch(scratch);
 	return result;
 }
 

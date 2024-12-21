@@ -16,16 +16,23 @@ struct Memory_Arena
 	u64 min_chunk_size;
 };
 
-struct Memory_Checkpoint
+struct _Memory_Checkpoint
 {
 	Memory_Arena *arena;
 	Memory_Arena_Chunk *chunk;
 	u64 old_used_memory;
+};
+
+struct Memory_Checkpoint_Scoped
+{
+	_Memory_Checkpoint checkpoint;
+	Memory_Arena *arena;
 	
-	Memory_Checkpoint() = default;
+	Memory_Checkpoint_Scoped() = default;
 	
-	Memory_Checkpoint(Memory_Arena *arena);
-	~Memory_Checkpoint();
+	Memory_Checkpoint_Scoped(_Memory_Checkpoint checkpoint);
+	Memory_Checkpoint_Scoped(Memory_Arena *arena);
+	~Memory_Checkpoint_Scoped();
 };
 
 #define m_arena_push_array(arena, T, count) (T *)m_arena_push(arena, sizeof(T) * (count))
@@ -39,7 +46,7 @@ struct Memory_Checkpoint
 internal void *m_arena_push(Memory_Arena *arena, u64 size);
 internal void *m_arena_push_z(Memory_Arena *arena, u64 size);
 
-internal Memory_Checkpoint m_checkpoint_begin(Memory_Arena *arena);
-internal void m_checkpoint_end(Memory_Checkpoint checkpoint);
+internal _Memory_Checkpoint m_checkpoint_begin(Memory_Arena *arena);
+internal void m_checkpoint_end(_Memory_Checkpoint checkpoint);
 
 #endif //MPLAYER_MEMORY_H

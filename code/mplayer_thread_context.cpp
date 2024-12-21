@@ -19,10 +19,10 @@ init_thread_context()
 	}
 }
 
-internal Memory_Checkpoint
+internal _Memory_Checkpoint
 get_scratch(Memory_Arena **conflicts, u64 count)
 {
-	Memory_Checkpoint result = ZERO_STRUCT;
+	_Memory_Checkpoint result = ZERO_STRUCT;
 	
 	for (u32 i = 0; i < array_count(tl_thread_ctx.arenas); i += 1)
 	{

@@ -52,7 +52,7 @@ compute_clip_matrix(V2_F32 pos, V2_F32 dim)
 }
 
 internal Texture
-reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
+reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height, u8 flags)
 {
 	assert(render_ctx->textures_count);
 	
@@ -78,7 +78,7 @@ reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 		render_ctx->textures_count += 1;
 	}
 	
-	texture.flags  = 0;
+	texture.flags  = flags;
 	texture.state  = Texture_State_Unloaded;
 	texture.index  = index;
 	texture.width  = width;
@@ -90,7 +90,7 @@ reserve_texture_handle(Render_Context *render_ctx, u16 width, u16 height)
 internal Texture
 reserve_texture_handle(Render_Context *render_ctx)
 {
-	Texture texture = reserve_texture_handle(render_ctx, 0, 0);
+	Texture texture = reserve_texture_handle(render_ctx, 0, 0, 0);
 	return texture;
 }
 
@@ -137,7 +137,7 @@ init_renderer(Render_Context *render_ctx, Memory_Arena *arena)
 		TEXTURE_RELEASE_BUFFER_CAPACITY);
 	
 	render_ctx->white_color = 0xFFFFFFFF;
-	render_ctx->white_texture = reserve_texture_handle(render_ctx, 1, 1);
+	render_ctx->white_texture = reserve_texture_handle(render_ctx, 1, 1, 0);
 	push_texture_upload_request(&render_ctx->upload_buffer, &render_ctx->white_texture, make_buffer((u8*)&render_ctx->white_color, 4), 0);
 }
 

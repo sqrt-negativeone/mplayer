@@ -125,7 +125,8 @@ struct UI_Element
 	UI_Element_Flags flags;
 	
 	Cursor_Shape hover_cursor;
-	Mplayer_Font *font;
+	Font *font;
+	f32 font_size;
 	String8 text;
 	Texture texture;
 	V4_F32 texture_tint_color;
@@ -168,7 +169,7 @@ struct UI_Elements_Bucket
 #define UI_STACK_MAX_SIZE 128
 struct UI_Fonts_Stack
 {
-	Mplayer_Font *stack[UI_STACK_MAX_SIZE];
+	Font *stack[UI_STACK_MAX_SIZE];
 	u32 top;
 	b32 auto_pop;
 };
@@ -219,7 +220,7 @@ struct UI_Size_Stack
 struct Mplayer_UI
 {
 	Render_Group *group;
-	Mplayer_Font *def_font;
+	Font *def_font;
 	Mplayer_Input *input;
 	Memory_Arena *arena;
 	Memory_Arena *frame_arena;
@@ -257,6 +258,7 @@ struct Mplayer_UI
 	V2_F32 grid_item_dim;
 	
 	UI_Fonts_Stack    fonts;
+	UI_F32_Stack      font_sizes;
 	UI_Textures_Stack textures;
 	UI_Color_Stack    text_colors;
 	UI_Color_Stack    texture_tint_colors;

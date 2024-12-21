@@ -42,6 +42,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_parent(ui, p) _defer_loop(ui_push_parent(ui, p), ui_pop_parent(ui))
 #define ui_vertical_layout(ui)   ui_parent(ui, ui_layout(ui, Axis2_Y))
 #define ui_horizontal_layout(ui) ui_parent(ui, ui_layout(ui, Axis2_X))
+#define ui_modal(ui, string) _defer_loop(ui_modal_begin(ui, string), ui_modal_end(ui))
 
 #define ui_pref_size(ui, axis, size)                   _defer_loop(ui_push_size(ui, axis, size), ui_pop_size(ui))
 #define ui_pref_width(ui, size)                        _defer_loop(ui_push_width(ui, size), ui_pop_width(ui))
@@ -52,6 +53,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_border_thickness(ui, border_thickness) _defer_loop(ui_push_border_thickness(ui, border_thickness), ui_pop_border_thickness(ui))
 #define ui_pref_texture(ui, border_thickness)          _defer_loop(ui_push_texture(ui, texture), ui_pop_texture(ui))
 #define ui_pref_font(ui, font)                         _defer_loop(ui_push_font(ui, font), ui_pop_font(ui))
+#define ui_pref_font_sizes(ui, font_size)              _defer_loop(ui_push_font_sizes(ui, font_size), ui_pop_font_sizes(ui))
 #define ui_pref_texture_tint_color(ui, tint_color)     _defer_loop(ui_push_texture_tint_color(ui, tint_color), ui_pop_texture_tint_color(ui))
 #define ui_pref_flags(ui, flags)     _defer_loop(ui_push_flags(ui, flags), ui_pop_flags(ui))
 #define ui_pref_roundness(ui, roundness)   _defer_loop(ui_push_roundness(ui, roundness), ui_pop_roundness(ui))
@@ -62,6 +64,7 @@ if ((stack_name).auto_pop) {           \
 
 #define ui_auto_pop_style(ui) do {              \
 ui_auto_pop_stack(ui->fonts);               \
+ui_auto_pop_stack(ui->font_sizes);          \
 ui_auto_pop_stack(ui->textures);            \
 ui_auto_pop_stack(ui->text_colors);         \
 ui_auto_pop_stack(ui->texture_tint_colors); \
@@ -222,12 +225,12 @@ ui_pop_texture(Mplayer_UI *ui)
 
 //- NOTE(fakhri): font stack
 internal void
-ui_push_font(Mplayer_UI *ui, Mplayer_Font *font)
+ui_push_font(Mplayer_UI *ui, Font *font)
 {
 	ui_stack_push(ui->fonts, font);
 }
 internal void
-ui_next_font(Mplayer_UI *ui, Mplayer_Font *font)
+ui_next_font(Mplayer_UI *ui, Font *font)
 {
 	ui_stack_push_auto_pop(ui->fonts, font);
 }
@@ -235,6 +238,23 @@ internal void
 ui_pop_font(Mplayer_UI *ui)
 {
 	ui_stack_pop(ui->fonts);
+}
+
+//- NOTE(fakhri): font stack
+internal void
+ui_push_font_sizes(Mplayer_UI *ui, f32 font_size)
+{
+	ui_stack_push(ui->font_sizes, font_size);
+}
+internal void
+ui_next_font_sizes(Mplayer_UI *ui, f32 font_size)
+{
+	ui_stack_push_auto_pop(ui->font_sizes, font_size);
+}
+internal void
+ui_pop_font_sizes(Mplayer_UI *ui)
+{
+	ui_stack_pop(ui->font_sizes);
 }
 
 //- NOTE(fakhri): texture tint color stack
@@ -360,6 +380,7 @@ internal void
 ui_push_default_style(Mplayer_UI *ui)
 {
 	ui_push_font(ui, ui->def_font);
+	ui_push_font_sizes(ui, 20.0f);
 	ui_push_texture(ui, NULL_TEXTURE);
 	ui_push_text_color(ui, vec4(1));
 	ui_push_texture_tint_color(ui, vec4(1));
@@ -380,6 +401,7 @@ internal void
 ui_reset_default_style(Mplayer_UI *ui)
 {
 	ui->fonts.top = 0;
+	ui->font_sizes.top = 0;
 	ui->textures.top = 0;
 	ui->text_colors.top = 0;
 	ui->texture_tint_colors.top = 0;
@@ -732,6 +754,7 @@ ui_element(Mplayer_UI *ui, String8 string, UI_Element_Flags flags = 0)
 	if (has_flag(flags, UI_FLAG_Draw_Text))
 	{
 		result->font       = ui_stack_top(ui->fonts);
+		result->font_size  = ui_stack_top(ui->font_sizes);
 		result->text_color = ui_stack_top(ui->text_colors);
 		result->text       = ui_drawable_text_from_string(string);
 	}
@@ -880,19 +903,25 @@ ui_input_field(Mplayer_UI *ui, String8 key, String8 *buffer, u64 max_capacity)
 	{
 		text_input->background_color = vec4(0.35f, 0.35f, 0.35f, 1);
 		
-		Mplayer_Font *font = ui_stack_top(ui->fonts);
-		V2_F32 text_dim = font_compute_text_dim(font, *buffer);
+		Font *font = ui_stack_top(ui->fonts);
+		f32 font_size = ui_stack_top(ui->font_sizes);
+		
+		V2_F32 text_dim = fnt_compute_text_dim(font, font_size, *buffer);
 		if (interaction.clicked || interaction.pressed)
 		{
 			V2_F32 pos = range_center(text_input->rect);
 			f32 test_x = pos.x - 0.5f * text_dim.width;
 			ui->input_cursor = 0;
-			for (u32 i = 0; i < buffer->len; i += 1)
+			
+			for (String8_UTF8_Iterator it = str8_utf8_iterator(*buffer);
+				str8_utf8_it_valid(&it);
+				str8_utf8_advance(&it))
 			{
-				f32 glyph_width = font_get_glyph_from_char(font, buffer->str[i]).advance;
+				Glyph_Metrics *glyph = fnt_get_glyph(font, font_size, it.utf8.codepoint);
+				f32 glyph_width = glyph->advance;
 				if (test_x + 0.5f * glyph_width < ui->mouse_pos.x)
 				{
-					ui->input_cursor = i + 1;
+					ui->input_cursor = u32(it.offset + it.utf8.advance);
 				}
 				else break;
 				
@@ -977,7 +1006,7 @@ ui_input_field(Mplayer_UI *ui, String8 key, String8 *buffer, u64 max_capacity)
 		
 		
 		UI_Input_Field_Draw_Data *draw_data = m_arena_push_struct_z(ui->frame_arena, UI_Input_Field_Draw_Data);
-		draw_data->cursor_offset_x = -0.5f * text_dim.width + font_compute_text_dim(font, str8(buffer->str, MIN(buffer->len, ui->input_cursor))).width;
+		draw_data->cursor_offset_x = -0.5f * text_dim.width + fnt_compute_text_dim(font, font_size, str8(buffer->str, MIN(buffer->len, ui->input_cursor))).width;
 		draw_data->cursor_dim = vec2(2.1f, 1.25f * text_dim.height);
 		ui_element_set_draw_proc(text_input, ui_input_field_default_draw, draw_data);
 	}
@@ -1269,7 +1298,7 @@ ui_layout_compute_preorder_sizes(UI_Element *node, Axis2 axis)
 		
 		case UI_Size_Kind_Text_Dim:
 		{
-			node->computed_dim.v[axis] = font_compute_text_dim(node->font, node->text).v[axis];
+			node->computed_dim.v[axis] = fnt_compute_text_dim(node->font, node->font_size, node->text).v[axis];
 		} break;
 		case UI_Size_Kind_Percent:
 		{
@@ -1463,7 +1492,8 @@ ui_draw_elements(Mplayer_UI *ui, Render_Group *group, UI_Element *node)
 	
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
-		draw_text(group, node->font, pos, node->text_color, fancy_str8(node->text), Text_Render_Flag_Centered);
+		fnt_draw_text(group, node->font, node->font_size, node->text, pos, node->text_color, 
+			Text_Render_Flag_Centered);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
@@ -1635,7 +1665,7 @@ ui_begin(Mplayer_UI *ui, Mplayer_Context *mplayer, Render_Group *group, V2_F32 m
 	ui->input       = &mplayer->input;
 	ui->frame_arena = &mplayer->frame_arena;
 	ui->arena       = &mplayer->main_arena;
-	ui->def_font    = &mplayer->font;
+	ui->def_font    = mplayer->font;
 	ui->frame_index += 1;
 	
 	//-NOTE(fakhri): purge untouched elements from hashtable

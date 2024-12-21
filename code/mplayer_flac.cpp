@@ -570,7 +570,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	decoded_block->frames_count = block_size;
 	decoded_block->samples = m_arena_push_array(&flac_stream->block_arena, f32, block_size * nb_channels);
 	
-	Memory_Checkpoint scratch = get_scratch(0, 0);
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	i64 *decoded_samples = m_arena_push_array(scratch.arena, i64, block_size * nb_channels);
 	
 	// NOTE(fakhri): decode subframes
@@ -1190,7 +1190,7 @@ flac_seek_stream(Flac_Stream *flac_stream, u64 target_sample)
 		
 		if (flac_stream->next_sample_number + block_info.block_size >= target_sample)
 		{
-			Memory_Checkpoint scratch = get_scratch(0, 0);
+			Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 			if (target_sample > flac_stream->next_sample_number)
 				flac_read_samples(flac_stream, target_sample - flac_stream->next_sample_number, flac_stream->streaminfo.sample_rate, scratch.arena);
 		}
