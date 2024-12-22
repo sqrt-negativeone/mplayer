@@ -159,8 +159,8 @@ struct Mplayer_Font
 };
 
 #include "mplayer_font.h"
-#include "mplayer_ui.h"
 
+struct _Mplayer_UI;
 
 enum Image_Data_State
 {
@@ -185,13 +185,6 @@ struct Mplayer_Item_Image
 	Texture texture;
 };
 
-struct Decode_Texture_Data_Input
-{
-	Memory_Arena work_arena;
-	struct Mplayer_Context *mplayer;
-	Mplayer_Item_Image *image;
-};
-
 typedef u32 Mplayer_Item_ID;
 
 struct Mplayer_Items_Array
@@ -205,6 +198,20 @@ struct Mplayer_Item_Header
 	Mplayer_Item_ID id;
 	Mplayer_Image_ID image_id;
 	u64 hash;
+};
+
+struct Seek_Table_Work_Data
+{
+	volatile b32 cancel_req;
+	volatile b32 running;
+	u32 seek_points_count;
+	Flac_Seek_Point *seek_table;
+	Flac_Stream *flac_stream;
+	u64 samples_count;
+	u64 first_block_offset;
+	Bit_Stream bitstream;
+	u8 nb_channels;
+	u8 bits_per_sample;
 };
 
 struct Mplayer_Track
@@ -350,7 +357,7 @@ struct Mplayer_Context
 	Memory_Arena main_arena;
 	Memory_Arena frame_arena;
 	Render_Context *render_ctx;
-	_Mplayer_UI ui;
+	_Mplayer_UI *ui;
 	Mplayer_Input input;
 	Fonts_Context *fonts_ctx;
 	Random_Generator entropy;

@@ -190,6 +190,13 @@ mplayer_find_or_create_artist(Mplayer_Context *mplayer, String8 artist_name)
 
 //~ NOTE(fakhri): Mplayer Image stuff
 
+struct Decode_Texture_Data_Input
+{
+	Memory_Arena work_arena;
+	struct Mplayer_Context *mplayer;
+	Mplayer_Item_Image *image;
+};
+
 internal Decode_Texture_Data_Input *
 mplayer_make_texure_upload_data(Mplayer_Context *mplayer, Mplayer_Item_Image *image)
 {
@@ -1608,7 +1615,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	mplayer->font = fnt_open_font(str8_lit("data/fonts/arial.ttf"));
 	mplayer->volume = 1.0f;
 	
-	ui_init(mplayer, mplayer->font);
+	mplayer->ui = ui_init(mplayer, mplayer->font);
 	
 	mplayer_init_queue(mplayer);
 	mplayer_load_settings(mplayer);
@@ -1621,7 +1628,7 @@ mplayer_hotload(Mplayer_Context *mplayer)
 {
 	platform = &mplayer->os;
 	fnt_set_fonts_context(mplayer->fonts_ctx);
-	ui_set_context(&mplayer->ui);
+	ui_set_context(mplayer->ui);
 }
 
 exported void
