@@ -1449,8 +1449,6 @@ mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
 	}
 	
 	ui_next_background_color(bg_color);
-	ui_next_border_color(vec4(0, 0, 0, 1));
-	ui_next_border_thickness(1);
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *track_el = ui_element_f(flags, "library_track_%p", track);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
@@ -1570,6 +1568,31 @@ mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
 	}
 }
 
+
+internal void
+mplayer_ui_side_bar_button(Mplayer_Context *mplayer, String8 string, Mplayer_Mode target_mode)
+{
+	Mplayer_UI_Interaction interaction = ui_button(string);
+	if (mplayer->mode_stack->mode != target_mode && interaction.clicked)
+	{
+		mplayer_change_mode(mplayer, target_mode, 0);
+	}
+	
+	if (mplayer->mode_stack->mode == target_mode) ui_parent(interaction.element) 
+		ui_pref_width(ui_size_by_childs(1)) ui_horizontal_layout()
+	{
+		ui_spacer_pixels(5, 1);
+		ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+		{
+			ui_next_width(ui_size_pixel(5, 1));
+			ui_next_height(ui_size_percent(0.9f, 1));
+			ui_next_background_color(vec4(1, 0, 0, 1));
+			ui_next_roundness(2.5);
+			ui_next_layer(UI_Layer_Indicators);
+			ui_element(str8_lit("mode-indicator"), UI_FLAG_Draw_Background | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim);
+		}
+	}
+}
 
 
 //~ NOTE(fakhri): Mplayer Exported API
@@ -1725,8 +1748,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							selected_option_index = option_index;
 						}
 						
-						ui_parent(option_el) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
+						ui_parent(option_el) ui_horizontal_layout()
 						{
+							ui_spacer_pixels(10, 1);
 							ui_next_width(ui_size_text_dim(1));
 							ui_label(option_path);
 						}
@@ -1786,46 +1810,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					ui_pref_width(ui_size_percent(1, 1)) ui_pref_height(ui_size_pixel(30, 1)) ui_pref_roundness(15)
 				{
 					ui_spacer_pixels(20, 1);
-					if (ui_button(str8_lit("Songs")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Music_Library)
-							mplayer_change_mode(mplayer, MODE_Music_Library, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Songs"), MODE_Music_Library);
 					
 					ui_spacer_pixels(2, 1);
-					if (ui_button(str8_lit("Artists")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Artist_Library)
-							mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Artists"), MODE_Artist_Library);
 					
 					ui_spacer_pixels(2, 1);
-					if (ui_button(str8_lit("Albums")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Album_Library)
-							mplayer_change_mode(mplayer, MODE_Album_Library, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Albums"), MODE_Album_Library);
 					
 					ui_spacer_pixels(2, 1);
-					if (ui_button(str8_lit("Lyrics")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Lyrics)
-							mplayer_change_mode(mplayer, MODE_Lyrics, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Lyrics"), MODE_Lyrics);
 					
 					ui_spacer_pixels(2, 1);
-					if (ui_button(str8_lit("Queue")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Queue)
-							mplayer_change_mode(mplayer, MODE_Queue, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Queue"), MODE_Queue);
 					
 					ui_spacer(ui_size_parent_remaining());
-					if (ui_button(str8_lit("Settings")).clicked)
-					{
-						if (mplayer->mode_stack->mode != MODE_Settings)
-							mplayer_change_mode(mplayer, MODE_Settings, 0);
-					}
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Settings"), MODE_Settings);
+					
 					ui_spacer_pixels(20, 1);
 				}
 			}
@@ -1848,7 +1849,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							{
 								ui_next_background_color(vec4(1, 1, 1, 0));
 								ui_next_text_color(vec4(1, 1, 1, 1));
-								ui_next_font_sizes(40);
+								ui_next_font_sizes(50);
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_label(str8_lit("Artists"));
@@ -1880,12 +1881,13 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(40);
+							ui_next_font_sizes(50);
 							ui_label(str8_lit("Albums"));
 						}
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
+							
 							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
 							{
 								Mplayer_Item_ID album_id = 1 + album_index;
@@ -1965,6 +1967,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_text_color(vec4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
+								ui_next_font_sizes(50);
 								ui_label(artist->name);
 								
 								ui_spacer(ui_size_parent_remaining());
@@ -1974,6 +1977,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_pref_height(ui_size_text_dim(1))
 									ui_pref_width(ui_size_text_dim(1))
 								{
+									ui_spacer_pixels(10, 1);
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
 									{
 										for (u32 track_index = 0; track_index < artist->tracks.count; track_index += 1)
@@ -2046,19 +2050,21 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										ui_spacer_pixels(30, 1);
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
+										ui_next_font_sizes(19);
 										ui_label(str8_lit("Album"));
 										
-										ui_spacer_pixels(20, 1);
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
+										ui_next_font_sizes(40);
 										ui_label(album->name);
 										
-										//ui_spacer_pixels(1, 1);
+										//ui_spacer_pixels(15, 1);
 										
 										// NOTE(fakhri): artist button
 										{
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
+											ui_next_font_sizes(20);
 											ui_next_text_color(vec4(0.4f, 0.4f, 0.4f, 1));
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("%.*s###_album_artist_button", STR8_EXPAND(album->artist));
 											if (interaction.hover)
@@ -2078,13 +2084,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											}
 										}
 										
-										ui_spacer_pixels(10, 1);
+										ui_spacer(ui_size_parent_remaining());
 										
 										// NOTE(fakhri): queue album button
 										{
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
 											ui_next_text_color(vec4(0.6f, 0.6f, 0.6f, 1));
+											ui_next_font_sizes(18);
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Album");
 											if (interaction.pressed)
 											{
@@ -2100,7 +2107,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 												mplayer_queue_resume(mplayer);
 											}
 										}
-										
+										ui_spacer_pixels(10, 1);
 									}
 								}
 								ui_spacer_pixels(10, 1);
@@ -2111,7 +2118,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_horizontal_layout()
 						{
 							ui_spacer_pixels(50, 0);
-							ui_for_each_list_item(str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index)
+							ui_for_each_list_item(str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index) ui_pref_roundness(5)
 							{
 								Mplayer_Item_ID track_id = album->tracks.items[track_index];
 								mplayer_ui_track_item(mplayer, track_id);
@@ -2134,6 +2141,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
+							ui_next_font_sizes(50);
 							ui_label(str8_lit("Lyrics"));
 						}
 						
@@ -2151,6 +2159,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
+							ui_next_font_sizes(50);
 							ui_label(str8_lit("Settings"));
 						}
 						
@@ -2299,7 +2308,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_text_color(vec4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
-								
+								ui_next_font_sizes(50);
 								String8 title = str8_f(&mplayer->frame_arena, "Queue(%d)", mplayer->queue.count - 1);
 								ui_label(title);
 								
@@ -2307,6 +2316,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								
 								ui_next_height(ui_size_by_childs(1));
 								ui_horizontal_layout()
+									ui_pref_font_sizes(19)
 									ui_pref_height(ui_size_text_dim(1))
 									ui_pref_width(ui_size_text_dim(1))
 								{
@@ -2492,6 +2502,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
+							ui_next_font_sizes(20);
 							if (mplayer_ui_underlined_button_f("%.*s##_song_title_button", STR8_EXPAND(current_music->title)).clicked)
 							{
 								assert(current_music->artist_id);
@@ -2503,6 +2514,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
+							ui_next_font_sizes(15);
 							if (mplayer_ui_underlined_button_f("%.*s##_song_artist_button", STR8_EXPAND(current_music->artist)).clicked)
 							{
 								assert(current_music->artist_id);

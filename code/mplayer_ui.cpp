@@ -95,6 +95,7 @@ struct Mplayer_UI_Interaction
 enum UI_Layer
 {
 	UI_Layer_Default,
+	UI_Layer_Indicators,
 	UI_Layer_Popup,
 };
 
@@ -974,8 +975,11 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 		}
 	}
 	
+	b32 new_element = 0;
 	if (!result)
 	{
+		new_element = 1;
+		
 		//- NOTE(fakhri): create new element
 		result = g_ui->free_elements;
 		if (result)
@@ -1042,6 +1046,20 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	if (has_flag(flags, UI_FLAG_View_Scroll))
 	{
 		result->scroll_step = ui_stack_top(g_ui->scroll_steps);
+	}
+	
+	if (new_element && has_flag(flags, UI_FLAG_Animate_Pos))
+	{
+		for (UI_Element *p = g_ui->curr_parent; p; p = p->parent)
+		{
+			if (p->computed_rect.min_x && p->computed_rect.min_y && p->computed_rect.max_x && p->computed_rect.max_y)
+			{
+				V2_F32 p_pos = range_center(p->computed_rect);
+				// NOTE(fakhri): start from the center of the parent
+				result->rect = range_center_dim(p_pos, vec2(0, 0));
+				break;
+			}
+		}
 	}
 	
 	if (g_ui->curr_parent)
