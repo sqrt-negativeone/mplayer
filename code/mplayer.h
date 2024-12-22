@@ -350,7 +350,7 @@ struct Mplayer_Context
 	Memory_Arena main_arena;
 	Memory_Arena frame_arena;
 	Render_Context *render_ctx;
-	Mplayer_UI ui;
+	_Mplayer_UI ui;
 	Mplayer_Input input;
 	Fonts_Context *fonts_ctx;
 	Random_Generator entropy;

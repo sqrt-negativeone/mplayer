@@ -204,7 +204,11 @@ fnt_raster_init(Font_Raster *raster)
 {
 	V2_I32 atlas_dim = vec2i(1024, 1024);
 	raster->atlas.dim = atlas_dim;
-	raster->atlas.buf = arena_push_buffer(&g_fonts_ctx->arena, atlas_dim.width * atlas_dim.height);
+	if (!raster->atlas.buf.size)
+	{
+		raster->atlas.buf = arena_push_buffer(&g_fonts_ctx->arena, atlas_dim.width * atlas_dim.height);
+	}
+	assert(raster->atlas.buf.size == atlas_dim.width * atlas_dim.height);
 	raster->atlas.handle = reserve_texture_handle(g_fonts_ctx->render_ctx, (u16)atlas_dim.width, (u16)atlas_dim.height, TEXTURE_FLAG_GRAY_BIT);
 	
 	stbtt_PackBegin(&raster->ctx, raster->atlas.buf.data, raster->atlas.dim.width, raster->atlas.dim.height, 0, 1, 0);
@@ -224,7 +228,12 @@ fnt_raster_range(stbtt_fontinfo *info, Font_Face *face, Font_Raster *raster, stb
 	{
 		// TODO(fakhri): failed to pack all glyphs! probably the texture is full, if that's the case
 		//               reserve a new texture and try again with the glyphs that failed
-		not_impemeneted();
+		#if 0
+			stbtt_PackEnd(&raster->ctx);
+		fnt_raster_init(raster);
+		#endif
+			
+			not_impemeneted();
 	}
 	
 	for (i32 ch_index = 0; 

@@ -65,7 +65,7 @@ enum
 typedef u32 UI_Element_Flags;
 
 struct UI_Element;
-#define UI_CUSTOM_DRAW_PROC(name) void name(struct Mplayer_UI *ui, Render_Group *group, UI_Element *element)
+#define UI_CUSTOM_DRAW_PROC(name) void name(Render_Group *group, UI_Element *element)
 
 typedef UI_CUSTOM_DRAW_PROC(UI_Custom_Draw_Proc);
 
@@ -217,7 +217,7 @@ struct UI_Size_Stack
 };
 
 #define UI_ELEMENETS_HASHTABLE_SIZE 128
-struct Mplayer_UI
+struct _Mplayer_UI
 {
 	Render_Group *group;
 	Font *def_font;

@@ -1400,37 +1400,37 @@ mplayer_close_path_lister(Mplayer_Context *mplayer, Mplayer_Path_Lister *path_li
 
 //~ NOTE(fakhri): Custom UI stuff
 internal Mplayer_UI_Interaction
-mplayer_ui_underlined_button(Mplayer_UI *ui, String8 string)
+mplayer_ui_underlined_button(String8 string)
 {
-	ui_next_hover_cursor(ui, Cursor_Hand);
-	UI_Element *button = ui_element(ui, string, UI_FLAG_Draw_Text | UI_FLAG_Clickable);
-	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, button);
-	if (interaction.hover) ui_parent(ui, button)
+	ui_next_hover_cursor(Cursor_Hand);
+	UI_Element *button = ui_element(string, UI_FLAG_Draw_Text | UI_FLAG_Clickable);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(button);
+	if (interaction.hover) ui_parent(button)
 	{
 		button->child_layout_axis = Axis2_Y;
-		ui_spacer(ui, ui_size_percent(0.85f, 1));
+		ui_spacer(ui_size_percent(0.85f, 1));
 		
-		ui_next_width(ui, ui_size_percent(1, 1));
-		ui_next_height(ui, ui_size_pixel(1, 1));
-		ui_next_background_color(ui, button->text_color);
-		ui_element(ui, {}, UI_FLAG_Draw_Background);
+		ui_next_width(ui_size_percent(1, 1));
+		ui_next_height(ui_size_pixel(1, 1));
+		ui_next_background_color(button->text_color);
+		ui_element({}, UI_FLAG_Draw_Background);
 	}
 	return interaction;
 }
 
 internal Mplayer_UI_Interaction
-mplayer_ui_underlined_button_f(Mplayer_UI *ui, const char *fmt, ...)
+mplayer_ui_underlined_button_f(const char *fmt, ...)
 {
 	va_list args;
   va_start(args, fmt);
-	String8 string = str8_fv(ui->frame_arena, fmt, args);
+	String8 string = str8_fv(g_ui->frame_arena, fmt, args);
 	va_end(args);
 	
-	return mplayer_ui_underlined_button(ui, string);
+	return mplayer_ui_underlined_button(string);
 }
 
 internal void
-mplayer_ui_track_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
 {
 	Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
 	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
@@ -1441,33 +1441,33 @@ mplayer_ui_track_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID 
 		bg_color = vec4(0, 0, 0, 1);
 	}
 	
-	ui_next_background_color(ui, bg_color);
-	ui_next_border_color(ui, vec4(0, 0, 0, 1));
-	ui_next_border_thickness(ui, 1);
-	ui_next_hover_cursor(ui, Cursor_Hand);
-	UI_Element *track_el = ui_element_f(ui, flags, "library_track_%p", track);
-	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, track_el);
+	ui_next_background_color(bg_color);
+	ui_next_border_color(vec4(0, 0, 0, 1));
+	ui_next_border_thickness(1);
+	ui_next_hover_cursor(Cursor_Hand);
+	UI_Element *track_el = ui_element_f(flags, "library_track_%p", track);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
 	if (interaction.clicked)
 	{
 		mplayer_queue_play_track(mplayer, track_id);
 		mplayer_queue_resume(mplayer);
 	}
 	
-	ui_parent(ui, track_el) ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
-		ui_horizontal_layout(ui)
+	ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+		ui_horizontal_layout()
 	{
-		ui_spacer_pixels(ui, 10, 1);
+		ui_spacer_pixels(10, 1);
 		
-		ui_next_width(ui, ui_size_text_dim(1));
-		ui_next_height(ui, ui_size_text_dim(1));
-		ui_element_f(ui, UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
+		ui_next_width(ui_size_text_dim(1));
+		ui_next_height(ui_size_text_dim(1));
+		ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
 			STR8_EXPAND(track->title), track);
 	}
 }
 
 
 internal void
-mplayer_ui_album_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
+mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
 {
 	Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
 	
@@ -1478,20 +1478,20 @@ mplayer_ui_album_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID 
 	if (image_ready)
 	{
 		flags |= UI_FLAG_Draw_Image;
-		ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
-		ui_next_texture(ui, image->texture);
+		ui_next_texture_tint_color(vec4(1, 1, 1, 0.35f));
+		ui_next_texture(image->texture);
 	}
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
-		ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+		ui_next_background_color(vec4(1, 1, 1, 0.35f));
 	}
 	
-	ui_next_hover_cursor(ui, Cursor_Hand);
-	ui_next_roundness(ui, 10);
-	UI_Element *album_el = ui_element_f(ui, flags, "library_album_%p", album);
+	ui_next_hover_cursor(Cursor_Hand);
+	ui_next_roundness(10);
+	UI_Element *album_el = ui_element_f(flags, "library_album_%p", album);
 	album_el->child_layout_axis = Axis2_Y;
-	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, album_el);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(album_el);
 	if (interaction.clicked)
 	{
 		mplayer->selected_album_id = album_id;
@@ -1503,19 +1503,19 @@ mplayer_ui_album_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID 
 		album_el->texture_tint_color = vec4(1, 1, 1, 0.9f);
 	}
 	
-	ui_parent(ui, album_el)
+	ui_parent(album_el)
 	{
-		ui_next_width(ui, ui_size_percent(1, 1));
-		ui_next_height(ui, ui_size_pixel(50, 1));
-		ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 0.3f));
-		ui_next_roundness(ui, 5);
-		ui_element_f(ui, UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
+		ui_next_width(ui_size_percent(1, 1));
+		ui_next_height(ui_size_pixel(50, 1));
+		ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 0.3f));
+		ui_next_roundness(5);
+		ui_element_f(UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
 			STR8_EXPAND(album->name), album);
 	}
 }
 
 internal void
-mplayer_ui_aritst_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
+mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
 {
 	Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, artist_id);
 	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, artist->header.image_id, 1);
@@ -1525,23 +1525,23 @@ mplayer_ui_aritst_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID
 	if (image_ready)
 	{
 		flags |= UI_FLAG_Draw_Image;
-		ui_next_texture_tint_color(ui, vec4(1, 1, 1, 0.35f));
-		ui_next_texture(ui, image->texture);
+		ui_next_texture_tint_color(vec4(1, 1, 1, 0.35f));
+		ui_next_texture(image->texture);
 	}
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
-		ui_next_background_color(ui, vec4(1, 1, 1, 0.35f));
+		ui_next_background_color(vec4(1, 1, 1, 0.35f));
 	}
 	
-	ui_next_hover_cursor(ui, Cursor_Hand);
-	ui_next_roundness(ui, 10);
-	ui_next_width(ui, ui_size_percent(1, 1));
-	ui_next_height(ui, ui_size_percent(1, 1));
+	ui_next_hover_cursor(Cursor_Hand);
+	ui_next_roundness(10);
+	ui_next_width(ui_size_percent(1, 1));
+	ui_next_height(ui_size_percent(1, 1));
 	flags |= UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
-	UI_Element *artist_el = ui_element_f(ui, flags, "library_artist_%p", artist);
+	UI_Element *artist_el = ui_element_f(flags, "library_artist_%p", artist);
 	artist_el->child_layout_axis = Axis2_Y;
-	Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, artist_el);
+	Mplayer_UI_Interaction interaction = ui_interaction_from_element(artist_el);
 	if (interaction.clicked)
 	{
 		mplayer->selected_artist_id = artist_id;
@@ -1552,13 +1552,13 @@ mplayer_ui_aritst_item(Mplayer_UI *ui, Mplayer_Context *mplayer, Mplayer_Item_ID
 		artist_el->texture_tint_color = vec4(1, 1, 1, 1);
 	}
 	
-	ui_parent(ui, artist_el)
+	ui_parent(artist_el)
 	{
-		ui_spacer_pixels(ui, 10, 1);
+		ui_spacer_pixels(10, 1);
 		
-		ui_next_width(ui, ui_size_percent(1, 1));
-		ui_next_height(ui, ui_size_text_dim(1));
-		ui_element_f(ui, UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_artist_name_%p", 
+		ui_next_width(ui_size_percent(1, 1));
+		ui_next_height(ui_size_text_dim(1));
+		ui_element_f(UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_artist_name_%p", 
 			STR8_EXPAND(artist->name), artist);
 	}
 }
@@ -1606,8 +1606,9 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	
 	mplayer->fonts_ctx = fnt_init(mplayer->render_ctx);
 	mplayer->font = fnt_open_font(str8_lit("data/fonts/arial.ttf"));
-	
 	mplayer->volume = 1.0f;
+	
+	ui_init(mplayer, mplayer->font);
 	
 	mplayer_init_queue(mplayer);
 	mplayer_load_settings(mplayer);
@@ -1620,6 +1621,7 @@ mplayer_hotload(Mplayer_Context *mplayer)
 {
 	platform = &mplayer->os;
 	fnt_set_fonts_context(mplayer->fonts_ctx);
+	ui_set_context(&mplayer->ui);
 }
 
 exported void
@@ -1644,62 +1646,61 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		mplayer_change_next_mode(mplayer);
 	}
 	
-	Mplayer_UI *ui = &mplayer->ui;;
-	ui_begin(ui, mplayer, &group, world_mouse_p);
+	ui_begin(&group, world_mouse_p);
 	
 	if (mplayer->show_path_modal)
 	{
-		ui_modal(ui, str8_lit("path-lister-modal"))
-			ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
-			ui_pref_height(ui, ui_size_by_childs(1)) ui_horizontal_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+		ui_modal(str8_lit("path-lister-modal"))
+			ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+			ui_pref_height(ui_size_by_childs(1)) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 		{
-			ui_next_border_color(ui, vec4(0,0,0,1));
-			ui_next_border_thickness(ui, 2);
-			ui_next_background_color(ui, vec4(0.15f, 0.15f, 0.15f, 1.0f));
-			ui_next_width(ui, ui_size_percent(0.9f, 1));
-			ui_next_height(ui, ui_size_percent(0.9f, 1));
-			ui_next_flags(ui, UI_FLAG_Clip);
-			ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(30, 1))
+			ui_next_border_color(vec4(0,0,0,1));
+			ui_next_border_thickness(2);
+			ui_next_background_color(vec4(0.15f, 0.15f, 0.15f, 1.0f));
+			ui_next_width(ui_size_percent(0.9f, 1));
+			ui_next_height(ui_size_percent(0.9f, 1));
+			ui_next_flags(UI_FLAG_Clip);
+			ui_vertical_layout() ui_padding(ui_size_pixel(30, 1))
 			{
-				ui_next_height(ui, ui_size_pixel(30, 1));
-				ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(20, 1))
-					ui_pref_height(ui, ui_size_percent(1, 1))
+				ui_next_height(ui_size_pixel(30, 1));
+				ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
+					ui_pref_height(ui_size_percent(1, 1))
 				{
-					ui_next_width(ui, ui_size_text_dim(1));
-					ui_label(ui, str8_lit("Input path:"));
+					ui_next_width(ui_size_text_dim(1));
+					ui_label(str8_lit("Input path:"));
 					
-					ui_spacer_pixels(ui, 10, 1);
+					ui_spacer_pixels(10, 1);
 					
-					ui_next_border_color(ui, vec4(0,0,0,1));
-					ui_next_border_thickness(ui, 2);
-					ui_next_background_color(ui, vec4(0.2f, 0.2f, 0.2f, 1.0f));
-					if (ui_input_field(ui, str8_lit("path-input-field"), &mplayer->path_lister.user_path, sizeof(mplayer->path_lister.user_path_buffer)))
+					ui_next_border_color(vec4(0,0,0,1));
+					ui_next_border_thickness(2);
+					ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+					if (ui_input_field(str8_lit("path-input-field"), &mplayer->path_lister.user_path, sizeof(mplayer->path_lister.user_path_buffer)))
 					{
 						mplayer_refresh_path_lister_dir(&mplayer->path_lister);
 					}
 					
 				}
-				ui_spacer_pixels(ui, 10, 1);
+				ui_spacer_pixels(10, 1);
 				
-				ui_next_border_thickness(ui, 2);
-				ui_next_height(ui, ui_size_by_childs(1));
-				ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
+				ui_next_border_thickness(2);
+				ui_next_height(ui_size_by_childs(1));
+				ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 				{
 					u32 selected_option_index = mplayer->path_lister.filtered_paths_count;
 					
-					ui_next_height(ui, ui_size_percent(0.75f, 0));
-					ui_for_each_list_item(ui, str8_lit("path-lister-options"), mplayer->path_lister.filtered_paths_count, 40.0f, 1.0f, option_index)
-						ui_pref_height(ui, ui_size_percent(1,0)) ui_pref_width(ui, ui_size_percent(1, 0))
+					ui_next_height(ui_size_percent(0.75f, 0));
+					ui_for_each_list_item(str8_lit("path-lister-options"), mplayer->path_lister.filtered_paths_count, 40.0f, 1.0f, option_index)
+						ui_pref_height(ui_size_percent(1,0)) ui_pref_width(ui_size_percent(1, 0))
 					{
 						String8 option_path = mplayer->path_lister.filtered_paths[option_index];
 						
 						UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 						
-						ui_next_roundness(ui, 5);
-						ui_next_background_color(ui, vec4(0.25f, 0.25f,0.25f, 1));
-						ui_next_hover_cursor(ui, Cursor_Hand);
-						UI_Element *option_el = ui_element_f(ui, flags, "path-option-%.*s", STR8_EXPAND(option_path));
-						Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, option_el);
+						ui_next_roundness(5);
+						ui_next_background_color(vec4(0.25f, 0.25f,0.25f, 1));
+						ui_next_hover_cursor(Cursor_Hand);
+						UI_Element *option_el = ui_element_f(flags, "path-option-%.*s", STR8_EXPAND(option_path));
+						Mplayer_UI_Interaction interaction = ui_interaction_from_element(option_el);
 						if (interaction.hover)
 						{
 							option_el->background_color = vec4(0.2f, 0.2f,0.2f, 1);
@@ -1717,10 +1718,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							selected_option_index = option_index;
 						}
 						
-						ui_parent(ui, option_el) ui_horizontal_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+						ui_parent(option_el) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 						{
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_label(ui, option_path);
+							ui_next_width(ui_size_text_dim(1));
+							ui_label(option_path);
 						}
 					}
 					
@@ -1730,14 +1731,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					}
 				}
 				
-				ui_spacer(ui, ui_size_parent_remaining());
+				ui_spacer(ui_size_parent_remaining());
 				
-				ui_next_height(ui, ui_size_by_childs(1));
-				ui_horizontal_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+				ui_next_height(ui_size_by_childs(1));
+				ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 				{
-					ui_next_height(ui, ui_size_text_dim(1));
-					ui_next_width(ui, ui_size_text_dim(1));
-					if (mplayer_ui_underlined_button(ui, str8_lit("Ok")).clicked)
+					ui_next_height(ui_size_text_dim(1));
+					ui_next_width(ui_size_text_dim(1));
+					if (mplayer_ui_underlined_button(str8_lit("Ok")).clicked)
 					{
 						if (mplayer->settings.locations_count < MAX_LOCATION_COUNT)
 						{
@@ -1750,10 +1751,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						mplayer_save_settings(mplayer);
 					}
 					
-					ui_spacer(ui, ui_size_parent_remaining());
-					ui_next_height(ui, ui_size_text_dim(1));
-					ui_next_width(ui, ui_size_text_dim(1));
-					if (mplayer_ui_underlined_button(ui, str8_lit("Cancel")).clicked)
+					ui_spacer(ui_size_parent_remaining());
+					ui_next_height(ui_size_text_dim(1));
+					ui_next_width(ui_size_text_dim(1));
+					if (mplayer_ui_underlined_button(str8_lit("Cancel")).clicked)
 					{
 						mplayer_close_path_lister(mplayer, &mplayer->path_lister);
 					}
@@ -1763,98 +1764,98 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		}
 	}
 	
-	ui_vertical_layout(ui)
+	ui_vertical_layout()
 	{
-		ui_pref_height(ui, ui_size_parent_remaining())
-			ui_horizontal_layout(ui)
+		ui_pref_height(ui_size_parent_remaining())
+			ui_horizontal_layout()
 		{
-			ui_next_background_color(ui, vec4(0.06f, 0.06f, 0.06f, 1.0f));
-			ui_next_width(ui, ui_size_pixel(150, 1));
-			ui_next_border_color(ui, vec4(0.f, 0.f, 0.f, 1.0f));
-			ui_next_border_thickness(ui, 2);
-			ui_vertical_layout(ui)
+			ui_next_background_color(vec4(0.06f, 0.06f, 0.06f, 1.0f));
+			ui_next_width(ui_size_pixel(150, 1));
+			ui_next_border_color(vec4(0.f, 0.f, 0.f, 1.0f));
+			ui_next_border_thickness(2);
+			ui_vertical_layout()
 			{
-				ui_pref_background_color(ui, vec4(0.1f, 0.1f, 0.1f, 1)) ui_pref_text_color(ui, vec4(1, 1, 1, 1))
-					ui_pref_width(ui, ui_size_percent(1, 1)) ui_pref_height(ui, ui_size_pixel(30, 1)) ui_pref_roundness(ui, 15)
+				ui_pref_background_color(vec4(0.1f, 0.1f, 0.1f, 1)) ui_pref_text_color(vec4(1, 1, 1, 1))
+					ui_pref_width(ui_size_percent(1, 1)) ui_pref_height(ui_size_pixel(30, 1)) ui_pref_roundness(15)
 				{
-					ui_spacer_pixels(ui, 20, 1);
-					if (ui_button(ui, str8_lit("Songs")).clicked)
+					ui_spacer_pixels(20, 1);
+					if (ui_button(str8_lit("Songs")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Music_Library)
 							mplayer_change_mode(mplayer, MODE_Music_Library, 0);
 					}
 					
-					ui_spacer_pixels(ui, 2, 1);
-					if (ui_button(ui, str8_lit("Artists")).clicked)
+					ui_spacer_pixels(2, 1);
+					if (ui_button(str8_lit("Artists")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Artist_Library)
 							mplayer_change_mode(mplayer, MODE_Artist_Library, 0);
 					}
 					
-					ui_spacer_pixels(ui, 2, 1);
-					if (ui_button(ui, str8_lit("Albums")).clicked)
+					ui_spacer_pixels(2, 1);
+					if (ui_button(str8_lit("Albums")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Album_Library)
 							mplayer_change_mode(mplayer, MODE_Album_Library, 0);
 					}
 					
-					ui_spacer_pixels(ui, 2, 1);
-					if (ui_button(ui, str8_lit("Lyrics")).clicked)
+					ui_spacer_pixels(2, 1);
+					if (ui_button(str8_lit("Lyrics")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Lyrics)
 							mplayer_change_mode(mplayer, MODE_Lyrics, 0);
 					}
 					
-					ui_spacer_pixels(ui, 2, 1);
-					if (ui_button(ui, str8_lit("Queue")).clicked)
+					ui_spacer_pixels(2, 1);
+					if (ui_button(str8_lit("Queue")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Queue)
 							mplayer_change_mode(mplayer, MODE_Queue, 0);
 					}
 					
-					ui_spacer(ui, ui_size_parent_remaining());
-					if (ui_button(ui, str8_lit("Settings")).clicked)
+					ui_spacer(ui_size_parent_remaining());
+					if (ui_button(str8_lit("Settings")).clicked)
 					{
 						if (mplayer->mode_stack->mode != MODE_Settings)
 							mplayer_change_mode(mplayer, MODE_Settings, 0);
 					}
-					ui_spacer_pixels(ui, 20, 1);
+					ui_spacer_pixels(20, 1);
 				}
 			}
 			
-			ui_next_width(ui, ui_size_parent_remaining());
-			ui_vertical_layout(ui)
+			ui_next_width(ui_size_parent_remaining());
+			ui_vertical_layout()
 			{
 				switch(mplayer->mode_stack->mode)
 				{
 					case MODE_Artist_Library:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(69, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 0);
+							ui_spacer_pixels(50, 0);
 							
-							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(ui, vec4(1, 1, 1, 0));
-								ui_next_text_color(ui, vec4(1, 1, 1, 1));
-								ui_next_font_sizes(ui, 40);
-								ui_next_width(ui, ui_size_text_dim(1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								ui_label(ui, str8_lit("Artists"));
+								ui_next_background_color(vec4(1, 1, 1, 0));
+								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_font_sizes(40);
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
+								ui_label(str8_lit("Artists"));
 							}
 						}
 						
 						
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							u32 selected_artist_id = 0;
-							ui_for_each_grid_item(ui, str8_lit("library-artists-grid"), mplayer->library.artists_count - 1, vec2(250.0f, 220.0f), 10, artist_index)
+							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer->library.artists_count - 1, vec2(250.0f, 220.0f), 10, artist_index)
 							{
 								Mplayer_Item_ID artist_id = 1 + artist_index;
-								mplayer_ui_aritst_item(ui, mplayer, artist_id);
+								mplayer_ui_aritst_item(mplayer, artist_id);
 							}
 						}
 						
@@ -1863,25 +1864,25 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Album_Library:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(69, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 1);
+							ui_spacer_pixels(50, 1);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_next_font_sizes(ui, 40);
-							ui_label(ui, str8_lit("Albums"));
+							ui_next_background_color(vec4(1, 1, 1, 0));
+							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_width(ui_size_text_dim(1));
+							ui_next_font_sizes(40);
+							ui_label(str8_lit("Albums"));
 						}
 						
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_for_each_grid_item(ui, str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
+							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
 							{
 								Mplayer_Item_ID album_id = 1 + album_index;
-								mplayer_ui_album_item(ui, mplayer, album_id);
+								mplayer_ui_album_item(mplayer, album_id);
 							}
 						}
 						
@@ -1890,33 +1891,33 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Music_Library:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(90, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(90, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 1);
+							ui_spacer_pixels(50, 1);
 							
-							ui_next_height(ui, ui_size_by_childs(1));
-							ui_next_width(ui, ui_size_parent_remaining());
-							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							ui_next_height(ui_size_by_childs(1));
+							ui_next_width(ui_size_parent_remaining());
+							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(ui, vec4(1, 1, 1, 0));
-								ui_next_text_color(ui, vec4(1, 1, 1, 1));
-								ui_next_width(ui, ui_size_text_dim(1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								ui_next_font_sizes(ui, 50);
-								ui_label(ui, str8_lit("Songs"));
+								ui_next_background_color(vec4(1, 1, 1, 0));
+								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
+								ui_next_font_sizes(50);
+								ui_label(str8_lit("Songs"));
 								
-								ui_spacer_pixels(ui, 5, 1);
+								ui_spacer_pixels(5, 1);
 								
-								ui_next_height(ui, ui_size_by_childs(1));
-								ui_horizontal_layout(ui)
-									ui_pref_font_sizes(ui, 20)
-									ui_pref_height(ui, ui_size_text_dim(1))
-									ui_pref_width(ui, ui_size_text_dim(1))
+								ui_next_height(ui_size_by_childs(1));
+								ui_horizontal_layout()
+									ui_pref_font_sizes(20)
+									ui_pref_height(ui_size_text_dim(1))
+									ui_pref_width(ui_size_text_dim(1))
 								{
-									ui_spacer_pixels(ui, 20, 1);
-									if (mplayer_ui_underlined_button(ui, str8_lit("Queue All")).clicked)
+									ui_spacer_pixels(20, 1);
+									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
 									{
 										for (u32 track_id = 1; track_id < mplayer->library.tracks_count; track_id += 1)
 										{
@@ -1925,17 +1926,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										mplayer_queue_resume(mplayer);
 									}
 									
-									ui_spacer_pixels(ui, 10, 1);
+									ui_spacer_pixels(10, 1);
 								}
 							}
 						}
 						
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 						{
-							ui_for_each_list_item(ui, str8_lit("library-tracks-list"), mplayer->library.tracks_count - 1, 50.0f, 1.0f, track_index)
+							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer->library.tracks_count - 1, 50.0f, 1.0f, track_index)
 							{
 								Mplayer_Item_ID track_id = 1 + track_index;
-								mplayer_ui_track_item(ui, mplayer, track_id);
+								mplayer_ui_track_item(mplayer, track_id);
 							}
 						}
 					} break;
@@ -1945,28 +1946,28 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, mplayer->selected_artist_id);
 						
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(90, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(90, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 1);
+							ui_spacer_pixels(50, 1);
 							
-							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(ui, vec4(1, 1, 1, 0));
-								ui_next_text_color(ui, vec4(1, 1, 1, 1));
-								ui_next_width(ui, ui_size_text_dim(1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								ui_label(ui, artist->name);
+								ui_next_background_color(vec4(1, 1, 1, 0));
+								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
+								ui_label(artist->name);
 								
-								ui_spacer(ui, ui_size_parent_remaining());
+								ui_spacer(ui_size_parent_remaining());
 								
-								ui_next_height(ui, ui_size_by_childs(1));
-								ui_horizontal_layout(ui)
-									ui_pref_height(ui, ui_size_text_dim(1))
-									ui_pref_width(ui, ui_size_text_dim(1))
+								ui_next_height(ui_size_by_childs(1));
+								ui_horizontal_layout()
+									ui_pref_height(ui_size_text_dim(1))
+									ui_pref_width(ui_size_text_dim(1))
 								{
-									if (mplayer_ui_underlined_button(ui, str8_lit("Queue All")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
 									{
 										for (u32 track_index = 0; track_index < artist->tracks.count; track_index += 1)
 										{
@@ -1976,18 +1977,18 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										mplayer_queue_resume(mplayer);
 									}
 									
-									ui_spacer_pixels(ui, 10, 1);
+									ui_spacer_pixels(10, 1);
 									
 								}
 							}
 						}
 						
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_for_each_grid_item(ui, str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10, album_index)
+							ui_for_each_grid_item(str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10, album_index)
 							{
 								Mplayer_Item_ID album_id = artist->albums.items[album_index];
-								mplayer_ui_album_item(ui, mplayer, album_id);
+								mplayer_ui_album_item(mplayer, album_id);
 							}
 						}
 						
@@ -1999,17 +2000,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 1);
 						
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(200, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(200, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 10, 1);
+							ui_spacer_pixels(10, 1);
 							
-							ui_vertical_layout(ui)
+							ui_vertical_layout()
 							{
-								ui_spacer_pixels(ui, 10, 1);
+								ui_spacer_pixels(10, 1);
 								
-								ui_horizontal_layout(ui)
+								ui_horizontal_layout()
 								{
 									// NOTE(fakhri): album cover image
 									{
@@ -2017,42 +2018,42 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										if (mplayer_item_image_ready(*image))
 										{
 											flags |= UI_FLAG_Draw_Image;
-											ui_next_texture_tint_color(ui, vec4(1, 1, 1, 1));
-											ui_next_texture(ui, image->texture);
+											ui_next_texture_tint_color(vec4(1, 1, 1, 1));
+											ui_next_texture(image->texture);
 										}
 										else
 										{
 											flags |= UI_FLAG_Draw_Background;
-											ui_next_background_color(ui, vec4(0.2f, 0.2f, 0.2f, 1.0f));
+											ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
 										}
 										
-										ui_next_roundness(ui, 10);
-										ui_next_width(ui, ui_size_pixel(180, 1));
-										ui_next_height(ui, ui_size_pixel(180, 1));
-										ui_element(ui, {}, flags);
+										ui_next_roundness(10);
+										ui_next_width(ui_size_pixel(180, 1));
+										ui_next_height(ui_size_pixel(180, 1));
+										ui_element({}, flags);
 									}
 									
-									ui_spacer_pixels(ui, 10, 1);
-									ui_vertical_layout(ui)
+									ui_spacer_pixels(10, 1);
+									ui_vertical_layout()
 									{
-										ui_spacer_pixels(ui, 30, 1);
-										ui_next_width(ui, ui_size_text_dim(1));
-										ui_next_height(ui, ui_size_text_dim(1));
-										ui_label(ui, str8_lit("Album"));
+										ui_spacer_pixels(30, 1);
+										ui_next_width(ui_size_text_dim(1));
+										ui_next_height(ui_size_text_dim(1));
+										ui_label(str8_lit("Album"));
 										
-										ui_spacer_pixels(ui, 20, 1);
-										ui_next_width(ui, ui_size_text_dim(1));
-										ui_next_height(ui, ui_size_text_dim(1));
-										ui_label(ui, album->name);
+										ui_spacer_pixels(20, 1);
+										ui_next_width(ui_size_text_dim(1));
+										ui_next_height(ui_size_text_dim(1));
+										ui_label(album->name);
 										
-										//ui_spacer_pixels(ui, 1, 1);
+										//ui_spacer_pixels(1, 1);
 										
 										// NOTE(fakhri): artist button
 										{
-											ui_next_width(ui, ui_size_text_dim(1));
-											ui_next_height(ui, ui_size_text_dim(1));
-											ui_next_text_color(ui, vec4(0.4f, 0.4f, 0.4f, 1));
-											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f(ui, "%.*s###_album_artist_button", STR8_EXPAND(album->artist));
+											ui_next_width(ui_size_text_dim(1));
+											ui_next_height(ui_size_text_dim(1));
+											ui_next_text_color(vec4(0.4f, 0.4f, 0.4f, 1));
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("%.*s###_album_artist_button", STR8_EXPAND(album->artist));
 											if (interaction.hover)
 											{
 												interaction.element->text_color = vec4(0.6f, 0.6f, 0.6f, 1);
@@ -2070,14 +2071,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											}
 										}
 										
-										ui_spacer_pixels(ui, 10, 1);
+										ui_spacer_pixels(10, 1);
 										
 										// NOTE(fakhri): queue album button
 										{
-											ui_next_width(ui, ui_size_text_dim(1));
-											ui_next_height(ui, ui_size_text_dim(1));
-											ui_next_text_color(ui, vec4(0.6f, 0.6f, 0.6f, 1));
-											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f(ui, "Queue Album");
+											ui_next_width(ui_size_text_dim(1));
+											ui_next_height(ui_size_text_dim(1));
+											ui_next_text_color(vec4(0.6f, 0.6f, 0.6f, 1));
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Album");
 											if (interaction.pressed)
 											{
 												interaction.element->text_color = vec4(1, 1, 1, 1);
@@ -2095,38 +2096,38 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										
 									}
 								}
-								ui_spacer_pixels(ui, 10, 1);
+								ui_spacer_pixels(10, 1);
 							}
 						}
-						ui_spacer_pixels(ui, 20, 0);
+						ui_spacer_pixels(20, 0);
 						
-						ui_horizontal_layout(ui)
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 0);
-							ui_for_each_list_item(ui, str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index)
+							ui_spacer_pixels(50, 0);
+							ui_for_each_list_item(str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index)
 							{
 								Mplayer_Item_ID track_id = album->tracks.items[track_index];
-								mplayer_ui_track_item(ui, mplayer, track_id);
+								mplayer_ui_track_item(mplayer, track_id);
 							}
 							
-							ui_spacer_pixels(ui, 50, 0);
+							ui_spacer_pixels(50, 0);
 						}
-						ui_spacer_pixels(ui, 10, 1);
+						ui_spacer_pixels(10, 1);
 					} break;
 					
 					case MODE_Lyrics:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(69, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 0);
+							ui_spacer_pixels(50, 0);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_label(ui, str8_lit("Lyrics"));
+							ui_next_background_color(vec4(1, 1, 1, 0));
+							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_width(ui_size_text_dim(1));
+							ui_label(str8_lit("Lyrics"));
 						}
 						
 					} break;
@@ -2134,46 +2135,46 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Settings:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(69, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(69, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 0);
+							ui_spacer_pixels(50, 0);
 							
-							ui_next_background_color(ui, vec4(1, 1, 1, 0));
-							ui_next_text_color(ui, vec4(1, 1, 1, 1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							ui_label(ui, str8_lit("Settings"));
+							ui_next_background_color(vec4(1, 1, 1, 0));
+							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_width(ui_size_text_dim(1));
+							ui_label(str8_lit("Settings"));
 						}
 						
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 1))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_next_childs_axis(ui, Axis2_Y);
-							ui_parent(ui, ui_element(ui, str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll))
-								ui_padding(ui, ui_size_pixel(20, 1))
+							ui_next_childs_axis(Axis2_Y);
+							ui_parent(ui_element(str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll))
+								ui_padding(ui_size_pixel(20, 1))
 							{
-								ui_next_height(ui, ui_size_by_childs(1));
-								ui_horizontal_layout(ui)
+								ui_next_height(ui_size_by_childs(1));
+								ui_horizontal_layout()
 								{
-									ui_next_width(ui, ui_size_text_dim(1));
-									ui_next_height(ui, ui_size_text_dim(1));
-									ui_label(ui, str8_lit("Library"));
+									ui_next_width(ui_size_text_dim(1));
+									ui_next_height(ui_size_text_dim(1));
+									ui_label(str8_lit("Library"));
 								}
 								
-								ui_spacer_pixels(ui, 10, 1);
+								ui_spacer_pixels(10, 1);
 								
-								ui_next_width(ui, ui_size_parent_remaining());
-								ui_next_height(ui, ui_size_by_childs(1));
-								ui_parent(ui, ui_element(ui, {}, 0))
+								ui_next_width(ui_size_parent_remaining());
+								ui_next_height(ui_size_by_childs(1));
+								ui_parent(ui_element({}, 0))
 								{
-									ui_next_background_color(ui, vec4(0.2f,0.2f,0.2f,1));
-									ui_next_height(ui, ui_size_pixel(60, 1));
-									ui_next_roundness(ui, 5);
-									UI_Element *add_location_el = ui_element(ui, str8_lit("setting-music-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
-									ui_parent(ui, add_location_el) ui_padding(ui, ui_size_parent_remaining()) ui_pref_height(ui, ui_size_by_childs(1))
-										ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(20, 1))
+									ui_next_background_color(vec4(0.2f,0.2f,0.2f,1));
+									ui_next_height(ui_size_pixel(60, 1));
+									ui_next_roundness(5);
+									UI_Element *add_location_el = ui_element(str8_lit("setting-music-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
+									ui_parent(add_location_el) ui_padding(ui_size_parent_remaining()) ui_pref_height(ui_size_by_childs(1))
+										ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
 									{
-										Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(ui, add_location_el);
+										Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
 										if (add_loc_interaction.hover)
 										{
 											add_location_el->background_color = vec4(0.3f,0.3f,0.3f,1);
@@ -2187,65 +2188,65 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											mplayer->show_library_locations = !mplayer->show_library_locations;
 										}
 										
-										ui_next_width(ui, ui_size_text_dim(1));
-										ui_next_height(ui, ui_size_text_dim(1));
-										ui_label(ui, str8_lit("Music Library Locations"));
+										ui_next_width(ui_size_text_dim(1));
+										ui_next_height(ui_size_text_dim(1));
+										ui_label(str8_lit("Music Library Locations"));
 										
-										ui_spacer(ui, ui_size_parent_remaining());
+										ui_spacer(ui_size_parent_remaining());
 										
-										ui_next_roundness(ui, 5);
-										ui_next_background_color(ui, vec4(0.25f,0.25f,0.25f,1));
-										ui_next_width(ui, ui_size_by_childs(1));
-										ui_next_height(ui, ui_size_by_childs(1));
-										ui_next_childs_axis(ui, Axis2_Y);
-										ui_next_hover_cursor(ui, Cursor_Hand);
-										UI_Element *loc_el = ui_element(ui, str8_lit("add-location-button"), UI_FLAG_Draw_Background | UI_FLAG_Clickable);
-										if (ui_interaction_from_element(ui, loc_el).clicked)
+										ui_next_roundness(5);
+										ui_next_background_color(vec4(0.25f,0.25f,0.25f,1));
+										ui_next_width(ui_size_by_childs(1));
+										ui_next_height(ui_size_by_childs(1));
+										ui_next_childs_axis(Axis2_Y);
+										ui_next_hover_cursor(Cursor_Hand);
+										UI_Element *loc_el = ui_element(str8_lit("add-location-button"), UI_FLAG_Draw_Background | UI_FLAG_Clickable);
+										if (ui_interaction_from_element(loc_el).clicked)
 										{
 											mplayer_open_path_lister(mplayer, &mplayer->path_lister);
 										}
 										
-										ui_parent(ui, loc_el) 
-											ui_padding(ui, ui_size_pixel(5, 1)) ui_pref_width(ui, ui_size_by_childs(1))
-											ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(5, 1))
+										ui_parent(loc_el) 
+											ui_padding(ui_size_pixel(5, 1)) ui_pref_width(ui_size_by_childs(1))
+											ui_horizontal_layout() ui_padding(ui_size_pixel(5, 1))
 										{
-											ui_next_width(ui, ui_size_text_dim(1));
-											ui_next_height(ui, ui_size_text_dim(1));
-											ui_label(ui, str8_lit("Add Location"));
+											ui_next_width(ui_size_text_dim(1));
+											ui_next_height(ui_size_text_dim(1));
+											ui_label(str8_lit("Add Location"));
 										}
 									}
 									
 									u32 location_to_delete = mplayer->settings.locations_count;
 									
 									if (mplayer->show_library_locations) 
-										ui_pref_background_color(ui, vec4(0.15f,0.15f,0.15f,1))
-										ui_pref_flags(ui, UI_FLAG_Animate_Dim)
-										ui_pref_height(ui, ui_size_by_childs(1))
-										ui_pref_roundness(ui, 10)
-										ui_for_each_list_item(ui, str8_lit("settings-location-list"), mplayer->settings.locations_count, 40.0f, 1.0f, location_index)
+										ui_pref_background_color(vec4(0.15f,0.15f,0.15f,1))
+										ui_pref_flags(UI_FLAG_Animate_Dim)
+										ui_pref_height(ui_size_by_childs(1))
+										ui_pref_roundness(10)
+										ui_for_each_list_item(str8_lit("settings-location-list"), mplayer->settings.locations_count, 40.0f, 1.0f, location_index)
 										
-										ui_pref_height(ui, ui_size_parent_remaining()) ui_pref_flags(ui, 0) ui_pref_roundness(ui, 100)
+										ui_pref_height(ui_size_parent_remaining()) ui_pref_flags(0) ui_pref_roundness(100)
 									{
 										Mplayer_Library_Location *location = mplayer->settings.locations + location_index;
-										ui_next_border_thickness(ui, 2);
+										ui_next_border_thickness(2);
 										u32 flags = UI_FLAG_Animate_Dim | UI_FLAG_Clip | UI_FLAG_Draw_Background;
-										UI_Element *location_el = ui_element(ui, {}, flags);
+										UI_Element *location_el = ui_element({}, flags);
 										location_el->child_layout_axis = Axis2_X;
 										
-										ui_parent(ui, location_el) ui_padding(ui, ui_size_pixel(10, 1))
+										ui_parent(location_el) ui_padding(ui_size_pixel(10, 1))
 										{
-											ui_next_width(ui, ui_size_text_dim(1));
-											ui_label(ui, str8(location->path, location->path_len));
+											ui_next_width(ui_size_text_dim(1));
+											ui_label(str8(location->path, location->path_len));
 											
-											ui_spacer(ui, ui_size_parent_remaining());
+											ui_spacer(ui_size_parent_remaining());
 											
-											ui_next_width(ui, ui_size_pixel(20, 1));
-											ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
+											ui_next_width(ui_size_pixel(20, 1));
+											ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 											{
-												ui_next_height(ui, ui_size_pixel(20, 1));
-												ui_next_roundness(ui, 10);
-												ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1));
-												if (ui_button_f(ui, "X###delete-location-%p", location).clicked)
+												ui_next_height(ui_size_pixel(20, 1));
+												ui_next_roundness(10);
+												ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1));
+												if (ui_button_f("X###delete-location-%p", location).clicked)
 												{
 													location_to_delete = location_index;
 													mplayer_save_settings(mplayer);
@@ -2265,10 +2266,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									}
 								}
 								
-								ui_spacer_pixels(ui, 20,1);
-								ui_next_width(ui, ui_size_text_dim(1));
-								ui_next_height(ui, ui_size_text_dim(1));
-								if (mplayer_ui_underlined_button(ui, str8_lit("Reindex Library")).clicked)
+								ui_spacer_pixels(20,1);
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
+								if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked)
 								{
 									mplayer_index_library(mplayer);
 								}
@@ -2279,52 +2280,52 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Queue:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(ui, vec4(0.05f, 0.05f, 0.05f, 1));
-						ui_next_height(ui, ui_size_pixel(100, 1));
-						ui_horizontal_layout(ui)
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(100, 1));
+						ui_horizontal_layout()
 						{
-							ui_spacer_pixels(ui, 50, 1);
+							ui_spacer_pixels(50, 1);
 							
-							ui_vertical_layout(ui) ui_padding(ui, ui_size_pixel(10, 1))
+							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(ui, vec4(1, 1, 1, 0));
-								ui_next_text_color(ui, vec4(1, 1, 1, 1));
-								ui_next_width(ui, ui_size_text_dim(1));
-								ui_next_height(ui, ui_size_text_dim(1));
+								ui_next_background_color(vec4(1, 1, 1, 0));
+								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
 								
 								String8 title = str8_f(&mplayer->frame_arena, "Queue(%d)", mplayer->queue.count - 1);
-								ui_label(ui, title);
+								ui_label(title);
 								
-								ui_spacer(ui, ui_size_parent_remaining());
+								ui_spacer(ui_size_parent_remaining());
 								
-								ui_next_height(ui, ui_size_by_childs(1));
-								ui_horizontal_layout(ui)
-									ui_pref_height(ui, ui_size_text_dim(1))
-									ui_pref_width(ui, ui_size_text_dim(1))
+								ui_next_height(ui_size_by_childs(1));
+								ui_horizontal_layout()
+									ui_pref_height(ui_size_text_dim(1))
+									ui_pref_width(ui_size_text_dim(1))
 								{
-									if (mplayer_ui_underlined_button(ui, str8_lit("Shuffle Queue")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Shuffle Queue")).clicked)
 									{
 										mplayer_queue_shuffle(mplayer);
 										mplayer_set_current(mplayer, 1);
 									}
-									ui_spacer_pixels(ui, 30, 1);
+									ui_spacer_pixels(30, 1);
 									
-									if (mplayer_ui_underlined_button(ui, str8_lit("Clear Queue")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Clear Queue")).clicked)
 									{
 										mplayer_clear_queue(mplayer);
 									}
-									ui_spacer_pixels(ui, 10, 1);
+									ui_spacer_pixels(10, 1);
 									
 								}
 							}
 						}
 						
 						
-						ui_next_width(ui, ui_size_parent_remaining());
-						ui_next_height(ui, ui_size_parent_remaining());
-						ui_horizontal_layout(ui) ui_padding(ui, ui_size_pixel(50, 0))
+						ui_next_width(ui_size_parent_remaining());
+						ui_next_height(ui_size_parent_remaining());
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 						{
-							ui_for_each_list_item(ui, str8_lit("queue-tracks-list"), mplayer->queue.count-1, 50.0f, 1.0f, index)
+							ui_for_each_list_item(str8_lit("queue-tracks-list"), mplayer->queue.count-1, 50.0f, 1.0f, index)
 							{
 								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index + 1;
 								Mplayer_Item_ID track_id = mplayer->queue.tracks[queue_index];
@@ -2338,25 +2339,25 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								
 								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 								
-								ui_next_background_color(ui, bg_color);
-								ui_next_border_color(ui, vec4(0, 0, 0, 1));
-								ui_next_border_thickness(ui, 1);
-								ui_next_hover_cursor(ui, Cursor_Hand);
-								UI_Element *track_el = ui_element_f(ui, flags, "queue_track_%p%d", track, queue_index);
-								Mplayer_UI_Interaction interaction = ui_interaction_from_element(ui, track_el);
+								ui_next_background_color(bg_color);
+								ui_next_border_color(vec4(0, 0, 0, 1));
+								ui_next_border_thickness(1);
+								ui_next_hover_cursor(Cursor_Hand);
+								UI_Element *track_el = ui_element_f(flags, "queue_track_%p%d", track, queue_index);
+								Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
 								if (interaction.clicked)
 								{
 									mplayer_set_current(mplayer, Mplayer_Queue_Index(queue_index));
 								}
 								
-								ui_parent(ui, track_el) ui_vertical_layout(ui) ui_padding(ui, ui_size_parent_remaining())
-									ui_horizontal_layout(ui)
+								ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+									ui_horizontal_layout()
 								{
-									ui_spacer_pixels(ui, 10, 1);
+									ui_spacer_pixels(10, 1);
 									
-									ui_next_width(ui, ui_size_text_dim(1));
-									ui_next_height(ui, ui_size_text_dim(1));
-									ui_element_f(ui, UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
+									ui_next_width(ui_size_text_dim(1));
+									ui_next_height(ui_size_text_dim(1));
+									ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
 										STR8_EXPAND(track->title), track);
 								}
 							}
@@ -2369,23 +2370,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		}
 		
 		// NOTE(fakhri): track control
-		ui_next_background_color(ui, vec4(0.f, 0.f, 0.f, 1));
-		ui_pref_height(ui, ui_size_pixel(125, 1))
-			ui_vertical_layout(ui)
+		ui_next_background_color(vec4(0.f, 0.f, 0.f, 1));
+		ui_pref_height(ui_size_pixel(125, 1))
+			ui_vertical_layout()
 		{
-			ui_spacer_pixels(ui, 10, 1);
+			ui_spacer_pixels(10, 1);
 			
 			//- NOTE(fakhri): track 
-			//ui_next_background_color(ui, vec4(1, 0, 1, 1));
-			ui_pref_height(ui, ui_size_pixel(20, 1))
-				ui_horizontal_layout(ui)
+			//ui_next_background_color(vec4(1, 0, 1, 1));
+			ui_pref_height(ui_size_pixel(20, 1))
+				ui_horizontal_layout()
 			{
-				ui_spacer_pixels(ui, 10, 1);
+				ui_spacer_pixels(10, 1);
 				
 				Mplayer_Track *current_music = mplayer_queue_get_current_track(mplayer);
 				// NOTE(fakhri): timestamp
 				{
-					ui_next_width(ui, ui_size_text_dim(1));
+					ui_next_width(ui_size_text_dim(1));
 					
 					String8 timestamp_string = str8_lit("--:--:--");
 					if (current_music && current_music->flac_stream)
@@ -2394,15 +2395,15 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						timestamp_string = str8_f(&mplayer->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
 					
-					ui_label(ui, timestamp_string);
+					ui_label(timestamp_string);
 				}
 				
-				ui_spacer_pixels(ui, 20, 1);
+				ui_spacer_pixels(20, 1);
 				
 				// NOTE(fakhri): track progres slider
-				ui_next_width(ui, ui_size_percent(1.0f, 0.25f));
-				ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1.0f));
-				ui_next_roundness(ui, 5);
+				ui_next_width(ui_size_percent(1.0f, 0.25f));
+				ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1.0f));
+				ui_next_roundness(5);
 				if (current_music && current_music->flac_stream)
 				{
 					u64 samples_count = 0;
@@ -2410,7 +2411,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					samples_count = current_music->flac_stream->streaminfo.samples_count;
 					current_playing_sample = current_music->flac_stream->next_sample_number;
 					
-					Mplayer_UI_Interaction progress = ui_slider_u64(ui, str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count);
+					Mplayer_UI_Interaction progress = ui_slider_u64(str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count);
 					if (progress.pressed)
 					{
 						mplayer_queue_pause(mplayer);
@@ -2424,13 +2425,13 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				else
 				{
 					u64 current_playing_sample = 0;
-					ui_slider_u64(ui, str8_lit("track_progress_slider"), &current_playing_sample, 0, 0);
+					ui_slider_u64(str8_lit("track_progress_slider"), &current_playing_sample, 0, 0);
 				}
 				
-				ui_spacer_pixels(ui, 10, 1);
+				ui_spacer_pixels(10, 1);
 				
 				{
-					ui_next_width(ui, ui_size_text_dim(1));
+					ui_next_width(ui_size_text_dim(1));
 					
 					String8 timestamp_string = str8_lit("--:--:--");
 					if (current_music && current_music->flac_stream)
@@ -2438,19 +2439,19 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_music->flac_stream->streaminfo.samples_count, u64(current_music->flac_stream->streaminfo.sample_rate));
 						timestamp_string = str8_f(&mplayer->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
-					ui_label(ui, timestamp_string);
+					ui_label(timestamp_string);
 				}
 				
-				ui_spacer_pixels(ui, 10, 1);
+				ui_spacer_pixels(10, 1);
 			}
 			
-			ui_pref_height(ui, ui_size_parent_remaining())
-				ui_horizontal_layout(ui)
+			ui_pref_height(ui_size_parent_remaining())
+				ui_horizontal_layout()
 			{
-				ui_next_width(ui, ui_size_percent(1.0f/3.0f, 1));
-				ui_horizontal_layout(ui)
+				ui_next_width(ui_size_percent(1.0f/3.0f, 1));
+				ui_horizontal_layout()
 				{
-					ui_spacer_pixels(ui, 10, 1);
+					ui_spacer_pixels(10, 1);
 					
 					Mplayer_Track *current_music = mplayer_queue_get_current_track(mplayer);
 					// NOTE(fakhri): cover image
@@ -2464,38 +2465,38 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							if (mplayer_item_image_ready(*cover_image))
 							{
 								flags |= UI_FLAG_Draw_Image;
-								ui_next_texture_tint_color(ui, vec4(1, 1, 1, 1));
-								ui_next_texture(ui, cover_image->texture);
+								ui_next_texture_tint_color(vec4(1, 1, 1, 1));
+								ui_next_texture(cover_image->texture);
 							}
 							
-							ui_next_width(ui, ui_size_pixel(90, 1));
-							ui_next_height(ui, ui_size_pixel(90, 1));
-							ui_element(ui, {}, flags);
+							ui_next_width(ui_size_pixel(90, 1));
+							ui_next_height(ui_size_pixel(90, 1));
+							ui_element({}, flags);
 						}
 						
-						ui_spacer_pixels(ui, 10, 1);
+						ui_spacer_pixels(10, 1);
 						
 						// NOTE(fakhri): track info
-						ui_next_width(ui, ui_size_parent_remaining());
-						ui_pref_flags(ui, UI_FLAG_Clip)
-							ui_vertical_layout(ui)
+						ui_next_width(ui_size_parent_remaining());
+						ui_pref_flags(UI_FLAG_Clip)
+							ui_vertical_layout()
 						{
-							ui_spacer_pixels(ui, 25, 0);
+							ui_spacer_pixels(25, 0);
 							
-							ui_next_height(ui, ui_size_text_dim(1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							if (mplayer_ui_underlined_button_f(ui, "%.*s##_song_title_button", STR8_EXPAND(current_music->title)).clicked)
+							ui_next_height(ui_size_text_dim(1));
+							ui_next_width(ui_size_text_dim(1));
+							if (mplayer_ui_underlined_button_f("%.*s##_song_title_button", STR8_EXPAND(current_music->title)).clicked)
 							{
 								assert(current_music->artist_id);
 								mplayer->selected_album_id = current_music->album_id;
 								mplayer_change_mode(mplayer, MODE_Album_Tracks, current_music->album_id);
 							}
 							
-							ui_spacer_pixels(ui, 5, 0);
+							ui_spacer_pixels(5, 0);
 							
-							ui_next_height(ui, ui_size_text_dim(1));
-							ui_next_width(ui, ui_size_text_dim(1));
-							if (mplayer_ui_underlined_button_f(ui, "%.*s##_song_artist_button", STR8_EXPAND(current_music->artist)).clicked)
+							ui_next_height(ui_size_text_dim(1));
+							ui_next_width(ui_size_text_dim(1));
+							if (mplayer_ui_underlined_button_f("%.*s##_song_artist_button", STR8_EXPAND(current_music->artist)).clicked)
 							{
 								assert(current_music->artist_id);
 								mplayer->selected_artist_id = current_music->artist_id;
@@ -2506,27 +2507,27 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				}
 				
 				// NOTE(fakhri): next/prevplay/pause buttons
-				ui_next_width(ui, ui_size_percent(1.0f/3.0f, 1));
-				ui_vertical_layout(ui)
+				ui_next_width(ui_size_percent(1.0f/3.0f, 1));
+				ui_vertical_layout()
 				{
-					ui_spacer_pixels(ui, 25, 1);
+					ui_spacer_pixels(25, 1);
 					
-					ui_next_height(ui, ui_size_parent_remaining());
-					ui_next_width(ui, ui_size_parent_remaining());
-					ui_horizontal_layout(ui)
+					ui_next_height(ui_size_parent_remaining());
+					ui_next_width(ui_size_parent_remaining());
+					ui_horizontal_layout()
 					{
-						ui_spacer(ui, ui_size_parent_remaining());
+						ui_spacer(ui_size_parent_remaining());
 						
-						ui_pref_width(ui, ui_size_text_dim(1))
-							ui_pref_height(ui, ui_size_text_dim(1))
-							ui_pref_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1))
+						ui_pref_width(ui_size_text_dim(1))
+							ui_pref_height(ui_size_text_dim(1))
+							ui_pref_background_color(vec4(0.3f, 0.3f, 0.3f, 1))
 						{
-							ui_spacer(ui, ui_size_parent_remaining());
+							ui_spacer(ui_size_parent_remaining());
 							
-							ui_next_roundness(ui, 20);
-							ui_next_width(ui, ui_size_pixel(40, 1));
-							ui_next_height(ui, ui_size_pixel(40, 1));
-							if (ui_button(ui, str8_lit("<<")).clicked && is_valid(mplayer, mplayer->queue.current_index))
+							ui_next_roundness(20);
+							ui_next_width(ui_size_pixel(40, 1));
+							ui_next_height(ui_size_pixel(40, 1));
+							if (ui_button(str8_lit("<<")).clicked && is_valid(mplayer, mplayer->queue.current_index))
 							{
 								if (mplayer->input.time - mplayer->time_since_last_play <= 1.f)
 									mplayer_play_prev_in_queue(mplayer);
@@ -2537,63 +2538,63 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								mplayer_queue_resume(mplayer);
 							}
 							
-							ui_spacer_pixels(ui, 10, 1);
+							ui_spacer_pixels(10, 1);
 							
-							ui_next_roundness(ui, 25);
-							ui_next_width(ui, ui_size_pixel(50, 1));
-							ui_next_height(ui, ui_size_pixel(50, 1));
-							if (ui_button(ui, mplayer_is_queue_playing(mplayer)? str8_lit("II") : str8_lit("I>")).clicked)
+							ui_next_roundness(25);
+							ui_next_width(ui_size_pixel(50, 1));
+							ui_next_height(ui_size_pixel(50, 1));
+							if (ui_button(mplayer_is_queue_playing(mplayer)? str8_lit("II") : str8_lit("I>")).clicked)
 							{
 								mplayer_queue_toggle_play(mplayer);
 							}
-							ui_spacer_pixels(ui, 10, 1);
+							ui_spacer_pixels(10, 1);
 							
-							ui_next_roundness(ui, 20);
-							ui_next_width(ui, ui_size_pixel(40, 1));
-							ui_next_height(ui, ui_size_pixel(40, 1));
-							if (ui_button(ui, str8_lit(">>")).clicked)
+							ui_next_roundness(20);
+							ui_next_width(ui_size_pixel(40, 1));
+							ui_next_height(ui_size_pixel(40, 1));
+							if (ui_button(str8_lit(">>")).clicked)
 							{
 								mplayer_play_next_in_queue(mplayer);
 							}
 							
-							ui_spacer(ui, ui_size_parent_remaining());
+							ui_spacer(ui_size_parent_remaining());
 						}
 						
-						ui_spacer(ui, ui_size_parent_remaining());
+						ui_spacer(ui_size_parent_remaining());
 					}
 					
-					ui_spacer(ui, ui_size_parent_remaining());
+					ui_spacer(ui_size_parent_remaining());
 				}
 				
 				// NOTE(fakhri): volume
-				ui_next_width(ui, ui_size_parent_remaining());
-				ui_horizontal_layout(ui)
+				ui_next_width(ui_size_parent_remaining());
+				ui_horizontal_layout()
 				{
-					ui_spacer(ui, ui_size_parent_remaining());
+					ui_spacer(ui_size_parent_remaining());
 					
-					ui_next_width(ui, ui_size_pixel(150, 1));
-					ui_vertical_layout(ui)
+					ui_next_width(ui_size_pixel(150, 1));
+					ui_vertical_layout()
 					{
-						ui_spacer(ui, ui_size_parent_remaining());
+						ui_spacer(ui_size_parent_remaining());
 						
 						// NOTE(fakhri): volume slider
 						{
-							ui_next_height(ui, ui_size_pixel(12, 1));
-							ui_next_background_color(ui, vec4(0.3f, 0.3f, 0.3f, 1.0f));
-							ui_next_roundness(ui, 5);
-							ui_slider_f32(ui, str8_lit("volume-control-slider"), &mplayer->volume, 0, 1);
+							ui_next_height(ui_size_pixel(12, 1));
+							ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1.0f));
+							ui_next_roundness(5);
+							ui_slider_f32(str8_lit("volume-control-slider"), &mplayer->volume, 0, 1);
 						}
 						
-						ui_spacer(ui, ui_size_parent_remaining());
+						ui_spacer(ui_size_parent_remaining());
 					}
 					
-					ui_spacer_pixels(ui, 10, 1);
+					ui_spacer_pixels(10, 1);
 				}
 			}
 		}
 	}
 	
-	ui_end(ui);
+	ui_end();
 	
 	// NOTE(fakhri): draw fps
 	#if 0
