@@ -13,6 +13,7 @@
 
 #include "mplayer_byte_stream.h"
 
+#include "third_party/meow_hash_x64_aesni.h"
 
 //~ NOTE(fakhri): string hashing stuff
 internal u64
@@ -49,6 +50,54 @@ is_valid(Mplayer_Image_ID id)
 	return result;
 }
 
+internal b32
+is_valid(Mplayer_Track_ID id)
+{
+	b32 result = id.v[0] && id.v[1];
+	return result;
+}
+
+internal b32
+is_equal(Mplayer_Track_ID id1, Mplayer_Track_ID id2)
+{
+	b32 result = id1.v[0] == id2.v[0] && id1.v[1] == id2.v[1];
+	return result;
+}
+internal b32
+is_equal(Mplayer_Album_ID id1, Mplayer_Album_ID id2)
+{
+	b32 result = id1.v[0] == id2.v[0] && id1.v[1] == id2.v[1];
+	return result;
+}
+internal b32
+is_equal(Mplayer_Artist_ID id1, Mplayer_Artist_ID id2)
+{
+	b32 result = id1.v[0] == id2.v[0] && id1.v[1] == id2.v[1];
+	return result;
+}
+
+internal Mplayer_Item_ID
+to_item_id(Mplayer_Artist_ID id)
+{
+	Mplayer_Item_ID item_id;
+	item_id.artist_id = id;
+	return item_id;
+}
+internal Mplayer_Item_ID
+to_item_id(Mplayer_Track_ID id)
+{
+	Mplayer_Item_ID item_id;
+	item_id.track_id = id;
+	return item_id;
+}
+internal Mplayer_Item_ID
+to_item_id(Mplayer_Album_ID id)
+{
+	Mplayer_Item_ID item_id;
+	item_id.album_id = id;
+	return item_id;
+}
+
 internal Mplayer_Image_ID
 mplayer_reserve_image_id(Mplayer_Library *library)
 {
@@ -60,131 +109,168 @@ mplayer_reserve_image_id(Mplayer_Library *library)
 
 
 internal Mplayer_Track *
-mplayer_track_by_id(Mplayer_Library *library, Mplayer_Item_ID id)
+mplayer_track_by_id(Mplayer_Library *library, Mplayer_Track_ID id)
 {
-	assert(id < library->tracks_count);
-	Mplayer_Track *track = library->tracks + id;
-	return track;
-}
-
-internal Mplayer_Track *
-mplayer_make_track(Mplayer_Library *library)
-{
-	assert(library->tracks_count < MAX_TRACKS_COUNT);
-	Mplayer_Item_ID id = library->tracks_count++;
+	u32 slot_index = id.v[1] % array_count(library->tracks_table);
 	
-	Mplayer_Track *track = mplayer_track_by_id(library, id);
-	
-	memory_zero_struct(track);
-	track->header.id = id;
+	Mplayer_Track *track = 0;
+	for (Mplayer_Track *entry = library->tracks_table[slot_index].first; entry; entry = entry->next_hash)
+	{
+		if (is_equal(entry->hash, id))
+		{
+			track = entry;
+			break;
+		}
+	}
 	
 	return track;
 }
 
 internal Mplayer_Album *
-mplayer_album_by_id(Mplayer_Library *library, Mplayer_Item_ID id)
+mplayer_album_by_id(Mplayer_Library *library, Mplayer_Album_ID id)
 {
-	assert(id < library->albums_count);
-	Mplayer_Album *album = library->albums + id;
-	return album;
-}
-
-internal Mplayer_Album *
-mplayer_make_album(Mplayer_Library *library)
-{
-	assert(library->albums_count < MAX_ALBUMS_COUNT);
-	Mplayer_Item_ID id = library->albums_count++;
+	u32 slot_index = id.v[1] % array_count(library->albums_table);
 	
-	Mplayer_Album *album = mplayer_album_by_id(library, id);
-	memory_zero_struct(album);
-	album->header.id = id;
-	
-	return album;
-}
-
-internal Mplayer_Artist *
-mplayer_artist_by_id(Mplayer_Library *library, Mplayer_Item_ID id)
-{
-	assert(id < library->artists_count);
-	Mplayer_Artist *artist = library->artists + id;
-	return artist;
-}
-
-internal Mplayer_Artist *
-mplayer_make_artist(Mplayer_Library *library)
-{
-	assert(library->artists_count < MAX_ARTISTS_COUNT);
-	Mplayer_Item_ID id = library->artists_count++;
-	
-	Mplayer_Artist *artist = mplayer_artist_by_id(library, id);
-	memory_zero_struct(artist);
-	artist->header.id = id;
-	return artist;
-}
-
-
-internal Mplayer_Album *
-mplayer_find_or_create_album(Mplayer_Context *mplayer, Mplayer_Artist *artist, String8 album_name)
-{
-	u64 hash = str8_hash_case_insensitive(album_name);
-	Mplayer_Album *result = 0;
-	
-	Mplayer_Library *library = &mplayer->library;
-	
-	for (u32 album_index = 0; album_index < library->albums_count; album_index += 1)
+	Mplayer_Album *album = 0;
+	for (Mplayer_Album *entry = library->albums_table[slot_index].first; entry; entry = entry->next_hash)
 	{
-		Mplayer_Album *album = library->albums + album_index;
-		if (album->header.hash == hash && 
-			str8_match(album_name, album->name, MatchFlag_CaseInsensitive) &&
-			album->artist_id == artist->header.id)
+		if (is_equal(entry->hash, id))
 		{
-			result = album;
+			album = entry;
 			break;
 		}
 	}
 	
-	if (!result)
-	{
-		result = mplayer_make_album(library);
-		result->header.image_id = mplayer_reserve_image_id(library);
-		
-		result->name = str8_clone(&library->arena, album_name);
-		result->artist = artist->name;
-		result->header.hash = hash;
-		result->artist_id = artist->header.id;
-		
-		artist->albums.count += 1;
-	}
-	
-	return result;
+	return album;
 }
 
 internal Mplayer_Artist *
-mplayer_find_or_create_artist(Mplayer_Context *mplayer, String8 artist_name)
+mplayer_artist_by_id(Mplayer_Library *library, Mplayer_Artist_ID id)
 {
-	u64 hash = str8_hash_case_insensitive(artist_name);
-	Mplayer_Artist *result = 0;
-	Mplayer_Library *library = &mplayer->library;
+	u32 slot_index = id.v[1] % array_count(library->artists_table);
 	
-	for (u32 artist_index = 0; artist_index < library->artists_count; artist_index += 1)
+	Mplayer_Artist *artist = 0;
+	for (Mplayer_Artist *entry = library->artists_table[slot_index].first; entry; entry = entry->next_hash)
 	{
-		Mplayer_Artist *artist = library->artists + artist_index;
-		if (artist->header.hash == hash && 
-			str8_match(artist_name, artist->name, MatchFlag_CaseInsensitive))
+		if (is_equal(entry->hash, id))
 		{
-			result = artist;
+			artist = entry;
 			break;
 		}
 	}
 	
-	if (!result)
+	return artist;
+}
+
+internal Mplayer_Track_ID
+mplayer_compute_track_id(String8 track_path)
+{
+	Mplayer_Track_ID id = NULL_TRACK_ID;
+	
+	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, track_path.len, track_path.str);
+	memory_copy(&id, &meow_hash, sizeof(meow_hash));
+	
+	return id;
+}
+
+internal Mplayer_Album_ID
+mplayer_compute_album_id(String8 artist_name, String8 album_name)
+{
+	Mplayer_Album_ID id = NULL_ALBUM_ID;
+	
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
+	
+	String8 data = str8_f(scratch.arena, "%.*s%.*s", STR8_EXPAND(artist_name), STR8_EXPAND(album_name));
+	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, data.len, data.str);
+	memory_copy(&id, &meow_hash, sizeof(meow_hash));
+	
+	return id;
+}
+
+internal Mplayer_Artist_ID
+mplayer_compute_artist_id(String8 artist_name)
+{
+	Mplayer_Artist_ID id = NULL_ARTIST_ID;
+	
+	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, artist_name.len, artist_name.str);
+	memory_copy(&id, &meow_hash, sizeof(meow_hash));
+	
+	return id;
+}
+
+internal void
+mplayer_insert_track(Mplayer_Library *library, Mplayer_Track *track)
+{
+	if (is_equal(track->hash, NULL_TRACK_ID))
 	{
-		result = mplayer_make_artist(library);
-		
-		result->name = str8_clone(&library->arena, artist_name);
-		result->header.hash = hash;
+		track->hash = mplayer_compute_track_id(track->path);
 	}
-	return result;
+	Mplayer_Track_ID id = track->hash;
+	
+	// NOTE(fakhri): sanity check that we don't have another track
+	// with the same id
+	{
+		Mplayer_Track *test_track = mplayer_track_by_id(library, id);
+		assert(test_track == 0);
+	}
+	
+	u32 slot_index = id.v[1] % array_count(library->tracks_table);
+	DLLPushBack_NP(library->tracks_table[slot_index].first, library->tracks_table[slot_index].last, 
+		track, 
+		next_hash, prev_hash);
+	
+	library->tracks_table[slot_index].count += 1;
+	
+	assert(library->tracks_count < array_count(library->track_ids));
+	library->track_ids[library->tracks_count++] = id;
+}
+
+internal void
+mplayer_insert_album(Mplayer_Library *library, Mplayer_Album *album)
+{
+	assert(!is_equal(album->hash, NULL_ALBUM_ID));
+	Mplayer_Album_ID id = album->hash;
+	
+	// NOTE(fakhri): sanity check that we don't have another album
+	// with the same id
+	{
+		Mplayer_Album *test_album = mplayer_album_by_id(library, id);
+		assert(test_album == 0);
+	}
+	
+	u32 slot_index = id.v[1] % array_count(library->albums_table);
+	DLLPushBack_NP(library->albums_table[slot_index].first, library->albums_table[slot_index].last,
+		album, 
+		next_hash, prev_hash);
+	
+	library->albums_table[slot_index].count += 1;
+	
+	assert(library->albums_count < array_count(library->album_ids));
+	library->album_ids[library->albums_count++] = id;
+}
+
+internal void
+mplayer_insert_artist(Mplayer_Library *library, Mplayer_Artist *artist)
+{
+	assert(!is_equal(artist->hash, NULL_ARTIST_ID));
+	Mplayer_Artist_ID id = artist->hash;
+	
+	// NOTE(fakhri): sanity check that we don't have another album
+	// with the same id
+	{
+		Mplayer_Artist *test_artist = mplayer_artist_by_id(library, id);
+		assert(test_artist == 0);
+	}
+	
+	u32 slot_index = id.v[1] % array_count(library->artists_table);
+	DLLPushBack_NP(library->artists_table[slot_index].first, library->artists_table[slot_index].last,
+		artist, 
+		next_hash, prev_hash);
+	
+	library->artists_table[slot_index].count += 1;
+	
+	assert(library->artists_count < array_count(library->artist_ids));
+	library->artist_ids[library->artists_count++] = id;
 }
 
 
@@ -302,82 +388,82 @@ mplayer_get_image_by_id(Mplayer_Context *mplayer, Mplayer_Image_ID image_id, b32
 //~ NOTE(fakhri): track control stuff
 
 internal void
-mplayer_music_reset(Mplayer_Track *music_track)
+mplayer_track_reset(Mplayer_Track *track)
 {
-	if (music_track && music_track->flac_stream)
+	if (track && track->flac_stream)
 	{
-		flac_seek_stream(music_track->flac_stream, 0);
+		flac_seek_stream(track->flac_stream, 0);
 	}
 }
 
 internal void
-mplayer_load_music_track(Mplayer_Context *mplayer, Mplayer_Track *music_track)
+mplayer_load_track(Mplayer_Context *mplayer, Mplayer_Track *track)
 {
-	if (!music_track) return;
+	if (!track) return;
 	
-	if (!music_track->file_loaded)
+	if (!track->file_loaded)
 	{
-		music_track->flac_file_buffer = mplayer->os.load_entire_file(music_track->path, &mplayer->library.track_transient_arena);
-		music_track->file_loaded = true;
+		track->flac_file_buffer = mplayer->os.load_entire_file(track->path, &mplayer->library.track_transient_arena);
+		track->file_loaded = true;
 	}
 	
-	if (!music_track->flac_stream)
+	if (!track->flac_stream)
 	{
-		music_track->flac_stream = m_arena_push_struct_z(&mplayer->library.track_transient_arena, Flac_Stream);
-		init_flac_stream(music_track->flac_stream, &mplayer->library.track_transient_arena, music_track->flac_file_buffer);
-		if (!music_track->flac_stream->seek_table)
+		track->flac_stream = m_arena_push_struct_z(&mplayer->library.track_transient_arena, Flac_Stream);
+		init_flac_stream(track->flac_stream, &mplayer->library.track_transient_arena, track->flac_file_buffer);
+		if (!track->flac_stream->seek_table)
 		{
-			flac_build_seek_table(music_track->flac_stream, &mplayer->library.track_transient_arena, &music_track->build_seektable_work_data);
+			flac_build_seek_table(track->flac_stream, &mplayer->library.track_transient_arena, &track->build_seektable_work_data);
 		}
 		
-		if (!is_valid(music_track->header.image_id))
+		if (!is_valid(track->image_id))
 		{
-			Flac_Picture *front_cover = music_track->flac_stream->front_cover;
+			Flac_Picture *front_cover = track->flac_stream->front_cover;
 			if (front_cover)
 			{
-				music_track->header.image_id = mplayer_reserve_image_id(&mplayer->library);
-				Mplayer_Item_Image *cover_image = mplayer_get_image_by_id(mplayer, music_track->header.image_id, 0);
+				track->image_id = mplayer_reserve_image_id(&mplayer->library);
+				Mplayer_Item_Image *cover_image = mplayer_get_image_by_id(mplayer, track->image_id, 0);
 				
 				cover_image->in_disk = false;
 				cover_image->texture_data = clone_buffer(&mplayer->library.arena, front_cover->buffer);
 			}
 			else
 			{
-				Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, music_track->album_id);
+				Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, track->album_id);
 				if (album)
 				{
-					music_track->header.image_id = album->header.image_id;
+					track->image_id = album->image_id;
 				}
 			}
 		}
 	}
 	
-	mplayer_music_reset(music_track);
+	mplayer_track_reset(track);
 }
 
 internal void
-mplayer_unload_music_track(Mplayer_Context *mplayer, Mplayer_Track *music)
+mplayer_unload_track(Mplayer_Context *mplayer, Mplayer_Track *track)
 {
-	if (!music) return;
+	if (!track) return;
 	
-	music->build_seektable_work_data.cancel_req = 1;
-	for (;music->build_seektable_work_data.running;)
+	track->build_seektable_work_data.cancel_req = 1;
+	for (;track->build_seektable_work_data.running;)
 	{
 		// NOTE(fakhri): help worker threads instead of just waiting
 		platform->do_next_work();
 	}
-	uninit_flac_stream(music->flac_stream);
+	uninit_flac_stream(track->flac_stream);
 	m_arena_free_all(&mplayer->library.track_transient_arena);
-	music->file_loaded = false;
-	music->flac_stream = 0;
-	music->flac_file_buffer = ZERO_STRUCT;
+	track->file_loaded = false;
+	track->flac_stream = 0;
+	track->flac_file_buffer = ZERO_STRUCT;
 }
 
 internal b32
-is_music_track_still_playing(Mplayer_Track *music_track)
+is_track_still_playing(Mplayer_Track *track)
 {
-	b32 result = (music_track->flac_stream && 
-		!bitstream_is_empty(&music_track->flac_stream->bitstream));
+	b32 result = (track->flac_stream && 
+		!bitstream_is_empty(&track->flac_stream->bitstream));
 	
 	return result;
 }
@@ -482,7 +568,7 @@ internal b32
 is_valid(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 {
 	b32 result = (index && (index < mplayer->queue.count) && 
-		mplayer->queue.tracks[index] && (mplayer->queue.tracks[index] < mplayer->library.tracks_count));
+		is_valid(mplayer->queue.tracks[index]));
 	return result;
 }
 
@@ -494,7 +580,7 @@ mplayer_queue_shuffle(Mplayer_Context *mplayer)
 	for (Mplayer_Queue_Index i = 1; i < queue->count; i += 1)
 	{
 		u16 swap_index = (u16)rng_next_minmax(&mplayer->entropy, i, queue->count);
-		SWAP(Mplayer_Item_ID, queue->tracks[i], queue->tracks[swap_index]);
+		SWAP(Mplayer_Track_ID, queue->tracks[i], queue->tracks[swap_index]);
 		
 		// TODO(fakhri): can we afford to just do another loop to look for
 		// the new index of the current track playing track?
@@ -544,7 +630,7 @@ mplayer_set_current(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 	
 	if (is_valid(mplayer, queue->current_index))
 	{
-		mplayer_unload_music_track(mplayer, 
+		mplayer_unload_track(mplayer, 
 			mplayer_queue_get_current_track(mplayer));
 	}
 	
@@ -552,7 +638,7 @@ mplayer_set_current(Mplayer_Context *mplayer, Mplayer_Queue_Index index)
 	
 	if (is_valid(mplayer, queue->current_index))
 	{
-		mplayer_load_music_track(mplayer, 
+		mplayer_load_track(mplayer, 
 			mplayer_queue_get_current_track(mplayer));
 	}
 }
@@ -569,7 +655,7 @@ mplayer_clear_queue(Mplayer_Context *mplayer)
 	Mplayer_Queue *queue = &mplayer->queue;
 	
 	mplayer_set_current(mplayer, NULL_QUEUE_INDEX);
-	queue->tracks[0] = 0;
+	queue->tracks[0] = NULL_TRACK_ID;
 	queue->playing = 0;
 	queue->count = 1;
 }
@@ -608,7 +694,7 @@ mplayer_update_queue(Mplayer_Context *mplayer)
 	if (queue->playing)
 	{
 		Mplayer_Track *current_track = mplayer_queue_get_current_track(mplayer);
-		if (current_track && !is_music_track_still_playing(current_track))
+		if (current_track && !is_track_still_playing(current_track))
 		{
 			mplayer_play_next_in_queue(mplayer);
 		}
@@ -648,7 +734,7 @@ mplayer_is_queue_playing(Mplayer_Context *mplayer)
 }
 
 internal void
-mplayer_queue_insert_at(Mplayer_Context *mplayer, Mplayer_Queue_Index index, Mplayer_Item_ID track_id)
+mplayer_queue_insert_at(Mplayer_Context *mplayer, Mplayer_Queue_Index index, Mplayer_Track_ID track_id)
 {
 	Mplayer_Queue *queue = &mplayer->queue;
 	
@@ -672,16 +758,16 @@ mplayer_queue_insert_at(Mplayer_Context *mplayer, Mplayer_Queue_Index index, Mpl
 }
 
 internal void
-mplayer_queue_next(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+mplayer_queue_next(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 {
-	if (!track_id) return;
+	if (!is_valid(track_id)) return;
 	mplayer_queue_insert_at(mplayer, mplayer->queue.current_index + 1, track_id);
 }
 
 internal void
-mplayer_queue_last(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+mplayer_queue_last(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 {
-	if (!track_id) return;
+	if (!is_valid(track_id)) return;
 	mplayer_queue_insert_at(mplayer, mplayer->queue.count, track_id);
 }
 
@@ -697,23 +783,22 @@ mplayer_empty_queue_after_current(Mplayer_Context *mplayer)
 }
 
 internal void
-mplayer_queue_play_track(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+mplayer_queue_play_track(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 {
 	mplayer_queue_next(mplayer, track_id);
 	mplayer_play_next_in_queue(mplayer);
 }
 
-internal Mplayer_Item_ID
+internal Mplayer_Track_ID
 mplayer_queue_current_track_id(Mplayer_Context *mplayer)
 {
-	Mplayer_Item_ID result = 0;
+	Mplayer_Track_ID result = NULL_TRACK_ID;
 	if (is_valid(mplayer, mplayer->queue.current_index))
 	{
 		result = mplayer->queue.tracks[mplayer->queue.current_index];
 	}
 	return result;
 }
-
 
 //~ NOTE(fakhri): Library Indexing, Serializing and other stuff
 internal void
@@ -729,7 +814,7 @@ mplayer_reset_library(Mplayer_Context *mplayer)
 	// NOTE(fakhri): reserve null ids
 	library->artists_count = 1;
 	library->albums_count = 1;
-	library->tracks_count = 1;
+	library->tracks_count = 0;
 	for (u32 i = 1; i < library->images_count; i += 1)
 	{
 		Mplayer_Item_Image *image = library->images + i;
@@ -748,6 +833,22 @@ enum Mplayer_Library_Index_Version : u32
 	INDEX_VERSION_NULL,
 	INDEX_VERSION_1,
 };
+
+internal void
+mplayer_serialize(File_Handle *file, Mplayer_Track_ID id)
+{
+	platform->write_block(file, &id, sizeof(id));
+}
+internal void
+mplayer_serialize(File_Handle *file, Mplayer_Artist_ID id)
+{
+	platform->write_block(file, &id, sizeof(id));
+}
+internal void
+mplayer_serialize(File_Handle *file, Mplayer_Album_ID id)
+{
+	platform->write_block(file, &id, sizeof(id));
+}
 
 internal void
 mplayer_serialize(File_Handle *file, u32 num)
@@ -782,13 +883,6 @@ mplayer_serialize(File_Handle *file, Buffer buffer)
 }
 
 internal void
-mplayer_serialize(File_Handle *file, Mplayer_Items_Array items_array)
-{
-	mplayer_serialize(file, items_array.count);
-	platform->write_block(file, items_array.items, items_array.count * sizeof(Mplayer_Item_ID));
-}
-
-internal void
 mplayer_serialize(File_Handle *file, Mplayer_Item_Image image)
 {
 	mplayer_serialize(file, image.in_disk);
@@ -803,9 +897,43 @@ mplayer_serialize(File_Handle *file, Mplayer_Item_Image image)
 }
 
 internal void
+mplayer_serialize_track(File_Handle *file, Mplayer_Track *track)
+{
+	mplayer_serialize(file, track->hash);
+	mplayer_serialize(file, track->path);
+	mplayer_serialize(file, track->title);
+	mplayer_serialize(file, track->album);
+	mplayer_serialize(file, track->artist);
+	mplayer_serialize(file, track->genre);
+	mplayer_serialize(file, track->date);
+	mplayer_serialize(file, track->track_number);
+	
+	mplayer_serialize(file, track->artist_id);
+	mplayer_serialize(file, track->album_id);
+}
+
+internal void
+mplayer_deserialize_track(Byte_Stream *bs, Mplayer_Track *track)
+{
+	byte_stream_read(bs, &track->hash);
+	byte_stream_read(bs, &track->path);
+	byte_stream_read(bs, &track->title);
+	byte_stream_read(bs, &track->album);
+	byte_stream_read(bs, &track->artist);
+	byte_stream_read(bs, &track->genre);
+	byte_stream_read(bs, &track->date);
+	byte_stream_read(bs, &track->track_number);
+	
+	byte_stream_read(bs, &track->artist_id);
+	byte_stream_read(bs, &track->album_id);
+	
+}
+
+internal void
 mplayer_save_indexed_library(Mplayer_Context *mplayer)
 {
-	String8 index_path = MPLAYER_INDEX_FILENAME;
+	#if 0
+		String8 index_path = MPLAYER_INDEX_FILENAME;
 	File_Handle *index_file = platform->open_file(index_path, File_Open_Write | File_Create_Always);
 	
 	if (index_file)
@@ -822,7 +950,6 @@ mplayer_save_indexed_library(Mplayer_Context *mplayer)
 			
 			mplayer_serialize(index_file, artist->name);
 			
-			mplayer_serialize(index_file, artist->tracks);
 			mplayer_serialize(index_file, artist->albums);
 		}
 		
@@ -833,31 +960,25 @@ mplayer_save_indexed_library(Mplayer_Context *mplayer)
 			mplayer_serialize(index_file, album->name);
 			mplayer_serialize(index_file, album->artist);
 			mplayer_serialize(index_file, album->artist_id);
-			mplayer_serialize(index_file, album->tracks);
 			
-			Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 0);
+			Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
 			mplayer_serialize(index_file, *image);
 		}
 		
-		for (u32 track_id = 1; track_id < mplayer->library.tracks_count; track_id += 1)
+		for (u32 track_index = 1; track_index < mplayer->library.tracks_count; track_index += 1)
 		{
-			Mplayer_Track *track = mplayer->library.tracks + track_id;
-			
-			mplayer_serialize(index_file, track->path);
-			mplayer_serialize(index_file, track->title);
-			mplayer_serialize(index_file, track->album);
-			mplayer_serialize(index_file, track->artist);
-			mplayer_serialize(index_file, track->genre);
-			mplayer_serialize(index_file, track->date);
-			mplayer_serialize(index_file, track->track_number);
-			
-			mplayer_serialize(index_file, track->artist_id);
-			mplayer_serialize(index_file, track->album_id);
+			Mplayer_Track_ID track_id = mplayer->library.track_ids[track_index];
+			Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
+			if (track)
+			{
+				mplayer_serialize_track(index_file, track);
+			}
 		}
 		
 		
 		platform->close_file(index_file);
 	}
+	#endif
 }
 
 internal b32
@@ -873,7 +994,8 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 	{
 		success = 1;
 		
-		Byte_Stream bs = make_byte_stream(lib_index);
+		#if 0		
+			Byte_Stream bs = make_byte_stream(lib_index);
 		u32 index_version;
 		byte_stream_read(&bs, &index_version);
 		assert(INDEX_VERSION_1 == index_version);
@@ -902,14 +1024,14 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 				for (u32 album_id = 1; album_id < albums_count; album_id += 1)
 				{
 					Mplayer_Album *album = mplayer_make_album(&mplayer->library);
-					album->header.image_id = mplayer_reserve_image_id(&mplayer->library);
+					album->image_id = mplayer_reserve_image_id(&mplayer->library);
 					
 					byte_stream_read(&bs, &album->name);
 					byte_stream_read(&bs, &album->artist);
 					byte_stream_read(&bs, &album->artist_id);
 					byte_stream_read(&bs, &album->tracks);
 					
-					Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 0);
+					Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
 					byte_stream_read(&bs, image);
 					if (image->in_disk)
 					{
@@ -923,22 +1045,14 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 				
 				for (u32 track_id = 1; track_id < tracks_count; track_id += 1)
 				{
-					Mplayer_Track *track = mplayer_make_track(&mplayer->library);
-					
-					byte_stream_read(&bs, &track->path);
-					byte_stream_read(&bs, &track->title);
-					byte_stream_read(&bs, &track->album);
-					byte_stream_read(&bs, &track->artist);
-					byte_stream_read(&bs, &track->genre);
-					byte_stream_read(&bs, &track->date);
-					byte_stream_read(&bs, &track->track_number);
-					
-					byte_stream_read(&bs, &track->artist_id);
-					byte_stream_read(&bs, &track->album_id);
+					Mplayer_Track *track = m_arena_push_struct_z(&mplayer->library.arena, Mplayer_Track);
+					mplayer_deserialize_track(&bs, track);
+					mplayer_insert_track(&mplayer->library, track);
 				}
 				
 			} break;
 		}
+		#endif
 	}
 	
 	return success;
@@ -996,101 +1110,145 @@ mplayer_load_tracks_in_directory(Mplayer_Context *mplayer, String8 library_path)
 				assert(file);
 				if (file)
 				{
-					// TODO(fakhri): make sure the track is not already indexed
-					Mplayer_Track *music_track = mplayer_make_track(&mplayer->library);
-					music_track->path = str8_clone(&mplayer->library.arena, info.path);
-					
-					Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
-					platform->close_file(file);
-					// NOTE(fakhri): init flac stream
+					Mplayer_Library *library = &mplayer->library;
+					Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path);
+					Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
+					if (!track)
 					{
-						tmp_flac_stream.bitstream.buffer = buffer;
-						tmp_flac_stream.bitstream.pos.byte_index = 0;
-						tmp_flac_stream.bitstream.pos.bits_left  = 8;
-					}
-					flac_process_metadata(&tmp_flac_stream, scratch.arena);
-					
-					Flac_Picture *front_cover = tmp_flac_stream.front_cover;
-					
-					music_track->album        = str8_lit("***Unkown Album***");
-					music_track->artist       = str8_lit("***Unkown Artist***");
-					music_track->date         = str8_lit("***Unkown Date***");
-					music_track->genre        = str8_lit("***Unkown Gener***");
-					music_track->track_number = str8_lit("-");
-					
-					for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
-						node;
-						node = node->next)
-					{
-						String8 value = ZERO_STRUCT;
-						String8 key = ZERO_STRUCT;
-						for (u32 i = 0; i < node->str.len; i += 1)
+						track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
+						track->path = str8_clone(&library->arena, info.path);
+						
+						Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
+						platform->close_file(file);
+						// NOTE(fakhri): init flac stream
 						{
-							if (node->str.str[i] == '=')
+							tmp_flac_stream.bitstream.buffer = buffer;
+							tmp_flac_stream.bitstream.pos.byte_index = 0;
+							tmp_flac_stream.bitstream.pos.bits_left  = 8;
+						}
+						flac_process_metadata(&tmp_flac_stream, scratch.arena);
+						
+						Flac_Picture *front_cover = tmp_flac_stream.front_cover;
+						
+						// TODO(fakhri): should we have these values be defaulted to empty strings instead?
+						track->album        = str8_lit("***Unkown Album***");
+						track->artist       = str8_lit("***Unkown Artist***");
+						track->date         = str8_lit("***Unkown Date***");
+						track->genre        = str8_lit("***Unkown Gener***");
+						track->track_number = str8_lit("-");
+						
+						for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
+							node;
+							node = node->next)
+						{
+							String8 value = ZERO_STRUCT;
+							String8 key = ZERO_STRUCT;
+							for (u32 i = 0; i < node->str.len; i += 1)
 							{
-								key   = prefix8(node->str, i);
-								value = suffix8(node->str, node->str.len - i - 1);
-								break;
+								if (node->str.str[i] == '=')
+								{
+									key   = prefix8(node->str, i);
+									value = suffix8(node->str, node->str.len - i - 1);
+									break;
+								}
+							}
+							
+							if (false) {}
+							else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+							{
+								track->title = str8_clone(&library->arena, value);
+							}
+							else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
+							{
+								track->album = str8_clone(&library->arena, value);
+							}
+							else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
+							{
+								track->artist = str8_clone(&library->arena, value);
+							}
+							else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
+							{
+								track->genre = str8_clone(&library->arena, value);
+							}
+							else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
+							{
+								track->date = str8_clone(&library->arena, value);
+							}
+							else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
+							{
+								track->track_number = str8_clone(&library->arena, value);
 							}
 						}
 						
-						if (false) {}
-						else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+						if (!track->title.len)
 						{
-							music_track->title = str8_clone(&mplayer->library.arena, value);
+							track->title = str8_clone(&library->arena, info.name);
 						}
-						else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
+						
+						// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
+						
+						Mplayer_Artist *artist = 0;
+						// NOTE(fakhri): setup artist
 						{
-							music_track->album = str8_clone(&mplayer->library.arena, value);
+							Mplayer_Artist_ID artist_hash = mplayer_compute_artist_id(track->artist);
+							artist = mplayer_artist_by_id(library, artist_hash);
+							if (!artist)
+							{
+								artist = m_arena_push_struct_z(&library->arena, Mplayer_Artist);
+								artist->hash   = artist_hash;
+								artist->name   = track->artist;
+								
+								mplayer_insert_artist(library, artist);
+							}
 						}
-						else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
+						DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next_artist, prev_artist);
+						artist->tracks.count += 1;
+						track->artist_id = artist->hash;
+						
+						// NOTE(fakhri): setup album
 						{
-							music_track->artist = str8_clone(&mplayer->library.arena, value);
+							Mplayer_Album_ID album_hash = mplayer_compute_album_id(track->artist, track->album);
+							Mplayer_Album *album = mplayer_album_by_id(library, album_hash);
+							if (!album)
+							{
+								album = m_arena_push_struct_z(&library->arena, Mplayer_Album);
+								album->hash   = album_hash;
+								album->name   = track->album;
+								album->artist = track->artist;
+								album->image_id = mplayer_reserve_image_id(library);
+								
+								DLLPushBack_NP(artist->albums.first, artist->albums.last, album, next_artist, prev_artist);
+								artist->albums.count += 1;
+								album->artist_id = artist->hash;
+								
+								mplayer_insert_album(library, album);
+							}
+							
+							DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next_album, prev_album);
+							album->tracks.count += 1;
+							track->album_id = album->hash;
+							
+							// TODO(fakhri): do this only after all the tracks have loaded!!
+							// if no image is on disk there is absolutely no reason search for it
+							// again each time we find a new track belonging to this album!
+							Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
+							if (!image->in_disk && !image->texture_data.size)
+							{
+								String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(mplayer, &library->arena, dir);
+								if (cover_file_path.len)
+								{
+									image->in_disk = true;
+									image->path = cover_file_path;
+								}
+								else if (front_cover)
+								{
+									image->in_disk = false;
+									image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+								}
+							}
 						}
-						else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
-						{
-							music_track->genre = str8_clone(&mplayer->library.arena, value);
-						}
-						else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
-						{
-							music_track->date = str8_clone(&mplayer->library.arena, value);
-						}
-						else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
-						{
-							music_track->track_number = str8_clone(&mplayer->library.arena, value);
-						}
-					}
-					
-					if (!music_track->title.len)
-					{
-						music_track->title = str8_clone(&mplayer->library.arena, info.name);
-					}
-					
-					// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
-					
-					Mplayer_Artist *artist = mplayer_find_or_create_artist(mplayer, music_track->artist);
-					artist->tracks.count += 1;
-					music_track->artist_id = artist->header.id;
-					
-					Mplayer_Album *album = mplayer_find_or_create_album(mplayer, artist, music_track->album);
-					album->tracks.count += 1;
-					music_track->album_id = album->header.id;
-					
-					Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 0);
-					
-					if (!image->in_disk && !image->texture_data.size)
-					{
-						String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(mplayer, &mplayer->library.arena, dir);
-						if (cover_file_path.len)
-						{
-							image->in_disk = true;
-							image->path = cover_file_path;
-						}
-						else if (front_cover)
-						{
-							image->in_disk = false;
-							image->texture_data = clone_buffer(&mplayer->library.arena, front_cover->buffer);
-						}
+						
+						mplayer_insert_track(library, track);
 					}
 				}
 			}
@@ -1109,38 +1267,6 @@ mplayer_index_library(Mplayer_Context *mplayer)
 	{
 		Mplayer_Library_Location *location = mplayer->settings.locations + i;
 		mplayer_load_tracks_in_directory(mplayer, str8(location->path, location->path_len));
-	}
-	
-	for (u32 artist_id = 1; artist_id < library->artists_count; artist_id += 1)
-	{
-		Mplayer_Artist *artist = mplayer_artist_by_id(library, artist_id);
-		
-		artist->tracks.items = m_arena_push_array(&library->arena, Mplayer_Item_ID, artist->tracks.count);
-		artist->tracks.count = 0;
-		
-		artist->albums.items = m_arena_push_array(&library->arena, Mplayer_Item_ID, artist->albums.count);
-		artist->albums.count = 0;
-	}
-	
-	for (u32 album_id = 1; album_id < library->albums_count; album_id += 1)
-	{
-		Mplayer_Album *album = mplayer_album_by_id(library, album_id);
-		album->tracks.items = m_arena_push_array(&library->arena, Mplayer_Item_ID, album->tracks.count);
-		album->tracks.count = 0;
-		
-		Mplayer_Artist *artist = mplayer_artist_by_id(library, album->artist_id);
-		artist->albums.items[artist->albums.count++] = album_id;
-	}
-	
-	for (u32 track_id = 1; track_id < library->tracks_count; track_id += 1)
-	{
-		Mplayer_Track *track = mplayer_track_by_id(library, track_id);
-		
-		Mplayer_Artist *artist = mplayer_artist_by_id(library, track->artist_id);
-		artist->tracks.items[artist->tracks.count++] = track_id;
-		
-		Mplayer_Album *album = mplayer_album_by_id(library, track->album_id);
-		album->tracks.items[album->tracks.count++] = track_id;
 	}
 	
 	mplayer_save_indexed_library(mplayer);
@@ -1166,21 +1292,17 @@ mplayer_change_previous_mode(Mplayer_Context *mplayer)
 		
 		switch(mplayer->mode_stack->mode)
 		{
-			case MODE_Music_Library: break;
+			case MODE_Track_Library: break;
 			case MODE_Artist_Library: break;
 			case MODE_Album_Library: break;
 			
 			case MODE_Artist_Albums:
 			{
-				assert(mplayer->mode_stack->item_id);
-				
-				mplayer->selected_artist_id = mplayer->mode_stack->item_id;
+				mplayer->selected_artist_id = mplayer->mode_stack->id.artist_id;
 			} break;
 			case MODE_Album_Tracks:
 			{
-				assert(mplayer->mode_stack->item_id);
-				
-				mplayer->selected_album_id = mplayer->mode_stack->item_id;
+				mplayer->selected_album_id = mplayer->mode_stack->id.album_id;
 			} break;
 			
 			case MODE_Lyrics:  fallthrough;
@@ -1200,21 +1322,17 @@ mplayer_change_next_mode(Mplayer_Context *mplayer)
 		
 		switch(mplayer->mode_stack->mode)
 		{
-			case MODE_Music_Library: break;
+			case MODE_Track_Library: break;
 			case MODE_Artist_Library: break;
 			case MODE_Album_Library: break;
 			
 			case MODE_Artist_Albums:
 			{
-				assert(mplayer->mode_stack->item_id);
-				
-				mplayer->selected_artist_id = mplayer->mode_stack->item_id;
+				mplayer->selected_artist_id = mplayer->mode_stack->id.artist_id;
 			} break;
 			case MODE_Album_Tracks:
 			{
-				assert(mplayer->mode_stack->item_id);
-				
-				mplayer->selected_album_id = mplayer->mode_stack->item_id;
+				mplayer->selected_album_id = mplayer->mode_stack->id.album_id;
 			} break;
 			
 			case MODE_Lyrics:  fallthrough;
@@ -1226,7 +1344,7 @@ mplayer_change_next_mode(Mplayer_Context *mplayer)
 }
 
 internal void
-mplayer_change_mode(Mplayer_Context *mplayer, Mplayer_Mode new_mode, Mplayer_Item_ID item_id)
+mplayer_change_mode(Mplayer_Context *mplayer, Mplayer_Mode mode, Mplayer_Item_ID id = ZERO_STRUCT)
 {
 	if (mplayer->mode_stack && mplayer->mode_stack->next)
 	{
@@ -1246,10 +1364,10 @@ mplayer_change_mode(Mplayer_Context *mplayer, Mplayer_Mode new_mode, Mplayer_Ite
 		new_mode_node = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Mode_Stack);
 	}
 	
-	new_mode_node->mode = new_mode;
-	new_mode_node->item_id = item_id;
-	
 	new_mode_node->prev = mplayer->mode_stack;
+	new_mode_node->mode = mode;
+	new_mode_node->id = id;
+	
 	if (mplayer->mode_stack)
 	{
 		mplayer->mode_stack->next = new_mode_node;
@@ -1437,13 +1555,13 @@ mplayer_ui_underlined_button_f(const char *fmt, ...)
 }
 
 internal void
-mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
+mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 {
 	Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
 	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 	
 	V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
-	if (track_id == mplayer_queue_current_track_id(mplayer))
+	if (is_equal(track_id, mplayer_queue_current_track_id(mplayer)))
 	{
 		bg_color = vec4(0, 0, 0, 1);
 	}
@@ -1472,11 +1590,11 @@ mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Item_ID track_id)
 
 
 internal void
-mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
+mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Album_ID album_id)
 {
 	Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
 	
-	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 1);
+	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 1);
 	
 	UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip;
 	b32 image_ready = mplayer_item_image_ready(*image);
@@ -1500,7 +1618,7 @@ mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
 	if (interaction.clicked)
 	{
 		mplayer->selected_album_id = album_id;
-		mplayer_change_mode(mplayer, MODE_Album_Tracks, album_id);
+		mplayer_change_mode(mplayer, MODE_Album_Tracks, to_item_id(album_id));
 	}
 	
 	if (interaction.hover && image_ready)
@@ -1520,10 +1638,10 @@ mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Item_ID album_id)
 }
 
 internal void
-mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
+mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Artist_ID artist_id)
 {
 	Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, artist_id);
-	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, artist->header.image_id, 1);
+	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, artist->image_id, 1);
 	
 	UI_Element_Flags flags = 0;
 	b32 image_ready = mplayer_item_image_ready(*image);
@@ -1550,7 +1668,7 @@ mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Item_ID artist_id)
 	if (interaction.clicked)
 	{
 		mplayer->selected_artist_id = artist_id;
-		mplayer_change_mode(mplayer, MODE_Artist_Albums, artist_id);
+		mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(artist_id));
 	}
 	if (interaction.hover && image_ready)
 	{
@@ -1575,7 +1693,7 @@ mplayer_ui_side_bar_button(Mplayer_Context *mplayer, String8 string, Mplayer_Mod
 	Mplayer_UI_Interaction interaction = ui_button(string);
 	if (mplayer->mode_stack->mode != target_mode && interaction.clicked)
 	{
-		mplayer_change_mode(mplayer, target_mode, 0);
+		mplayer_change_mode(mplayer, target_mode);
 	}
 	
 	if (mplayer->mode_stack->mode == target_mode) ui_parent(interaction.element) 
@@ -1601,10 +1719,10 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 {
 	mplayer_update_queue(mplayer);
 	
-	Mplayer_Track *music = mplayer_queue_get_current_track(mplayer);
-	if (music && mplayer_is_queue_playing(mplayer))
+	Mplayer_Track *track = mplayer_queue_get_current_track(mplayer);
+	if (track && mplayer_is_queue_playing(mplayer))
 	{
-		Flac_Stream *flac_stream = music->flac_stream;
+		Flac_Stream *flac_stream = track->flac_stream;
 		f32 volume = mplayer->volume;
 		if (flac_stream)
 		{
@@ -1643,7 +1761,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	mplayer_init_queue(mplayer);
 	mplayer_load_settings(mplayer);
 	mplayer_load_library(mplayer);
-	mplayer_change_mode(mplayer, MODE_Music_Library, 0);
+	mplayer_change_mode(mplayer, MODE_Track_Library);
 }
 
 exported  void
@@ -1810,7 +1928,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					ui_pref_width(ui_size_percent(1, 1)) ui_pref_height(ui_size_pixel(30, 1)) ui_pref_roundness(15)
 				{
 					ui_spacer_pixels(20, 1);
-					mplayer_ui_side_bar_button(mplayer, str8_lit("Songs"), MODE_Music_Library);
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Tracks"), MODE_Track_Library);
 					
 					ui_spacer_pixels(2, 1);
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Artists"), MODE_Artist_Library);
@@ -1862,7 +1980,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							u32 selected_artist_id = 0;
 							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer->library.artists_count - 1, vec2(250.0f, 220.0f), 10, artist_index)
 							{
-								Mplayer_Item_ID artist_id = 1 + artist_index;
+								Mplayer_Artist_ID artist_id = mplayer->library.artist_ids[artist_index + 1];
 								mplayer_ui_aritst_item(mplayer, artist_id);
 							}
 						}
@@ -1890,14 +2008,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
 							{
-								Mplayer_Item_ID album_id = 1 + album_index;
+								Mplayer_Album_ID album_id = mplayer->library.album_ids[album_index + 1];
 								mplayer_ui_album_item(mplayer, album_id);
 							}
 						}
 						
 					} break;
 					
-					case MODE_Music_Library:
+					case MODE_Track_Library:
 					{
 						// NOTE(fakhri): header
 						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
@@ -1915,7 +2033,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_sizes(50);
-								ui_label(str8_lit("Songs"));
+								ui_label(str8_lit("Tracks"));
 								
 								ui_spacer_pixels(5, 1);
 								
@@ -1928,9 +2046,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_spacer_pixels(20, 1);
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
 									{
-										for (u32 track_id = 1; track_id < mplayer->library.tracks_count; track_id += 1)
+										for (u32 track_index = 1; track_index < mplayer->library.tracks_count; track_index += 1)
 										{
-											mplayer_queue_last(mplayer, track_id);
+											mplayer_queue_last(mplayer, mplayer->library.track_ids[track_index]);
 										}
 										mplayer_queue_resume(mplayer);
 									}
@@ -1944,7 +2062,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						{
 							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer->library.tracks_count - 1, 50.0f, 1.0f, track_index)
 							{
-								Mplayer_Item_ID track_id = 1 + track_index;
+								Mplayer_Track_ID track_id = mplayer->library.track_ids[track_index + 1];
 								mplayer_ui_track_item(mplayer, track_id);
 							}
 						}
@@ -1980,10 +2098,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_spacer_pixels(10, 1);
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
 									{
-										for (u32 track_index = 0; track_index < artist->tracks.count; track_index += 1)
+										for (Mplayer_Track *track = artist->tracks.first; 
+											track; 
+											track = track->next_artist)
 										{
-											Mplayer_Item_ID track_id = artist->tracks.items[track_index];
-											mplayer_queue_last(mplayer, track_id);
+											mplayer_queue_last(mplayer, track->hash);
 										}
 										mplayer_queue_resume(mplayer);
 									}
@@ -1996,10 +2115,19 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_for_each_grid_item(str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10, album_index)
+							u32 item_index = ui_grid_begin(str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10);
+							defer(ui_grid_end())
 							{
-								Mplayer_Item_ID album_id = artist->albums.items[album_index];
-								mplayer_ui_album_item(mplayer, album_id);
+								Mplayer_Album *first_album = 0;
+								{
+									u32 count; for(count = 0, first_album = artist->albums.first; 
+										count < item_index && first_album; 
+										count += 1, first_album = first_album->next_artist);
+								}
+								for(Mplayer_Album *album = first_album; ui_grid_item_begin(); (album = album->next_artist, ui_grid_item_end()))
+								{
+									mplayer_ui_album_item(mplayer, album->hash);
+								}
 							}
 						}
 						
@@ -2008,7 +2136,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Album_Tracks:
 					{
 						Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, mplayer->selected_album_id);
-						Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->header.image_id, 1);
+						Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 1);
 						
 						// NOTE(fakhri): header
 						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
@@ -2078,9 +2206,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											
 											if (interaction.clicked)
 											{
-												assert(album->artist_id);
 												mplayer->selected_artist_id = album->artist_id;
-												mplayer_change_mode(mplayer, MODE_Artist_Albums, album->artist_id);
+												mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(album->artist_id));
 											}
 										}
 										
@@ -2100,9 +2227,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											
 											if (interaction.clicked)
 											{
-												for (u32 track_index = 0; track_index < album->tracks.count; track_index += 1)
+												for (Mplayer_Track *track = album->tracks.first; 
+													track; 
+													track = track->next_album)
 												{
-													mplayer_queue_last(mplayer, album->tracks.items[track_index]);
+													mplayer_queue_last(mplayer, track->hash);
 												}
 												mplayer_queue_resume(mplayer);
 											}
@@ -2118,10 +2247,20 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_horizontal_layout()
 						{
 							ui_spacer_pixels(50, 0);
-							ui_for_each_list_item(str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f, track_index) ui_pref_roundness(5)
+							
+							u32 item_index = ui_list_begin(str8_lit("album-tracks-list"), album->tracks.count, 50.0f, 1.0f);
+							defer(ui_list_end())
 							{
-								Mplayer_Item_ID track_id = album->tracks.items[track_index];
-								mplayer_ui_track_item(mplayer, track_id);
+								Mplayer_Track *first_track = 0;
+								{
+									u32 count; for(count = 0, first_track = album->tracks.first; 
+										count < item_index && first_track; 
+										count += 1, first_track = first_track->next_album);
+								}
+								for(Mplayer_Track *track = first_track; ui_list_item_begin(); (track = track->next_album, ui_list_item_end()))
+								{
+									mplayer_ui_track_item(mplayer, track->hash);
+								}
 							}
 							
 							ui_spacer_pixels(50, 0);
@@ -2186,7 +2325,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_next_background_color(vec4(0.2f,0.2f,0.2f,1));
 									ui_next_height(ui_size_pixel(60, 1));
 									ui_next_roundness(5);
-									UI_Element *add_location_el = ui_element(str8_lit("setting-music-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
+									UI_Element *add_location_el = ui_element(str8_lit("setting-track-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
 									ui_parent(add_location_el) ui_padding(ui_size_parent_remaining()) ui_pref_height(ui_size_by_childs(1))
 										ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
 									{
@@ -2206,7 +2345,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
-										ui_label(str8_lit("Music Library Locations"));
+										ui_label(str8_lit("Track Library Locations"));
 										
 										ui_spacer(ui_size_parent_remaining());
 										
@@ -2287,7 +2426,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_height(ui_size_text_dim(1));
 								if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked)
 								{
+									platform->set_cursor(Cursor_Wait);
 									mplayer_index_library(mplayer);
+									platform->set_cursor(Cursor_Arrow);
 								}
 							}
 						}
@@ -2345,8 +2486,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_for_each_list_item(str8_lit("queue-tracks-list"), mplayer->queue.count-1, 50.0f, 1.0f, index)
 							{
 								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index + 1;
-								Mplayer_Item_ID track_id = mplayer->queue.tracks[queue_index];
-								Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
+								Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, mplayer->queue.tracks[queue_index]);
 								
 								V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
 								if (queue_index == mplayer->queue.current_index)
@@ -2400,15 +2540,15 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 			{
 				ui_spacer_pixels(10, 1);
 				
-				Mplayer_Track *current_music = mplayer_queue_get_current_track(mplayer);
+				Mplayer_Track *current_track = mplayer_queue_get_current_track(mplayer);
 				// NOTE(fakhri): timestamp
 				{
 					ui_next_width(ui_size_text_dim(1));
 					
 					String8 timestamp_string = str8_lit("--:--:--");
-					if (current_music && current_music->flac_stream)
+					if (current_track && current_track->flac_stream)
 					{
-						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_music->flac_stream->next_sample_number, u64(current_music->flac_stream->streaminfo.sample_rate));
+						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_track->flac_stream->next_sample_number, u64(current_track->flac_stream->streaminfo.sample_rate));
 						timestamp_string = str8_f(&mplayer->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
 					
@@ -2421,18 +2561,18 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				ui_next_width(ui_size_percent(1.0f, 0.25f));
 				ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1.0f));
 				ui_next_roundness(5);
-				if (current_music && current_music->flac_stream)
+				if (current_track && current_track->flac_stream)
 				{
 					u64 samples_count = 0;
 					u64 current_playing_sample = 0;
-					samples_count = current_music->flac_stream->streaminfo.samples_count;
-					current_playing_sample = current_music->flac_stream->next_sample_number;
+					samples_count = current_track->flac_stream->streaminfo.samples_count;
+					current_playing_sample = current_track->flac_stream->next_sample_number;
 					
 					Mplayer_UI_Interaction progress = ui_slider_u64(str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count);
 					if (progress.pressed)
 					{
 						mplayer_queue_pause(mplayer);
-						flac_seek_stream(current_music->flac_stream, (u64)current_playing_sample);
+						flac_seek_stream(current_track->flac_stream, (u64)current_playing_sample);
 					}
 					else if (progress.released)
 					{
@@ -2451,9 +2591,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					ui_next_width(ui_size_text_dim(1));
 					
 					String8 timestamp_string = str8_lit("--:--:--");
-					if (current_music && current_music->flac_stream)
+					if (current_track && current_track->flac_stream)
 					{
-						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_music->flac_stream->streaminfo.samples_count, u64(current_music->flac_stream->streaminfo.sample_rate));
+						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_track->flac_stream->streaminfo.samples_count, u64(current_track->flac_stream->streaminfo.sample_rate));
 						timestamp_string = str8_f(&mplayer->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
 					ui_label(timestamp_string);
@@ -2470,11 +2610,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				{
 					ui_spacer_pixels(10, 1);
 					
-					Mplayer_Track *current_music = mplayer_queue_get_current_track(mplayer);
+					Mplayer_Track *current_track = mplayer_queue_get_current_track(mplayer);
 					// NOTE(fakhri): cover image
-					if (current_music)
+					if (current_track)
 					{
-						Mplayer_Item_Image *cover_image = mplayer_get_image_by_id(mplayer, current_music->header.image_id, 1);
+						Mplayer_Item_Image *cover_image = mplayer_get_image_by_id(mplayer, current_track->image_id, 1);
 						
 						// NOTE(fakhri): cover
 						{
@@ -2503,11 +2643,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
 							ui_next_font_sizes(20);
-							if (mplayer_ui_underlined_button_f("%.*s##_song_title_button", STR8_EXPAND(current_music->title)).clicked)
+							if (mplayer_ui_underlined_button_f("%.*s##_track_title_button", STR8_EXPAND(current_track->title)).clicked)
 							{
-								assert(current_music->artist_id);
-								mplayer->selected_album_id = current_music->album_id;
-								mplayer_change_mode(mplayer, MODE_Album_Tracks, current_music->album_id);
+								mplayer->selected_album_id = current_track->album_id;
+								mplayer_change_mode(mplayer, MODE_Album_Tracks, to_item_id(current_track->album_id));
 							}
 							
 							ui_spacer_pixels(5, 0);
@@ -2515,11 +2654,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
 							ui_next_font_sizes(15);
-							if (mplayer_ui_underlined_button_f("%.*s##_song_artist_button", STR8_EXPAND(current_music->artist)).clicked)
+							if (mplayer_ui_underlined_button_f("%.*s##_track_artist_button", STR8_EXPAND(current_track->artist)).clicked)
 							{
-								assert(current_music->artist_id);
-								mplayer->selected_artist_id = current_music->artist_id;
-								mplayer_change_mode(mplayer, MODE_Artist_Albums, current_music->artist_id);
+								mplayer->selected_artist_id = current_track->artist_id;
+								mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(current_track->artist_id));
 							}
 						}
 					}

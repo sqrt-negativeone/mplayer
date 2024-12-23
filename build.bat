@@ -15,6 +15,7 @@ set compiler_warnings= ^
   /wd4201 ^
 	/wd4533 /wd4505 ^
   /wd4459 /wd4471 ^
+  /wd4324 ^
   /we4061 /we4062
 
 set common_compiler_flags=/FC /Z7 /GR- /EHsc /nologo
@@ -63,7 +64,6 @@ echo building platform layer
 call cl %compiler_settings% "%code_dir%\code\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
 
 xcopy "%code_dir%\lib\win32\*.dll" . /Y
-
 
 del *.obj > NUL 2> NUL
 popd

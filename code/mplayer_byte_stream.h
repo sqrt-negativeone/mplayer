@@ -38,6 +38,34 @@ byte_stream_advance(Byte_Stream *bs, u64 advance)
 }
 
 internal void
+byte_stream_read(Byte_Stream *bs, Mplayer_Track_ID *dst)
+{
+	if (byte_stream_available_bytes(*bs) >= sizeof(Mplayer_Track_ID))
+	{
+		memory_copy(dst, bs->current, sizeof(*dst));
+		byte_stream_advance(bs, sizeof(*dst));
+	}
+}
+internal void
+byte_stream_read(Byte_Stream *bs, Mplayer_Album_ID *dst)
+{
+	if (byte_stream_available_bytes(*bs) >= sizeof(Mplayer_Album_ID))
+	{
+		memory_copy(dst, bs->current, sizeof(*dst));
+		byte_stream_advance(bs, sizeof(*dst));
+	}
+}
+internal void
+byte_stream_read(Byte_Stream *bs, Mplayer_Artist_ID *dst)
+{
+	if (byte_stream_available_bytes(*bs) >= sizeof(Mplayer_Artist_ID))
+	{
+		memory_copy(dst, bs->current, sizeof(*dst));
+		byte_stream_advance(bs, sizeof(*dst));
+	}
+}
+
+internal void
 byte_stream_read(Byte_Stream *bs, u32 *dst)
 {
 	if (byte_stream_available_bytes(*bs) >= 4)
@@ -92,15 +120,22 @@ byte_stream_read(Byte_Stream *bs, Buffer *buffer)
 }
 
 internal void
-byte_stream_read(Byte_Stream *bs, Mplayer_Items_Array *items_array)
+byte_stream_read(Byte_Stream *bs, Mplayer_Track_List *track_list)
 {
-	byte_stream_read(bs, &items_array->count);
+	not_impemeneted();
+	#if 0
+		byte_stream_read(bs, &tracks->count);
 	
-	if (byte_stream_available_bytes(*bs) >= items_array->count * sizeof(Mplayer_Item_ID))
+	if (byte_stream_available_bytes(*bs) >= tracks->count * sizeof(Mplayer_Track_ID))
 	{
-		items_array->items= (Mplayer_Item_ID*)bs->current;
-		byte_stream_advance(bs, items_array->count * sizeof(Mplayer_Item_ID));
+		Mplayer_Track_ID *tracks_array = (Mplayer_Track_ID*)bs->current;
+		for(u32 i = 0; i < count; i += 1)
+		{
+			Mplayer_Track_List_Entry *entry = 0;
+		}
+		byte_stream_advance(bs, tracks_array->count * sizeof(Mplayer_Track_ID));
 	}
+	#endif
 }
 
 internal void

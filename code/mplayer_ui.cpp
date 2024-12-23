@@ -214,7 +214,7 @@ struct UI_Size_Stack
 };
 
 #define UI_ELEMENETS_HASHTABLE_SIZE 128
-struct _Mplayer_UI
+struct Mplayer_UI
 {
 	Render_Group *group;
 	Font *def_font;
@@ -278,7 +278,7 @@ struct _Mplayer_UI
 	UI_Elements_Bucket elements_table[UI_ELEMENETS_HASHTABLE_SIZE];
 };
 
-global _Mplayer_UI *g_ui;
+global Mplayer_UI *g_ui;
 
 internal UI_Size
 ui_make_size(UI_Size_Kind kind, f32 value, f32 strictness)
@@ -1955,15 +1955,15 @@ ui_modal_end()
 }
 
 internal void
-ui_set_context(_Mplayer_UI *ui)
+ui_set_context(Mplayer_UI *ui)
 {
 	g_ui = ui;
 }
 
-internal _Mplayer_UI *
+internal Mplayer_UI *
 ui_init(Mplayer_Context *mplayer, Font *default_font)
 {
-	_Mplayer_UI *ui = m_arena_push_struct_z(&mplayer->main_arena, _Mplayer_UI);
+	Mplayer_UI *ui = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_UI);
 	ui_set_context(ui);
 	
 	g_ui->input = &mplayer->input;

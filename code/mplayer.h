@@ -134,33 +134,9 @@ global Mplayer_OS_Vtable *platform = 0;
 #include "mplayer_bitstream.h"
 #include "mplayer_flac.h"
 
-
-struct Mplayer_Glyph
-{
-	V2_F32 uv_scale;
-	V2_F32 uv_offset;
-	V2_F32 dim;
-	V2_F32 offset;
-	f32 advance;
-};
-
-struct Mplayer_Font
-{
-	b32 monospaced;
-	b32 loaded;
-	Texture atlas_tex;
-	Buffer pixels_buf;
-	Mplayer_Glyph *glyphs;
-	u32 first_glyph_index;
-	u32 opl_glyph_index;
-	f32 line_advance;
-	f32 ascent;
-	f32 descent;
-};
-
 #include "mplayer_font.h"
 
-struct _Mplayer_UI;
+struct Mplayer_UI;
 
 enum Image_Data_State
 {
@@ -185,20 +161,13 @@ struct Mplayer_Item_Image
 	Texture texture;
 };
 
-typedef u32 Mplayer_Item_ID;
+struct Mplayer_Track_ID{u64 v[2];};
+struct Mplayer_Album_ID{u64 v[2];};
+struct Mplayer_Artist_ID{u64 v[2];};
 
-struct Mplayer_Items_Array
-{
-	Mplayer_Item_ID *items;
-	u32 count;
-};
-
-struct Mplayer_Item_Header
-{
-	Mplayer_Item_ID id;
-	Mplayer_Image_ID image_id;
-	u64 hash;
-};
+#define NULL_TRACK_ID Mplayer_Track_ID{}
+#define NULL_ALBUM_ID Mplayer_Album_ID{}
+#define NULL_ARTIST_ID Mplayer_Artist_ID{}
 
 struct Seek_Table_Work_Data
 {
@@ -216,7 +185,20 @@ struct Seek_Table_Work_Data
 
 struct Mplayer_Track
 {
-	Mplayer_Item_Header header;
+	// NOTE(fakhri): album links
+	Mplayer_Track *next_album;
+	Mplayer_Track *prev_album;
+	
+	// NOTE(fakhri): artist links
+	Mplayer_Track *next_artist;
+	Mplayer_Track *prev_artist;
+	
+	// NOTE(fakhri): hash table links
+	Mplayer_Track *next_hash;
+	Mplayer_Track *prev_hash;
+	Mplayer_Track_ID hash;
+	
+	Mplayer_Image_ID image_id;
 	
 	String8 path;
 	String8 title;
@@ -226,8 +208,8 @@ struct Mplayer_Track
 	String8 date;
 	String8 track_number;
 	
-	Mplayer_Item_ID artist_id;
-	Mplayer_Item_ID album_id;
+	Mplayer_Artist_ID artist_id;
+	Mplayer_Album_ID album_id;
 	
 	Flac_Stream *flac_stream;
 	b32 file_loaded;
@@ -235,27 +217,59 @@ struct Mplayer_Track
 	
 	Seek_Table_Work_Data build_seektable_work_data;
 };
-
-struct Mplayer_Artist
+struct Mplayer_Track_List
 {
-	Mplayer_Item_Header header;
-	
-	String8 name;
-	
-	Mplayer_Items_Array tracks;
-	Mplayer_Items_Array albums;
+	Mplayer_Track *first;
+	Mplayer_Track *last;
+	u32 count;
 };
 
 struct Mplayer_Album
 {
-	Mplayer_Item_Header header;
+	// NOTE(fakhri): artist links
+	Mplayer_Album *next_artist;
+	Mplayer_Album *prev_artist;
+	
+	// NOTE(fakhri): hash table links
+	Mplayer_Album *next_hash;
+	Mplayer_Album *prev_hash;
+	Mplayer_Album_ID hash;
+	
+	Mplayer_Image_ID image_id;
 	
 	String8 name;
 	String8 artist;
 	
-	Mplayer_Item_ID artist_id;
+	Mplayer_Artist_ID artist_id;
 	
-	Mplayer_Items_Array tracks;
+	Mplayer_Track_List tracks;
+};
+struct Mplayer_Album_List
+{
+	Mplayer_Album *first;
+	Mplayer_Album *last;
+	u32 count;
+};
+
+struct Mplayer_Artist
+{
+	// NOTE(fakhri): hash table links
+	Mplayer_Artist *next_hash;
+	Mplayer_Artist *prev_hash;
+	Mplayer_Artist_ID hash;
+	
+	Mplayer_Image_ID image_id;
+	
+	String8 name;
+	
+	Mplayer_Track_List tracks;
+	Mplayer_Album_List albums;
+};
+struct Mplayer_Artist_List
+{
+	Mplayer_Artist *first;
+	Mplayer_Artist *last;
+	u32 count;
 };
 
 #define MAX_ARTISTS_COUNT 512
@@ -271,9 +285,13 @@ struct Mplayer_Library
 	u32 albums_count;
 	u32 artists_count;
 	
-	Mplayer_Artist artists[MAX_ARTISTS_COUNT];
-	Mplayer_Album albums[MAX_ALBUMS_COUNT];
-	Mplayer_Track tracks[MAX_TRACKS_COUNT];
+	Mplayer_Track_List tracks_table[1024];
+	Mplayer_Album_List albums_table[1024];
+	Mplayer_Artist_List artists_table[1024];
+	
+	Mplayer_Artist_ID artist_ids[MAX_ARTISTS_COUNT];
+	Mplayer_Album_ID  album_ids[MAX_ALBUMS_COUNT];
+	Mplayer_Track_ID  track_ids[MAX_TRACKS_COUNT];
 	
 	Mplayer_Item_Image images[8192];
 	u32 images_count;
@@ -297,7 +315,7 @@ struct MPlayer_Settings
 
 enum Mplayer_Mode
 {
-	MODE_Music_Library,
+	MODE_Track_Library,
 	MODE_Artist_Library,
 	MODE_Album_Library,
 	
@@ -310,13 +328,20 @@ enum Mplayer_Mode
 	MODE_Settings,
 };
 
+union Mplayer_Item_ID
+{
+	Mplayer_Track_ID  track_id;
+	Mplayer_Album_ID  album_id;
+	Mplayer_Artist_ID artist_id;
+};
+
 struct Mplayer_Mode_Stack
 {
 	Mplayer_Mode_Stack *next;
 	Mplayer_Mode_Stack *prev;
 	Mplayer_Mode mode;
 	
-	Mplayer_Item_ID item_id;
+	Mplayer_Item_ID id;
 };
 
 
@@ -333,14 +358,6 @@ struct Mplayer_Path_Lister
 	u32 filtered_paths_count;
 };
 
-struct Mplayer_Queue_Entry
-{
-	Mplayer_Queue_Entry *next;
-	Mplayer_Queue_Entry *prev;
-	Mplayer_Item_ID track_id;
-};
-
-
 typedef u16 Mplayer_Queue_Index;
 
 struct Mplayer_Queue
@@ -348,7 +365,7 @@ struct Mplayer_Queue
 	b32 playing;
 	Mplayer_Queue_Index current_index;
 	u16 count;
-	Mplayer_Item_ID tracks[65536];
+	Mplayer_Track_ID tracks[65536];
 };
 
 
@@ -357,7 +374,7 @@ struct Mplayer_Context
 	Memory_Arena main_arena;
 	Memory_Arena frame_arena;
 	Render_Context *render_ctx;
-	_Mplayer_UI *ui;
+	Mplayer_UI *ui;
 	Mplayer_Input input;
 	Fonts_Context *fonts_ctx;
 	Random_Generator entropy;
@@ -376,8 +393,8 @@ struct Mplayer_Context
 	
 	Mplayer_Library library;
 	
-	Mplayer_Item_ID selected_artist_id;
-	Mplayer_Item_ID selected_album_id;
+	Mplayer_Artist_ID selected_artist_id;
+	Mplayer_Album_ID selected_album_id;
 	
 	f32 track_name_hover_t;
 	

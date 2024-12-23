@@ -23,6 +23,7 @@ typedef int32_t b32;
 typedef size_t umem;
 typedef void *Address;
 typedef void void_function();
+struct u128 {u64 v[2];};
 
 #define internal      static
 #define global        static
