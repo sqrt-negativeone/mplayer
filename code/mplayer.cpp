@@ -811,9 +811,8 @@ mplayer_reset_library(Mplayer_Context *mplayer)
 	for (;platform->do_next_work();) {}
 	m_arena_free_all(&library->arena);
 	
-	// NOTE(fakhri): reserve null ids
-	library->artists_count = 1;
-	library->albums_count = 1;
+	library->artists_count = 0;
+	library->albums_count = 0;
 	library->tracks_count = 0;
 	for (u32 i = 1; i < library->images_count; i += 1)
 	{
