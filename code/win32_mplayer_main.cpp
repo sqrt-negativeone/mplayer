@@ -25,6 +25,35 @@ global Mplayer_OS_Vtable w32_vtable;
 
 global Cursor_Shape g_w32_cursor = Cursor_Arrow;
 
+internal void
+w32_fix_path_slashes(String8 path)
+{
+	for(u32 i = 0; i < path.len; i += 1)
+	{
+		if (path.str[i] == '/') path.str[i] = '\\';
+	}
+}
+
+internal void
+w32_make_folder_if_missing(String8 dir)
+{
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
+	String8 path = str8_clone(scratch.arena, dir);
+	w32_fix_path_slashes(path);
+	
+	char *p = path.cstr;
+	for(u32 i = 0; i < path.len; i += 1)
+	{
+		if (path.str[i] == '\\')
+		{
+			path.str[i] = 0;
+			CreateDirectoryA(path.cstr, 0);
+			path.str[i] = '\\';
+		}
+	}
+	
+	CreateDirectoryA(path.cstr, 0);
+}
 
 internal void
 w32_set_cursor(Cursor_Shape cursor)
@@ -1103,6 +1132,8 @@ internal void
 w32_init_os_vtable()
 {
 	w32_vtable = {
+		.fix_path_slashes                    = w32_fix_path_slashes,
+		.make_folder_if_missing              = w32_make_folder_if_missing,
 		.set_cursor                          = w32_set_cursor,
 		.read_directory                      = w32_read_directory,
 		.get_current_directory               = w32_get_current_directory,

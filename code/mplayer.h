@@ -81,6 +81,8 @@ struct Directory
 	u32 count;
 };
 
+typedef void Fix_Path_Slashes_Proc(String8 path);
+typedef void Make_Folder_If_Missing_Proc(String8 dir);
 typedef void Set_Cursor_Proc(Cursor_Shape cursor);
 
 typedef i64 Atomic_Increment64_Proc(volatile i64 *addend);
@@ -101,25 +103,27 @@ typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
 
 struct Mplayer_OS_Vtable
 {
-	Set_Cursor_Proc *set_cursor;
+	Fix_Path_Slashes_Proc                   *fix_path_slashes;
+	Make_Folder_If_Missing_Proc             *make_folder_if_missing;
+	Set_Cursor_Proc                         *set_cursor;
 	
-	Read_Directory_Proc  *read_directory;
-	Get_Current_Directory_Proc *get_current_directory;
-	Load_Entire_File     *load_entire_file;
-	Open_File_Proc       *open_file;
-	Close_File_Proc      *close_file;
-	File_Read_block_Proc *read_block;
-	File_Write_block_Proc *write_block;
+	Read_Directory_Proc                      *read_directory;
+	Get_Current_Directory_Proc               *get_current_directory;
+	Load_Entire_File                         *load_entire_file;
+	Open_File_Proc                           *open_file;
+	Close_File_Proc                          *close_file;
+	File_Read_block_Proc                     *read_block;
+	File_Write_block_Proc                    *write_block;
 	
-	Push_Work_Proc    *push_work;
-	Do_Next_Work_Proc *do_next_work;
+	Push_Work_Proc                           *push_work;
+	Do_Next_Work_Proc                        *do_next_work;
 	
-	Allocate_Memory_Proc   *alloc;
-	Deallocate_Memory_Proc *dealloc;
+	Allocate_Memory_Proc                     *alloc;
+	Deallocate_Memory_Proc                   *dealloc;
 	
-	Atomic_Increment64_Proc *atomic_increment64;
-	Atomic_Decrement64_Proc *atomic_decrement64;
-	Atomic_Compare_And_Exchange64_Proc *atomic_compare_and_exchange64;
+	Atomic_Increment64_Proc                  *atomic_increment64;
+	Atomic_Decrement64_Proc                  *atomic_decrement64;
+	Atomic_Compare_And_Exchange64_Proc       *atomic_compare_and_exchange64;
 	Atomic_Compare_And_Exchange_Pointer_Proc *atomic_compare_and_exchange_pointer;
 };
 
