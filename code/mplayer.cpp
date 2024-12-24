@@ -898,61 +898,34 @@ mplayer_serialize(File_Handle *file, Mplayer_Item_Image image)
 }
 
 internal void
-mplayer_serialize_track(Mplayer_Track *track)
+mplayer_serialize_track(File_Handle *file, Mplayer_Track *track)
 {
-	// NOTE(fakhri): each track is saved in index/tracks/{id}
-	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
-	platform->make_folder_if_missing(str8_lit("index/tracks"));
-	String8 path = str8_f(scratch.arena, "index/tracks/%I64x%I64x", track->hash.v[0], track->hash.v[1]);
-	File_Handle *file = platform->open_file(path, File_Open_Write | File_Create_Always);
-	if (file)
-	{
-		mplayer_serialize(file, track->hash);
-		mplayer_serialize(file, track->path);
-		mplayer_serialize(file, track->title);
-		mplayer_serialize(file, track->album);
-		mplayer_serialize(file, track->artist);
-		mplayer_serialize(file, track->genre);
-		mplayer_serialize(file, track->date);
-		mplayer_serialize(file, track->track_number);
-		platform->close_file(file);
-	}
+	mplayer_serialize(file, track->hash);
+	mplayer_serialize(file, track->path);
+	mplayer_serialize(file, track->title);
+	mplayer_serialize(file, track->album);
+	mplayer_serialize(file, track->artist);
+	mplayer_serialize(file, track->genre);
+	mplayer_serialize(file, track->date);
+	mplayer_serialize(file, track->track_number);
 }
 
 internal void
-mplayer_serialize_artist(Mplayer_Artist *artist)
+mplayer_serialize_artist(File_Handle *file, Mplayer_Artist *artist)
 {
-	// NOTE(fakhri): each track is saved in index/tracks/{id}
-	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
-	platform->make_folder_if_missing(str8_lit("index/artists"));
-	String8 path = str8_f(scratch.arena, "index/artists/%I64x%I64x", artist->hash.v[0], artist->hash.v[1]);
-	File_Handle *file = platform->open_file(path, File_Open_Write | File_Create_Always);
-	if (file)
-	{
-		mplayer_serialize(file, artist->hash);
-		mplayer_serialize(file, artist->name);
-		platform->close_file(file);
-	}
+	mplayer_serialize(file, artist->hash);
+	mplayer_serialize(file, artist->name);
 }
 
 internal void
-mplayer_serialize_album(Mplayer_Context *mplayer, Mplayer_Album *album)
+mplayer_serialize_album(File_Handle *file, Mplayer_Context *mplayer, Mplayer_Album *album)
 {
-	// NOTE(fakhri): each track is saved in index/tracks/{id}
-	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
-	platform->make_folder_if_missing(str8_lit("index/albums"));
-	String8 path = str8_f(scratch.arena, "index/albums/%I64x%I64x", album->hash.v[0], album->hash.v[1]);
-	File_Handle *file = platform->open_file(path, File_Open_Write | File_Create_Always);
-	if (file)
-	{
-		mplayer_serialize(file, album->hash);
-		mplayer_serialize(file, album->name);
-		mplayer_serialize(file, album->artist);
-		
-		Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
-		mplayer_serialize(file, *image);
-		platform->close_file(file);
-	}
+	mplayer_serialize(file, album->hash);
+	mplayer_serialize(file, album->name);
+	mplayer_serialize(file, album->artist);
+	
+	Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
+	mplayer_serialize(file, *image);
 }
 
 internal void
@@ -997,27 +970,31 @@ mplayer_deserialize_album(Mplayer_Context *mplayer, Byte_Stream *bs, Mplayer_Alb
 internal void
 mplayer_save_indexed_library(Mplayer_Context *mplayer)
 {
-	// TODO(fakhri): mutli-thread this
+	File_Handle *file = platform->open_file(MPLAYER_INDEX_FILENAME, File_Open_Write | File_Create_Always);
+	
+	mplayer_serialize(file, mplayer->library.artists_count);
+	mplayer_serialize(file, mplayer->library.albums_count);
+	mplayer_serialize(file, mplayer->library.tracks_count);
 	
 	for (u32 artist_index = 0; artist_index < mplayer->library.artists_count; artist_index += 1)
 	{
 		Mplayer_Artist_ID artist_id = mplayer->library.artist_ids[artist_index];
 		Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, artist_id);
-		mplayer_serialize_artist(artist);
+		mplayer_serialize_artist(file, artist);
 	}
 	
 	for (u32 album_index = 0; album_index < mplayer->library.albums_count; album_index += 1)
 	{
 		Mplayer_Album_ID album_id = mplayer->library.album_ids[album_index];
 		Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, album_id);
-		mplayer_serialize_album(mplayer, album);
+		mplayer_serialize_album(file, mplayer, album);
 	}
 	
 	for (u32 track_index = 0; track_index < mplayer->library.tracks_count; track_index += 1)
 	{
 		Mplayer_Track_ID track_id = mplayer->library.track_ids[track_index];
 		Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
-		mplayer_serialize_track(track);
+		mplayer_serialize_track(file, track);
 	}
 }
 
@@ -1078,33 +1055,29 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 	Mplayer_Library *library = &mplayer->library;
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
-	Directory tracks_dir = platform->read_directory(scratch.arena, str8_lit("index/tracks"));
-	Directory albums_dir = platform->read_directory(scratch.arena, str8_lit("index/albums"));
-	Directory artists_dir = platform->read_directory(scratch.arena, str8_lit("index/artists"));
-	success = tracks_dir.count && albums_dir.count && artists_dir.count;
 	
-	for (u32 info_index = 0; info_index < artists_dir.count; info_index += 1)
+	Buffer index_content = platform->load_entire_file(MPLAYER_INDEX_FILENAME, &mplayer->library.arena);
+	if (is_valid(index_content))
 	{
-		File_Info info = artists_dir.files[info_index];
-		if (!has_flag(info.flags, FileFlag_Directory))
+		Byte_Stream bs = make_byte_stream(index_content);
+		success = 1;
+		
+		u32 artists_count;
+		u32 albums_count;
+		u32 tracks_count;
+		byte_stream_read(&bs, &artists_count);
+		byte_stream_read(&bs, &albums_count);
+		byte_stream_read(&bs, &tracks_count);
+		
+		for (u32 artist_index = 0; artist_index < artists_count; artist_index += 1)
 		{
-			Buffer indexed_track = platform->load_entire_file(info.path, &mplayer->library.arena);
-			Byte_Stream bs = make_byte_stream(indexed_track);
-			
 			Mplayer_Artist *artist = m_arena_push_struct_z(&library->arena, Mplayer_Artist);
 			mplayer_deserialize_artist(&bs, artist);
 			mplayer_insert_artist(library, artist);
 		}
-	}
-	
-	for (u32 info_index = 0; info_index < albums_dir.count; info_index += 1)
-	{
-		File_Info info = albums_dir.files[info_index];
-		if (!has_flag(info.flags, FileFlag_Directory))
+		
+		for (u32 album_index = 0; album_index < albums_count; album_index += 1)
 		{
-			Buffer indexed_track = platform->load_entire_file(info.path, &mplayer->library.arena);
-			Byte_Stream bs = make_byte_stream(indexed_track);
-			
 			Mplayer_Album *album = m_arena_push_struct_z(&library->arena, Mplayer_Album);
 			album->image_id = mplayer_reserve_image_id(library);
 			mplayer_deserialize_album(mplayer, &bs, album);
@@ -1116,17 +1089,9 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 			artist->albums.count += 1;
 			album->artist_id = artist->hash;
 		}
-	}
-	
-	for (u32 info_index = 0; info_index < tracks_dir.count; info_index += 1)
-	{
-		File_Info info = tracks_dir.files[info_index];
-		if (!has_flag(info.flags, FileFlag_Directory))
+		
+		for (u32 track_index = 0; track_index < tracks_count; track_index += 1)
 		{
-			success = 1;
-			Buffer indexed_track = platform->load_entire_file(info.path, &mplayer->library.arena);
-			Byte_Stream bs = make_byte_stream(indexed_track);
-			
 			Mplayer_Track *track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
 			mplayer_deserialize_track(&bs, track);
 			mplayer_insert_track(library, track);
@@ -1150,6 +1115,7 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 				album->tracks.count += 1;
 				track->album_id = album->hash;
 			}
+			
 		}
 	}
 	return success;
