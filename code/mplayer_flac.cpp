@@ -1016,9 +1016,11 @@ uninit_flac_stream(Flac_Stream *flac_stream)
 	}
 }
 
-internal void
+internal b32
 flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 {
+	b32 result = 1;
+	
 	Bit_Stream *bitstream = &flac_stream->bitstream;
 	Flac_Stream_Info *streaminfo = &flac_stream->streaminfo;
 	
@@ -1051,11 +1053,10 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 		if (md_size == 0) break;
 		
 		assert(md_type != 127);
-		if (md_blocks_count == 1)
+		if (md_blocks_count == 1 && md_type != 0)
 		{
-			// NOTE(fakhri): make sure the first meta data block is a streaminfo block
-			// as per specification
-			assert(md_type == 0);
+			result = 0;
+			break;
 		}
 		
 		switch (md_type)
@@ -1177,24 +1178,31 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			} break;
 		}
 	}
+	
+	return result;
 }
 
-internal void
+internal b32 
 init_flac_stream(Flac_Stream *flac_stream, Memory_Arena *arena, Buffer data)
 {
+	b32 result = 0;
 	// NOTE(fakhri): init bitstream
 	{
 		flac_stream->bitstream.buffer = data;
 		flac_stream->bitstream.pos.byte_index = 0;
 		flac_stream->bitstream.pos.bits_left  = 8;
 	}
-	flac_process_metadata(flac_stream, arena);
 	
-	flac_stream->first_block_pos = flac_stream->bitstream.pos;
+	result = flac_process_metadata(flac_stream, arena);
+	if (result)
+	{
+		flac_stream->first_block_pos = flac_stream->bitstream.pos;
+		
+		flac_stream->bitstream.pos = flac_stream->first_block_pos;
+		flac_decode_one_block(flac_stream, 1);
+	}
 	
-	flac_stream->bitstream.pos = flac_stream->first_block_pos;
-	flac_decode_one_block(flac_stream, 1);
-	return;
+	return result;
 }
 
 struct Decoded_Samples

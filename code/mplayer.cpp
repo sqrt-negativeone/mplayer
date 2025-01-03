@@ -1,4 +1,5 @@
 
+#include <time.h>
 #include "mplayer.h"
 
 #define STBI_ASSERT(x) assert(x)
@@ -407,7 +408,7 @@ mplayer_load_track(Mplayer_Context *mplayer, Mplayer_Track *track)
 	if (!track->flac_stream)
 	{
 		track->flac_stream = m_arena_push_struct_z(&mplayer->library.track_transient_arena, Flac_Stream);
-		init_flac_stream(track->flac_stream, &mplayer->library.track_transient_arena, track->flac_file_buffer);
+		assert(init_flac_stream(track->flac_stream, &mplayer->library.track_transient_arena, track->flac_file_buffer));
 		if (!track->flac_stream->seek_table)
 		{
 			flac_build_seek_table(track->flac_stream, &mplayer->library.track_transient_arena, &track->build_seektable_work_data);
@@ -1175,109 +1176,111 @@ mplayer_load_tracks_in_directory(Mplayer_Context *mplayer, String8 library_path)
 				{
 					Mplayer_Library *library = &mplayer->library;
 					Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path);
-					Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
-					if (!track)
+					Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
+					platform->close_file(file);
+					// NOTE(fakhri): init flac stream
 					{
-						track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
-						track->path = str8_clone(&library->arena, info.path);
-						track->hash = track_hash;
-						mplayer_insert_track(library, track);
-						
-						Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
-						platform->close_file(file);
-						// NOTE(fakhri): init flac stream
+						tmp_flac_stream.bitstream.buffer = buffer;
+						tmp_flac_stream.bitstream.pos.byte_index = 0;
+						tmp_flac_stream.bitstream.pos.bits_left  = 8;
+					}
+					if (flac_process_metadata(&tmp_flac_stream, scratch.arena))
+					{
+						Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
+						if (!track)
 						{
-							tmp_flac_stream.bitstream.buffer = buffer;
-							tmp_flac_stream.bitstream.pos.byte_index = 0;
-							tmp_flac_stream.bitstream.pos.bits_left  = 8;
-						}
-						flac_process_metadata(&tmp_flac_stream, scratch.arena);
-						
-						Flac_Picture *front_cover = tmp_flac_stream.front_cover;
-						
-						// TODO(fakhri): should we have these values be defaulted to empty strings instead?
-						track->album        = str8_lit("***Unkown Album***");
-						track->artist       = str8_lit("***Unkown Artist***");
-						track->date         = str8_lit("***Unkown Date***");
-						track->genre        = str8_lit("***Unkown Gener***");
-						track->track_number = str8_lit("-");
-						
-						for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
-							node;
-							node = node->next)
-						{
-							String8 value = ZERO_STRUCT;
-							String8 key = ZERO_STRUCT;
-							for (u32 i = 0; i < node->str.len; i += 1)
+							track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
+							track->path = str8_clone(&library->arena, info.path);
+							track->hash = track_hash;
+							mplayer_insert_track(library, track);
+							
+							
+							Flac_Picture *front_cover = tmp_flac_stream.front_cover;
+							
+							// TODO(fakhri): should we have these values be defaulted to empty strings instead?
+							track->album        = str8_lit("***Unkown Album***");
+							track->artist       = str8_lit("***Unkown Artist***");
+							track->date         = str8_lit("***Unkown Date***");
+							track->genre        = str8_lit("***Unkown Gener***");
+							track->track_number = str8_lit("-");
+							
+							for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
+								node;
+								node = node->next)
 							{
-								if (node->str.str[i] == '=')
+								String8 value = ZERO_STRUCT;
+								String8 key = ZERO_STRUCT;
+								for (u32 i = 0; i < node->str.len; i += 1)
 								{
-									key   = prefix8(node->str, i);
-									value = suffix8(node->str, node->str.len - i - 1);
-									break;
+									if (node->str.str[i] == '=')
+									{
+										key   = prefix8(node->str, i);
+										value = suffix8(node->str, node->str.len - i - 1);
+										break;
+									}
+								}
+								
+								if (false) {}
+								else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+								{
+									track->title = str8_clone(&library->arena, value);
+								}
+								else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
+								{
+									track->album = str8_clone(&library->arena, value);
+								}
+								else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
+								{
+									track->artist = str8_clone(&library->arena, value);
+								}
+								else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
+								{
+									track->genre = str8_clone(&library->arena, value);
+								}
+								else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
+								{
+									track->date = str8_clone(&library->arena, value);
+								}
+								else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
+								{
+									track->track_number = str8_clone(&library->arena, value);
 								}
 							}
 							
-							if (false) {}
-							else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+							if (!track->title.len)
 							{
-								track->title = str8_clone(&library->arena, value);
+								track->title = str8_clone(&library->arena, info.name);
 							}
-							else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
-							{
-								track->album = str8_clone(&library->arena, value);
-							}
-							else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
-							{
-								track->artist = str8_clone(&library->arena, value);
-							}
-							else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
-							{
-								track->genre = str8_clone(&library->arena, value);
-							}
-							else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
-							{
-								track->date = str8_clone(&library->arena, value);
-							}
-							else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
-							{
-								track->track_number = str8_clone(&library->arena, value);
-							}
-						}
-						
-						if (!track->title.len)
-						{
-							track->title = str8_clone(&library->arena, info.name);
-						}
-						
-						// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
-						
-						Mplayer_Artist *artist = mplayer_setup_track_artist(library, track);
-						
-						// NOTE(fakhri): setup album
-						{
-							Mplayer_Album *album = mplayer_setup_track_album(library, track, artist);
 							
-							// TODO(fakhri): do this only after all the tracks have loaded!!
-							// if no image is on disk there is absolutely no reason search for it
-							// again each time we find a new track belonging to this album!
-							Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
-							if (!image->in_disk && !image->texture_data.size)
+							// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
+							
+							Mplayer_Artist *artist = mplayer_setup_track_artist(library, track);
+							
+							// NOTE(fakhri): setup album
 							{
-								String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(mplayer, &library->arena, dir);
-								if (cover_file_path.len)
+								Mplayer_Album *album = mplayer_setup_track_album(library, track, artist);
+								
+								// TODO(fakhri): do this only after all the tracks have loaded!!
+								// if no image is on disk there is absolutely no reason search for it
+								// again each time we find a new track belonging to this album!
+								Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 0);
+								if (!image->in_disk && !image->texture_data.size)
 								{
-									image->in_disk = true;
-									image->path = cover_file_path;
-								}
-								else if (front_cover)
-								{
-									image->in_disk = false;
-									image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+									String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(mplayer, &library->arena, dir);
+									if (cover_file_path.len)
+									{
+										image->in_disk = true;
+										image->path = cover_file_path;
+									}
+									else if (front_cover)
+									{
+										image->in_disk = false;
+										image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+									}
 								}
 							}
+							
 						}
-						
 					}
 				}
 			}
@@ -1560,13 +1563,12 @@ mplayer_ui_underlined_button(String8 string)
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *button = ui_element(string, UI_FLAG_Draw_Text | UI_FLAG_Clickable);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(button);
-	if (interaction.hover) ui_parent(button)
+	if (interaction.hover) ui_pref_childs_axis(Axis2_Y) ui_parent(button)
 	{
-		button->child_layout_axis = Axis2_Y;
 		ui_spacer(ui_size_percent(0.85f, 1));
 		
-		ui_next_width(ui_size_percent(1, 1));
-		ui_next_height(ui_size_pixel(1, 1));
+		ui_next_width(ui_size_percent(1, 0));
+		ui_next_height(ui_size_pixel(1, 0));
 		ui_next_background_color(button->text_color);
 		ui_element({}, UI_FLAG_Draw_Background);
 	}
@@ -1600,10 +1602,15 @@ mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *track_el = ui_element_f(flags, "library_track_%p", track);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
-	if (interaction.clicked)
+	if (interaction.clicked_left)
 	{
 		mplayer_queue_play_track(mplayer, track_id);
 		mplayer_queue_resume(mplayer);
+	}
+	if (interaction.clicked_right)
+	{
+		ui_open_ctx_menu(g_ui->mouse_pos, mplayer->ctx_menu_ids[Track_Context_Menu]);
+		mplayer->ctx_menu_item_id = to_item_id(track_id);
 	}
 	
 	ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
@@ -1645,7 +1652,7 @@ mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Album_ID album_id)
 	UI_Element *album_el = ui_element_f(flags, "library_album_%p", album);
 	album_el->child_layout_axis = Axis2_Y;
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(album_el);
-	if (interaction.clicked)
+	if (interaction.clicked_left)
 	{
 		mplayer->selected_album_id = album_id;
 		mplayer_change_mode(mplayer, MODE_Album_Tracks, to_item_id(album_id));
@@ -1695,7 +1702,7 @@ mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Artist_ID artist_id)
 	UI_Element *artist_el = ui_element_f(flags, "library_artist_%p", artist);
 	artist_el->child_layout_axis = Axis2_Y;
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(artist_el);
-	if (interaction.clicked)
+	if (interaction.clicked_left)
 	{
 		mplayer->selected_artist_id = artist_id;
 		mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(artist_id));
@@ -1721,7 +1728,7 @@ internal void
 mplayer_ui_side_bar_button(Mplayer_Context *mplayer, String8 string, Mplayer_Mode target_mode)
 {
 	Mplayer_UI_Interaction interaction = ui_button(string);
-	if (mplayer->mode_stack->mode != target_mode && interaction.clicked)
+	if (mplayer->mode_stack->mode != target_mode && interaction.clicked_left)
 	{
 		mplayer_change_mode(mplayer, target_mode);
 	}
@@ -1780,13 +1787,18 @@ mplayer_get_audio_samples(Sound_Config device_config, Mplayer_Context *mplayer, 
 exported void
 mplayer_initialize(Mplayer_Context *mplayer)
 {
-	mplayer->entropy = rng_make_linear(1249817);
+	mplayer->entropy = rng_make_linear((u32)time(0));
 	
 	mplayer->fonts_ctx = fnt_init(mplayer->render_ctx);
 	mplayer->font = fnt_open_font(str8_lit("data/fonts/arial.ttf"));
 	mplayer->volume = 1.0f;
 	
 	mplayer->ui = ui_init(mplayer, mplayer->font);
+	
+	// NOTE(fakhri): ctx menu ids
+	{
+		mplayer->ctx_menu_ids[Track_Context_Menu] = ui_id_from_string(UI_NULL_ID, str8_lit("track-ctx-menu-id"));
+	}
 	
 	mplayer_init_queue(mplayer);
 	mplayer_load_settings(mplayer);
@@ -1825,6 +1837,90 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	}
 	
 	ui_begin(&group, world_mouse_p);
+	
+	// NOTE(fakhri): context menus
+	ui_pref_layer(UI_Layer_Ctx_Menu)
+	{
+		// NOTE(fakhri): track context menu
+		{
+			ui_pref_seed({2109487})
+				ui_ctx_menu(mplayer->ctx_menu_ids[Track_Context_Menu]) 
+				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.05f, 1.0f))
+				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
+				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
+			{
+				Mplayer_Track_ID track_id = mplayer->ctx_menu_item_id.track_id;
+				Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
+				
+				ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
+					ui_pref_width(ui_size_text_dim(1)) ui_pref_height(ui_size_text_dim(1))
+				{
+					ui_next_font_size(25);
+					ui_label(track->title);
+					
+					ui_spacer_pixels(20, 1);
+					
+					ui_pref_font_size(18)
+					{
+						if (mplayer_ui_underlined_button(str8_lit("Play")).clicked_left)
+						{
+							mplayer_queue_play_track(mplayer, track_id);
+							mplayer_queue_resume(mplayer);
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Play Next")).clicked_left)
+						{
+							mplayer_queue_next(mplayer, track_id);
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Queue")).clicked_left)
+						{
+							mplayer_queue_last(mplayer, track_id);
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Album")).clicked_left)
+						{
+							mplayer->selected_album_id = track->album_id;
+							mplayer_change_mode(mplayer, MODE_Album_Tracks, to_item_id(track->album_id));
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Artist")).clicked_left)
+						{
+							mplayer->selected_artist_id = track->artist_id;
+							mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(track->artist_id));
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
+						{
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Add to Playlist")).clicked_left)
+						{
+						}
+						ui_spacer_pixels(5,1);
+						
+						ui_spacer_pixels(20, 1);
+						if (mplayer_ui_underlined_button(str8_lit("Edit Info")).clicked_left)
+						{
+							// TODO(fakhri): open a model to edit track info
+						}
+					}
+				}
+			}
+		}
+		
+	}
 	
 	if (mplayer->show_path_modal)
 	{
@@ -1883,7 +1979,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						{
 							option_el->background_color = vec4(0.2f, 0.2f,0.2f, 1);
 						}
-						if (interaction.pressed)
+						if (interaction.pressed_left)
 						{
 							option_el->background_color = vec4(0.12f, 0.12f,0.12f, 1);
 							if (interaction.hover)
@@ -1891,7 +1987,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								option_el->background_color = vec4(0.1f, 0.1f,0.1f, 1);
 							}
 						}
-						if (interaction.clicked)
+						if (interaction.clicked_left)
 						{
 							selected_option_index = option_index;
 						}
@@ -1917,7 +2013,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				{
 					ui_next_height(ui_size_text_dim(1));
 					ui_next_width(ui_size_text_dim(1));
-					if (mplayer_ui_underlined_button(str8_lit("Ok")).clicked)
+					if (mplayer_ui_underlined_button(str8_lit("Ok")).clicked_left)
 					{
 						if (mplayer->settings.locations_count < MAX_LOCATION_COUNT)
 						{
@@ -1933,7 +2029,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					ui_spacer(ui_size_parent_remaining());
 					ui_next_height(ui_size_text_dim(1));
 					ui_next_width(ui_size_text_dim(1));
-					if (mplayer_ui_underlined_button(str8_lit("Cancel")).clicked)
+					if (mplayer_ui_underlined_button(str8_lit("Cancel")).clicked_left)
 					{
 						mplayer_close_path_lister(mplayer, &mplayer->path_lister);
 					}
@@ -1997,7 +2093,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							{
 								ui_next_background_color(vec4(1, 1, 1, 0));
 								ui_next_text_color(vec4(1, 1, 1, 1));
-								ui_next_font_sizes(50);
+								ui_next_font_size(50);
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_label(str8_lit("Artists"));
@@ -2008,9 +2104,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							u32 selected_artist_id = 0;
-							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer->library.artists_count - 1, vec2(250.0f, 220.0f), 10, artist_index)
+							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer->library.artists_count, vec2(250.0f, 220.0f), 10, artist_index)
 							{
-								Mplayer_Artist_ID artist_id = mplayer->library.artist_ids[artist_index + 1];
+								Mplayer_Artist_ID artist_id = mplayer->library.artist_ids[artist_index];
 								mplayer_ui_aritst_item(mplayer, artist_id);
 							}
 						}
@@ -2029,16 +2125,16 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(50);
+							ui_next_font_size(50);
 							ui_label(str8_lit("Albums"));
 						}
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							
-							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer->library.albums_count-1, vec2(300.0f, 300.0f), 10, album_index)
+							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer->library.albums_count, vec2(300.0f, 300.0f), 10, album_index)
 							{
-								Mplayer_Album_ID album_id = mplayer->library.album_ids[album_index + 1];
+								Mplayer_Album_ID album_id = mplayer->library.album_ids[album_index];
 								mplayer_ui_album_item(mplayer, album_id);
 							}
 						}
@@ -2062,21 +2158,21 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_text_color(vec4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
-								ui_next_font_sizes(50);
+								ui_next_font_size(50);
 								ui_label(str8_lit("Tracks"));
 								
 								ui_spacer_pixels(5, 1);
 								
 								ui_next_height(ui_size_by_childs(1));
 								ui_horizontal_layout()
-									ui_pref_font_sizes(20)
+									ui_pref_font_size(20)
 									ui_pref_height(ui_size_text_dim(1))
 									ui_pref_width(ui_size_text_dim(1))
 								{
 									ui_spacer_pixels(20, 1);
-									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
-										for (u32 track_index = 1; track_index < mplayer->library.tracks_count; track_index += 1)
+										for (u32 track_index = 0; track_index < mplayer->library.tracks_count; track_index += 1)
 										{
 											mplayer_queue_last(mplayer, mplayer->library.track_ids[track_index]);
 										}
@@ -2090,9 +2186,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 						{
-							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer->library.tracks_count - 1, 50.0f, 1.0f, track_index)
+							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer->library.tracks_count, 50.0f, 1.0f, track_index)
 							{
-								Mplayer_Track_ID track_id = mplayer->library.track_ids[track_index + 1];
+								Mplayer_Track_ID track_id = mplayer->library.track_ids[track_index];
 								mplayer_ui_track_item(mplayer, track_id);
 							}
 						}
@@ -2115,7 +2211,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_text_color(vec4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
-								ui_next_font_sizes(50);
+								ui_next_font_size(50);
 								ui_label(artist->name);
 								
 								ui_spacer(ui_size_parent_remaining());
@@ -2126,7 +2222,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									ui_pref_width(ui_size_text_dim(1))
 								{
 									ui_spacer_pixels(10, 1);
-									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
 										for (Mplayer_Track *track = artist->tracks.first; 
 											track; 
@@ -2208,12 +2304,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										ui_spacer_pixels(30, 1);
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
-										ui_next_font_sizes(19);
+										ui_next_font_size(19);
 										ui_label(str8_lit("Album"));
 										
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
-										ui_next_font_sizes(40);
+										ui_next_font_size(40);
 										ui_label(album->name);
 										
 										//ui_spacer_pixels(15, 1);
@@ -2222,19 +2318,19 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										{
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
-											ui_next_font_sizes(20);
+											ui_next_font_size(20);
 											ui_next_text_color(vec4(0.4f, 0.4f, 0.4f, 1));
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("%.*s###_album_artist_button", STR8_EXPAND(album->artist));
 											if (interaction.hover)
 											{
 												interaction.element->text_color = vec4(0.6f, 0.6f, 0.6f, 1);
 											}
-											if (interaction.pressed)
+											if (interaction.pressed_left)
 											{
 												interaction.element->text_color = vec4(1, 1, 1, 1);
 											}
 											
-											if (interaction.clicked)
+											if (interaction.clicked_left)
 											{
 												mplayer->selected_artist_id = album->artist_id;
 												mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(album->artist_id));
@@ -2248,14 +2344,14 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
 											ui_next_text_color(vec4(0.6f, 0.6f, 0.6f, 1));
-											ui_next_font_sizes(18);
+											ui_next_font_size(18);
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Album");
-											if (interaction.pressed)
+											if (interaction.pressed_left)
 											{
 												interaction.element->text_color = vec4(1, 1, 1, 1);
 											}
 											
-											if (interaction.clicked)
+											if (interaction.clicked_left)
 											{
 												for (Mplayer_Track *track = album->tracks.first; 
 													track; 
@@ -2310,7 +2406,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(50);
+							ui_next_font_size(50);
 							ui_label(str8_lit("Lyrics"));
 						}
 						
@@ -2328,7 +2424,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_background_color(vec4(1, 1, 1, 0));
 							ui_next_text_color(vec4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(50);
+							ui_next_font_size(50);
 							ui_label(str8_lit("Settings"));
 						}
 						
@@ -2364,11 +2460,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										{
 											add_location_el->background_color = vec4(0.3f,0.3f,0.3f,1);
 										}
-										if (add_loc_interaction.pressed)
+										if (add_loc_interaction.pressed_left)
 										{
 											add_location_el->background_color = vec4(0.17f,0.17f,0.17f,1);
 										}
-										if (add_loc_interaction.clicked)
+										if (add_loc_interaction.clicked_left)
 										{
 											mplayer->show_library_locations = !mplayer->show_library_locations;
 										}
@@ -2386,7 +2482,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 										ui_next_childs_axis(Axis2_Y);
 										ui_next_hover_cursor(Cursor_Hand);
 										UI_Element *loc_el = ui_element(str8_lit("add-location-button"), UI_FLAG_Draw_Background | UI_FLAG_Clickable);
-										if (ui_interaction_from_element(loc_el).clicked)
+										if (ui_interaction_from_element(loc_el).clicked_left)
 										{
 											mplayer_open_path_lister(mplayer, &mplayer->path_lister);
 										}
@@ -2431,7 +2527,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 												ui_next_height(ui_size_pixel(20, 1));
 												ui_next_roundness(10);
 												ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1));
-												if (ui_button_f("X###delete-location-%p", location).clicked)
+												if (ui_button_f("X###delete-location-%p", location).clicked_left)
 												{
 													location_to_delete = location_index;
 													mplayer_save_settings(mplayer);
@@ -2454,7 +2550,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_spacer_pixels(20,1);
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
-								if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked)
+								if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked_left)
 								{
 									platform->set_cursor(Cursor_Wait);
 									mplayer_index_library(mplayer);
@@ -2479,7 +2575,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_text_color(vec4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
-								ui_next_font_sizes(50);
+								ui_next_font_size(50);
 								String8 title = str8_f(&mplayer->frame_arena, "Queue(%d)", mplayer->queue.count - 1);
 								ui_label(title);
 								
@@ -2487,18 +2583,18 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								
 								ui_next_height(ui_size_by_childs(1));
 								ui_horizontal_layout()
-									ui_pref_font_sizes(19)
+									ui_pref_font_size(19)
 									ui_pref_height(ui_size_text_dim(1))
 									ui_pref_width(ui_size_text_dim(1))
 								{
-									if (mplayer_ui_underlined_button(str8_lit("Shuffle Queue")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Shuffle Queue")).clicked_left)
 									{
 										mplayer_queue_shuffle(mplayer);
 										mplayer_set_current(mplayer, 1);
 									}
 									ui_spacer_pixels(30, 1);
 									
-									if (mplayer_ui_underlined_button(str8_lit("Clear Queue")).clicked)
+									if (mplayer_ui_underlined_button(str8_lit("Clear Queue")).clicked_left)
 									{
 										mplayer_clear_queue(mplayer);
 									}
@@ -2507,7 +2603,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								}
 							}
 						}
-						
 						
 						ui_next_width(ui_size_parent_remaining());
 						ui_next_height(ui_size_parent_remaining());
@@ -2532,7 +2627,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_hover_cursor(Cursor_Hand);
 								UI_Element *track_el = ui_element_f(flags, "queue_track_%p%d", track, queue_index);
 								Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
-								if (interaction.clicked)
+								if (interaction.clicked_left)
 								{
 									mplayer_set_current(mplayer, Mplayer_Queue_Index(queue_index));
 								}
@@ -2599,12 +2694,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					current_playing_sample = current_track->flac_stream->next_sample_number;
 					
 					Mplayer_UI_Interaction progress = ui_slider_u64(str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count);
-					if (progress.pressed)
+					if (progress.pressed_left)
 					{
 						mplayer_queue_pause(mplayer);
 						flac_seek_stream(current_track->flac_stream, (u64)current_playing_sample);
 					}
-					else if (progress.released)
+					else if (progress.released_left)
 					{
 						mplayer_queue_resume(mplayer);
 					}
@@ -2672,8 +2767,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(20);
-							if (mplayer_ui_underlined_button_f("%.*s##_track_title_button", STR8_EXPAND(current_track->title)).clicked)
+							ui_next_font_size(20);
+							if (mplayer_ui_underlined_button_f("%.*s##_track_title_button", STR8_EXPAND(current_track->title)).clicked_left)
 							{
 								mplayer->selected_album_id = current_track->album_id;
 								mplayer_change_mode(mplayer, MODE_Album_Tracks, to_item_id(current_track->album_id));
@@ -2683,8 +2778,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_next_height(ui_size_text_dim(1));
 							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_sizes(15);
-							if (mplayer_ui_underlined_button_f("%.*s##_track_artist_button", STR8_EXPAND(current_track->artist)).clicked)
+							ui_next_font_size(15);
+							if (mplayer_ui_underlined_button_f("%.*s##_track_artist_button", STR8_EXPAND(current_track->artist)).clicked_left)
 							{
 								mplayer->selected_artist_id = current_track->artist_id;
 								mplayer_change_mode(mplayer, MODE_Artist_Albums, to_item_id(current_track->artist_id));
@@ -2714,7 +2809,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_roundness(20);
 							ui_next_width(ui_size_pixel(40, 1));
 							ui_next_height(ui_size_pixel(40, 1));
-							if (ui_button(str8_lit("<<")).clicked && is_valid(mplayer, mplayer->queue.current_index))
+							if (ui_button(str8_lit("<<")).clicked_left && is_valid(mplayer, mplayer->queue.current_index))
 							{
 								if (mplayer->input.time - mplayer->time_since_last_play <= 1.f)
 									mplayer_play_prev_in_queue(mplayer);
@@ -2730,7 +2825,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_roundness(25);
 							ui_next_width(ui_size_pixel(50, 1));
 							ui_next_height(ui_size_pixel(50, 1));
-							if (ui_button(mplayer_is_queue_playing(mplayer)? str8_lit("II") : str8_lit("I>")).clicked)
+							if (ui_button(mplayer_is_queue_playing(mplayer)? str8_lit("II") : str8_lit("I>")).clicked_left)
 							{
 								mplayer_queue_toggle_play(mplayer);
 							}
@@ -2739,7 +2834,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							ui_next_roundness(20);
 							ui_next_width(ui_size_pixel(40, 1));
 							ui_next_height(ui_size_pixel(40, 1));
-							if (ui_button(str8_lit(">>")).clicked)
+							if (ui_button(str8_lit(">>")).clicked_left)
 							{
 								mplayer_play_next_in_queue(mplayer);
 							}

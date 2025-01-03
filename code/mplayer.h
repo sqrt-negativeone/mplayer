@@ -12,6 +12,8 @@
 #include "mplayer_buffer.h"
 #include "mplayer_thread_context.cpp"
 
+#include "mplayer_ui.h"
+
 enum Cursor_Shape
 {
 	Cursor_Arrow,
@@ -372,6 +374,12 @@ struct Mplayer_Queue
 	Mplayer_Track_ID tracks[65536];
 };
 
+enum Mplayer_Ctx_Menu
+{
+	Track_Context_Menu,
+	
+	Context_Menu_COUNT,
+};
 
 struct Mplayer_Context
 {
@@ -409,6 +417,9 @@ struct Mplayer_Context
 	
 	b32 show_library_locations;
 	MPlayer_Settings settings;
+	
+	UI_ID ctx_menu_ids[Context_Menu_COUNT];
+	Mplayer_Item_ID ctx_menu_item_id;
 };
 
 typedef void Mplayer_Initialize_Proc(Mplayer_Context *mplayer);

@@ -654,6 +654,13 @@ range_center_dim(V2_F32 center, V2_F32 dim)
   return result;
 }
 
+internal inline Range2_F32 
+range_topleft_dim(V2_F32 topleft, V2_F32 dim)
+{
+  Range2_F32 result = range_min_max(vec2(topleft.x, topleft.y - dim.height), vec2(topleft.x + dim.width, topleft.y));
+  return result;
+}
+
 internal V2_I32
 range_dim(Range2_I32 range)
 {
@@ -810,6 +817,18 @@ is_range_intersect(Range2_F32 range1, Range2_F32 range2)
 
 internal Range2_F32
 range_intersection(Range2_F32 range1, Range2_F32 range2)
+{
+	Range2_F32 result;
+	result.min_y = MAX(range1.min_y, range2.min_y);
+	result.max_y = MIN(range1.max_y, range2.max_y);
+	
+	result.min_x = MAX(range1.min_x, range2.min_x);
+	result.max_x = MIN(range1.max_x, range2.max_x);
+	return result;
+}
+
+internal Range2_F32
+range_union(Range2_F32 range1, Range2_F32 range2)
 {
 	Range2_F32 result;
 	result.min_y = MAX(range1.min_y, range2.min_y);

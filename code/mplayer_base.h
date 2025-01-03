@@ -29,6 +29,10 @@ struct u128 {u64 v[2];};
 #define global        static
 #define local_persist static
 
+#define _defer_loop(begin, end) for(i32 __i__ = ((begin), 0); !__i__; (__i__ += 1, (end)))
+#define _defer_loop_checked(begin, end) for(i32 __i__ = 2 * !(begin); (__i__ == 2? ((end), 0): !__i__); (__i__ += 1, (end)))
+#define defer(exp) _defer_loop(0, exp)
+
 #define fallthrough /*fallthrough*/
 
 #if defined(_MSC_VER) 

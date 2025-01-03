@@ -68,35 +68,69 @@ typedef UI_CUSTOM_DRAW_PROC(UI_Custom_Draw_Proc);
 enum UI_Interaction_Flag
 {
 	UI_Interaction_Hover    = 1 << 0,
-	UI_Interaction_Released = 1 << 1,
-	UI_Interaction_Clicked  = 1 << 2,
-	UI_Interaction_Pressed  = 1 << 3,
-	UI_Interaction_Dragging = 1 << 4,
-	UI_Interaction_Selected = 1 << 5,
+	
+	UI_Interaction_Released_Left   = 1 << 1,
+	UI_Interaction_Released_Middle = 1 << 2,
+	UI_Interaction_Released_Right  = 1 << 3,
+	UI_Interaction_Released_M4     = 1 << 4,
+	UI_Interaction_Released_M5     = 1 << 5,
+	
+	UI_Interaction_Clicked_Left    = 1 << 6,
+	UI_Interaction_Clicked_Middle  = 1 << 7,
+	UI_Interaction_Clicked_Right   = 1 << 8,
+	UI_Interaction_Clicked_M4      = 1 << 9,
+	UI_Interaction_Clicked_M5      = 1 << 10,
+	
+	UI_Interaction_Pressed_Left    = 1 << 11,
+	UI_Interaction_Pressed_Middle  = 1 << 12,
+	UI_Interaction_Pressed_Right   = 1 << 13,
+	UI_Interaction_Pressed_M4      = 1 << 14,
+	UI_Interaction_Pressed_M5      = 1 << 15,
+	
+	UI_Interaction_Dragging = 1 << 16,
+	UI_Interaction_Selected = 1 << 17,
 };
 
 struct Mplayer_UI_Interaction
 {
 	UI_Element *element;
+	V2_F32 pos;
+	
 	union {
 		u32 flags;
 		struct
 		{
 			u32 hover : 1;
-			u32 released : 1;
-			u32 clicked : 1;
-			u32 pressed : 1;
+			u32 released_left : 1;
+			u32 released_middle : 1;
+			u32 released_right : 1;
+			u32 released_m4 : 1;
+			u32 released_m5 : 1;
+			
+			u32 clicked_left : 1;
+			u32 clicked_middle : 1;
+			u32 clicked_right : 1;
+			u32 clicked_m4 : 1;
+			u32 clicked_m5 : 1;
+			
+			u32 pressed_left : 1;
+			u32 pressed_middle : 1;
+			u32 pressed_right : 1;
+			u32 pressed_m4 : 1;
+			u32 pressed_m5 : 1;
 			u32 dragging : 1;
 			u32 selected : 1;
 		};
 	};
 };
 
+
 enum UI_Layer
 {
 	UI_Layer_Default,
 	UI_Layer_Indicators,
 	UI_Layer_Popup,
+	UI_Layer_Ctx_Menu,
 };
 
 struct UI_Element
@@ -111,7 +145,7 @@ struct UI_Element
 	
 	UI_Element *next_hash;
 	UI_Element *prev_hash;
-	u64 id;
+	UI_ID id;
 	
 	u64 frame_index;
 	Mplayer_UI_Interaction last_frame_interaction;
@@ -136,6 +170,7 @@ struct UI_Element
 	
 	V2_F32 rel_top_left_pos; // relative to the parent element
 	
+	V2_F32 computed_top_left;
 	V2_F32 computed_dim;
 	Range2_F32 computed_rect;
 	
@@ -213,6 +248,20 @@ struct UI_Size_Stack
 	b32 auto_pop;
 };
 
+struct UI_Elements_Stack
+{
+	UI_Element *stack[UI_STACK_MAX_SIZE];
+	u32 top;
+	b32 auto_pop;
+};
+
+struct UI_ID_Stack
+{
+	UI_ID stack[UI_STACK_MAX_SIZE];
+	u32 top;
+	b32 auto_pop;
+};
+
 #define UI_ELEMENETS_HASHTABLE_SIZE 128
 struct Mplayer_UI
 {
@@ -227,13 +276,15 @@ struct Mplayer_UI
 	V2_F32 mouse_drag_start_pos;
 	V2_F32 mouse_pos;
 	
-	u64 selected_id;
-	u64 hot_id;
-	u64 active_id;
+	UI_ID selected_id;
+	UI_ID active_id;
+	UI_ID hot_id[Mouse_COUNT];
 	
 	f32 recent_click_time;
 	u32 input_cursor;
 	
+	// NOTE(fakhri): these probably better stored outside of the UI context but in the app side instead
+	// {
 	u32 list_items_count;
 	u32 list_item_index;
 	u32 list_first_visible_row;
@@ -253,7 +304,10 @@ struct Mplayer_UI
 	i32 grid_row_index;
 	f32 grid_vpadding;
 	V2_F32 grid_item_dim;
+	// }
 	
+	UI_ID_Stack seeds;
+	UI_Elements_Stack parents;
 	UI_Fonts_Stack    fonts;
 	UI_F32_Stack      font_sizes;
 	UI_Textures_Stack textures;
@@ -270,15 +324,38 @@ struct Mplayer_UI
 	UI_U32_Stack      layers;
 	UI_Size_Stack     sizes[Axis2_COUNT];
 	
+	b32 next_ctx_menu_open;
+	b32 ctx_menu_open;
+	UI_ID next_ctx_menu_id;
+	V2_F32 next_ctx_menu_origin;
+	UI_ID ctx_menu_id;
+	V2_F32 ctx_menu_origin;
+	UI_Element *ctx_menu_root;
 	UI_Element *modal_root;
 	UI_Element *root;
-	UI_Element *curr_parent;
 	
 	UI_Element *free_elements;
 	UI_Elements_Bucket elements_table[UI_ELEMENETS_HASHTABLE_SIZE];
 };
 
 global Mplayer_UI *g_ui;
+
+
+#define UI_NULL_ID {0}
+
+internal b32
+ui_id_is_equal(UI_ID a, UI_ID b)
+{
+	b32 result = a.value == b.value;
+	return result;
+}
+
+internal b32
+ui_id_is_null(UI_ID a)
+{
+	b32 result = ui_id_is_equal(a, UI_NULL_ID);
+	return result;
+}
 
 internal UI_Size
 ui_make_size(UI_Size_Kind kind, f32 value, f32 strictness)
@@ -318,8 +395,6 @@ if ((stack_name).auto_pop) {           \
 #define ui_size_by_childs(strictness)                 ui_make_size(UI_Size_Kind_By_Childs, 0, strictness)
 #define ui_size_parent_remaining() ui_size_percent(1, 0)
 
-#define _defer_loop(exp1, exp2) for(i32 __i__ = ((exp1), 0); __i__ == 0; (__i__ += 1, (exp2)))
-#define defer(exp) _defer_loop(0, exp)
 #define ui_parent(p) _defer_loop(ui_push_parent(p), ui_pop_parent())
 #define ui_vertical_layout()   ui_parent(ui_layout(Axis2_Y))
 #define ui_horizontal_layout() ui_parent(ui_layout(Axis2_X))
@@ -334,7 +409,7 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_border_thickness(border_thickness) _defer_loop(ui_push_border_thickness(border_thickness), ui_pop_border_thickness())
 #define ui_pref_texture(border_thickness)          _defer_loop(ui_push_texture(texture), ui_pop_texture())
 #define ui_pref_font(font)                         _defer_loop(ui_push_font(font), ui_pop_font())
-#define ui_pref_font_sizes(font_size)              _defer_loop(ui_push_font_sizes(font_size), ui_pop_font_sizes())
+#define ui_pref_font_size(font_size)              _defer_loop(ui_push_font_sizes(font_size), ui_pop_font_sizes())
 #define ui_pref_texture_tint_color(tint_color)     _defer_loop(ui_push_texture_tint_color(tint_color), ui_pop_texture_tint_color())
 #define ui_pref_flags(flags)     _defer_loop(ui_push_flags(flags), ui_pop_flags())
 #define ui_pref_roundness(roundness)   _defer_loop(ui_push_roundness(roundness), ui_pop_roundness())
@@ -342,6 +417,8 @@ if ((stack_name).auto_pop) {           \
 #define ui_pref_hover_cursor(hover_cursor)   _defer_loop(ui_push_hover_cursor(hover_cursor), ui_pop_hover_cursor())
 #define ui_pref_childs_axis(axis)   _defer_loop(ui_push_childs_axis(axis), ui_pop_childs_axis())
 #define ui_pref_layer(layer)   _defer_loop(ui_push_layer(layer), ui_pop_layer())
+#define ui_pref_parent(parent)   _defer_loop(ui_push_parent(parent), ui_pop_parent())
+#define ui_pref_seed(seed)   _defer_loop(ui_push_seed(seed), ui_pop_seed())
 
 #define ui_auto_pop_style() do {              \
 ui_auto_pop_stack(g_ui->fonts);               \
@@ -360,6 +437,8 @@ ui_auto_pop_stack(g_ui->scroll_steps);        \
 ui_auto_pop_stack(g_ui->hover_cursors);       \
 ui_auto_pop_stack(g_ui->childs_axis);         \
 ui_auto_pop_stack(g_ui->layers);         \
+ui_auto_pop_stack(g_ui->parents);         \
+ui_auto_pop_stack(g_ui->seeds);         \
 } while (0)
 
 //- NOTE(fakhri): background color stack
@@ -528,7 +607,7 @@ ui_push_font_sizes(f32 font_size)
 	ui_stack_push(g_ui->font_sizes, font_size);
 }
 internal void
-ui_next_font_sizes(f32 font_size)
+ui_next_font_size(f32 font_size)
 {
 	ui_stack_push_auto_pop(g_ui->font_sizes, font_size);
 }
@@ -640,7 +719,7 @@ ui_pop_childs_axis()
 	ui_stack_pop(g_ui->childs_axis);
 }
 
-//- NOTE(fakhri): texture tint color stack
+//- NOTE(fakhri): layers stack
 internal void
 ui_push_layer(u32 layer)
 {
@@ -657,255 +736,74 @@ ui_pop_layer()
 	ui_stack_pop(g_ui->layers);
 }
 
-internal void
-ui_push_default_style()
-{
-	ui_push_font(g_ui->def_font);
-	ui_push_font_sizes(20.0f);
-	ui_push_texture(NULL_TEXTURE);
-	ui_push_text_color(vec4(1));
-	ui_push_texture_tint_color(vec4(1));
-	ui_push_background_color(vec4(0));
-	ui_push_border_color(vec4(0,0,0,1));
-	ui_push_border_thickness(0);
-	ui_push_roundness(0);
-	ui_push_flags(0);
-	ui_push_scroll_step(vec2(0, -50));
-	ui_push_hover_cursor(Cursor_Arrow);
-	ui_push_childs_axis(Axis2_Y);
-	ui_push_layer(UI_Layer_Default);
-	ui_push_width(ui_size_parent_remaining());
-	ui_push_height(ui_size_parent_remaining());
-}
 
-internal void
-ui_reset_default_style()
-{
-	g_ui->fonts.top = 0;
-	g_ui->font_sizes.top = 0;
-	g_ui->textures.top = 0;
-	g_ui->text_colors.top = 0;
-	g_ui->texture_tint_colors.top = 0;
-	g_ui->bg_colors.top = 0;
-	g_ui->border_colors.top = 0;
-	g_ui->border_thickness.top = 0;
-	g_ui->roundness_stack.top = 0;
-	g_ui->flags_stack.top = 0;
-	g_ui->scroll_steps.top = 0;
-	g_ui->hover_cursors.top = 0;
-	g_ui->childs_axis.top = 0;
-	g_ui->layers.top = 0;
-	g_ui->sizes[Axis2_X].top = 0;
-	g_ui->sizes[Axis2_Y].top = 0;
-}
-
-
-internal void
-ui_update_element_interaction(UI_Element *element)
-{
-	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
-	interaction.element = element;
-	Range2_F32 interaction_rect = element->computed_rect;
-	u64 id = element->id;
-	for (UI_Element *p = element->parent; p; p = p->parent)
-	{
-		if (p->id)
-		{
-			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
-		}
-	}
-	
-	
-	b32 ignore = 0;
-	
-	if (g_ui->modal_root)
-	{
-		b32 in_modal = 0;
-		for (UI_Element *p = element->parent; p; p = p->parent)
-		{
-			if (p == g_ui->modal_root)
-			{
-				in_modal = 1;
-				break;
-			}
-		}
-		
-		if (!in_modal)
-		{
-			ignore = 1;
-		}
-	}
-	
-	V2_F32 mouse_p = g_ui->mouse_pos;
-	b32 mouse_over = is_in_range(interaction_rect, mouse_p) && !ignore;
-	
-	// TODO(fakhri): Bug: 
-	// - click an element
-	// - move the mouse over a child of that element
-	// - release the mouse, the parent element stays active and is not reset.
-	// 
-	// If we click somewhere empty and drag the mouse over the element
-	// and release we get a click event. this should not happen.
-	
-	for (Mplayer_Input_Event *e = g_ui->input->first_event, *next = 0; e; e = next)
-	{
-		next = e->next;
-		b32 consumed = 0;
-		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Move)
-		{
-			if (mouse_over)
-			{
-				consumed = 1;
-				g_ui->hot_id = id;
-			}
-			else if (g_ui->hot_id == id)
-			{
-				consumed = 0;
-				g_ui->hot_id = 0;
-			}
-		}
-		
-		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Key && e->key == Mouse_Left)
-		{
-			if (mouse_over && e->is_down)
-			{
-				consumed = 1;
-				g_ui->active_id = id;
-				g_ui->hot_id = id;
-				g_ui->mouse_drag_start_pos = mouse_p;
-				g_ui->recent_click_time = g_ui->input->time;
-				set_flag(interaction.flags, UI_Interaction_Pressed);
-			}
-			if (!e->is_down)
-			{
-				if (g_ui->hot_id == id)
-				{
-					consumed = 1;
-					if (g_ui->active_id == id)
-						set_flag(interaction.flags, UI_Interaction_Clicked);
-					g_ui->hot_id = 0;
-				}
-				
-				if (g_ui->active_id == id)
-				{
-					consumed = 1;
-					set_flag(interaction.flags, UI_Interaction_Released);
-					g_ui->active_id = 0;
-				}
-				
-				if (has_flag(element->flags, UI_FLAG_Selectable))
-				{
-					if (!mouse_over && g_ui->selected_id == id) g_ui->selected_id = 0;
-				}
-				
-			}
-		}
-		
-		if (mouse_over && has_flag(element->flags, UI_FLAG_View_Scroll) && e->kind == Event_Kind_Mouse_Wheel)
-		{
-			consumed = 1;
-			element->view_target_scroll += element->scroll_step * e->scroll;
-			
-			V2_F32 bounds_dim = element->child_bounds;
-			element->view_target_scroll.x = CLAMP(0, element->view_target_scroll.x, bounds_dim.width);
-			element->view_target_scroll.y = CLAMP(0, element->view_target_scroll.y, bounds_dim.height);
-		}
-		
-		if (consumed)
-		{
-			DLLRemove(g_ui->input->first_event, g_ui->input->last_event, e);
-		}
-	}
-	
-	if (mouse_over)
-	{
-		set_flag(interaction.flags, UI_Interaction_Hover);
-	}
-	else
-	{
-		if (g_ui->hot_id == id)
-		{
-			g_ui->hot_id = 0;
-		}
-	}
-	
-	if (g_ui->active_id == id)
-	{
-		set_flag(interaction.flags, UI_Interaction_Pressed);
-	}
-	
-	if (has_flag(element->flags, UI_FLAG_Selectable))
-	{
-		if (interaction.clicked)
-		{
-			g_ui->selected_id = id;
-		}
-		if (!mouse_over && interaction.released && g_ui->selected_id == id)
-		{
-			g_ui->selected_id = 0;
-		}
-		
-		if (g_ui->selected_id == id)
-		{
-			set_flag(interaction.flags, UI_Interaction_Selected);
-		}
-	}
-	
-	element->last_frame_interaction = interaction;
-}
-
-internal Mplayer_UI_Interaction
-ui_interaction_from_element(UI_Element *element)
-{
-	Mplayer_UI_Interaction interaction = element->last_frame_interaction;
-	return interaction;
-}
-
+//- NOTE(fakhri): parents stack
 internal void
 ui_push_parent(UI_Element *node)
 {
-	g_ui->curr_parent = node;
+	ui_stack_push(g_ui->parents, node);
 }
-
+internal void
+ui_next_parent(UI_Element *node)
+{
+	ui_stack_push_auto_pop(g_ui->parents, node);
+}
 internal void
 ui_pop_parent()
 {
-	UI_Element *parent = g_ui->curr_parent;
-	if (parent)
-	{
-		g_ui->curr_parent = parent->parent;
-	}
+	ui_stack_pop(g_ui->parents);
 }
+
+//- NOTE(fakhri): seeds stack
+internal void
+ui_push_seed(UI_ID seed)
+{
+	ui_stack_push(g_ui->seeds, seed);
+}
+internal void
+ui_next_seed(UI_ID seed)
+{
+	ui_stack_push_auto_pop(g_ui->seeds, seed);
+}
+internal void
+ui_pop_seed()
+{
+	ui_stack_pop(g_ui->seeds);
+}
+
+
 
 // NOTE(fakhri): from http://www.cse.yorku.ca/~oz/hash.html
 // TODO(fakhri): I just noticed this is the same as str8_hash function from mplayer.cpp but seeded with 5381 (choosen randomly lol)
 // change str8_hash to make it accept a seed and use that instead of having two string hashing functions that do the same thing
-internal u64
-ui_hash_key(String8 key)
+internal UI_ID
+ui_id_from_string(UI_ID seed, String8 key)
 {
 	u64 hash = 0;
 	if (key.len)
 	{
-		hash = 5381;
+		hash = seed.value;
 		for (u32 i = 0; i < key.len; i += 1)
 		{
 			hash = ((hash << 5) + hash) + key.str[i];
 		}
 	}
-	return hash;
+	
+	UI_ID result = {hash};
+	return result;
 }
 
 
 internal UI_Element *
-ui_element_by_id(u64 id)
+ui_element_by_id(UI_ID id)
 {
 	UI_Element *result = 0;
-	u32 bucket_index = id % array_count(g_ui->elements_table);
-	if (id)
+	u32 bucket_index = id.value % array_count(g_ui->elements_table);
+	if (!ui_id_is_null(id))
 	{
 		for (UI_Element *ht_node = g_ui->elements_table[bucket_index].first; ht_node; ht_node = ht_node->next_hash)
 		{
-			if (ht_node->id == id)
+			if (ui_id_is_equal(ht_node->id, id))
 			{
 				result = ht_node;
 				break;
@@ -960,14 +858,15 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	UI_Element *result = 0;
 	
 	//- NOTE(fakhri): check hash table
+	UI_ID seed = ui_stack_top(g_ui->seeds);
 	String8 key = ui_key_from_string(string);
-	u64 id = ui_hash_key(key);
-	u32 bucket_index = id % array_count(g_ui->elements_table);
-	if (id)
+	UI_ID id = ui_id_from_string(seed, key);
+	u32 bucket_index = id.value % array_count(g_ui->elements_table);
+	if (!ui_id_is_null(id))
 	{
 		for (UI_Element *ht_node = g_ui->elements_table[bucket_index].first; ht_node; ht_node = ht_node->next_hash)
 		{
-			if (ht_node->id == id && ht_node->frame_index < g_ui->frame_index)
+			if (ui_id_is_equal(ht_node->id, id) && ht_node->frame_index < g_ui->frame_index)
 			{
 				result = ht_node;
 				break;
@@ -1050,8 +949,9 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	
 	if (new_element && has_flag(flags, UI_FLAG_Animate_Pos))
 	{
-		for (UI_Element *p = g_ui->curr_parent; p; p = p->parent)
+		for (i32 i = g_ui->parents.top - 1; i >= 0; i -= 1)
 		{
+			UI_Element *p = g_ui->parents.stack[i];
 			if (p->computed_rect.min_x && p->computed_rect.min_y && p->computed_rect.max_x && p->computed_rect.max_y)
 			{
 				V2_F32 p_pos = range_center(p->computed_rect);
@@ -1062,10 +962,11 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 		}
 	}
 	
-	if (g_ui->curr_parent)
+	if (g_ui->parents.top)
 	{
-		DLLPushBack(g_ui->curr_parent->first, g_ui->curr_parent->last, result);
-		result->parent = g_ui->curr_parent;
+		UI_Element *curr_parent = ui_stack_top(g_ui->parents);
+		DLLPushBack(curr_parent->first, curr_parent->last, result);
+		result->parent = curr_parent;
 	}
 	
 	// ui_element_push(result);
@@ -1086,6 +987,289 @@ ui_element_f(UI_Element_Flags flags, const char *fmt, ...)
 	return result;
 }
 
+internal void
+ui_push_default_style()
+{
+	ui_push_font(g_ui->def_font);
+	ui_push_font_sizes(20.0f);
+	ui_push_texture(NULL_TEXTURE);
+	ui_push_text_color(vec4(1));
+	ui_push_texture_tint_color(vec4(1));
+	ui_push_background_color(vec4(0));
+	ui_push_border_color(vec4(0,0,0,1));
+	ui_push_border_thickness(0);
+	ui_push_roundness(0);
+	ui_push_flags(0);
+	ui_push_scroll_step(vec2(0, -50));
+	ui_push_hover_cursor(Cursor_Arrow);
+	ui_push_childs_axis(Axis2_Y);
+	ui_push_layer(UI_Layer_Default);
+	ui_push_width(ui_size_parent_remaining());
+	ui_push_height(ui_size_parent_remaining());
+	ui_push_seed({293847});
+}
+
+internal void
+ui_reset_default_style()
+{
+	g_ui->fonts.top = 0;
+	g_ui->font_sizes.top = 0;
+	g_ui->textures.top = 0;
+	g_ui->text_colors.top = 0;
+	g_ui->texture_tint_colors.top = 0;
+	g_ui->bg_colors.top = 0;
+	g_ui->border_colors.top = 0;
+	g_ui->border_thickness.top = 0;
+	g_ui->roundness_stack.top = 0;
+	g_ui->flags_stack.top = 0;
+	g_ui->scroll_steps.top = 0;
+	g_ui->hover_cursors.top = 0;
+	g_ui->childs_axis.top = 0;
+	g_ui->layers.top = 0;
+	g_ui->sizes[Axis2_X].top = 0;
+	g_ui->sizes[Axis2_Y].top = 0;
+	g_ui->parents.top = 0;
+	g_ui->seeds.top = 0;
+}
+
+internal b32
+ui_is_ctx_menu_open(UI_ID id)
+{
+	b32 result = g_ui->ctx_menu_open && ui_id_is_equal(g_ui->ctx_menu_id, id);
+	return result;
+}
+
+internal void
+ui_close_ctx_menu()
+{
+	g_ui->next_ctx_menu_open = 0;
+	g_ui->next_ctx_menu_id = UI_NULL_ID;
+}
+
+internal void
+ui_open_ctx_menu(V2_F32 origin, UI_ID id)
+{
+	if (!ui_is_ctx_menu_open(id))
+	{
+		g_ui->next_ctx_menu_open = 1;
+		g_ui->next_ctx_menu_id = id;
+		g_ui->next_ctx_menu_origin = origin;
+	}
+	
+	ui_push_layer(UI_Layer_Popup);
+	g_ui->ctx_menu_root = ui_element(str8_lit("ctx-menu"), UI_FLAG_Floating | UI_FLAG_Clip);
+}
+#define ui_ctx_menu(id) _defer_loop_checked(ui_begin_ctx_menu(id), ui_end_ctx_menu())
+
+internal b32
+ui_begin_ctx_menu(UI_ID id)
+{
+	ui_push_parent(g_ui->root);
+	ui_push_parent(g_ui->ctx_menu_root);
+	b32 is_open = ui_id_is_equal(g_ui->ctx_menu_id, id);
+	if (is_open)
+	{
+		
+	}
+	return is_open;
+}
+
+internal void
+ui_end_ctx_menu()
+{
+	ui_pop_parent();
+	ui_pop_parent();
+}
+
+internal void
+ui_update_element_interaction(UI_Element *element)
+{
+	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
+	interaction.element = element;
+	Range2_F32 interaction_rect = element->computed_rect;
+	UI_ID id = element->id;
+	for (UI_Element *p = element->parent; p; p = p->parent)
+	{
+		if (!ui_id_is_null(p->id))
+		{
+			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
+		}
+	}
+	
+	
+	b32 ignore = 0;
+	if (g_ui->modal_root)
+	{
+		b32 in_modal = 0;
+		for (UI_Element *p = element->parent; p; p = p->parent)
+		{
+			if (p == g_ui->modal_root)
+			{
+				in_modal = 1;
+				break;
+			}
+		}
+		
+		if (!in_modal)
+		{
+			ignore = 1;
+		}
+	}
+	
+	Range2_F32 ignored_rect = ZERO_STRUCT;
+	b32 in_ctx = 0;
+	if (g_ui->ctx_menu_open)
+	{
+		for (UI_Element *p = element->parent; p; p = p->parent)
+		{
+			if (p == g_ui->ctx_menu_root)
+			{
+				in_ctx = 1;
+				break;
+			}
+		}
+		
+		if (!in_ctx)
+		{
+			ignored_rect = g_ui->ctx_menu_root->computed_rect;
+		}
+	}
+	
+	V2_F32 mouse_p = g_ui->mouse_pos;
+	b32 mouse_over = !is_in_range(ignored_rect, mouse_p) && is_in_range(interaction_rect, mouse_p) && !ignore;
+	
+	// TODO(fakhri): Bug: 
+	// - click an element
+	// - move the mouse over a child of that element
+	// - release the mouse, the parent element stays active and is not reset.
+	// 
+	// If we click somewhere empty and drag the mouse over the element
+	// and release we get a click event. this should not happen.
+	
+	for (Mplayer_Input_Event *e = g_ui->input->first_event, *next = 0; e; e = next)
+	{
+		next = e->next;
+		b32 consumed = 0;
+		// NOTE(fakhri): handle ctx menu close events
+		if (g_ui->ctx_menu_open && !is_in_range(g_ui->ctx_menu_root->computed_rect, mouse_p))
+		{
+			if (e->kind == Event_Kind_Mouse_Key)
+			{
+				ui_close_ctx_menu();
+			}
+		}
+		
+		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Move)
+		{
+			if (mouse_over)
+			{
+				consumed = 1;
+				g_ui->active_id = id;
+			}
+			else if (ui_id_is_equal(g_ui->active_id, id))
+			{
+				consumed = 0;
+				g_ui->active_id = UI_NULL_ID;
+			}
+		}
+		
+		if (has_flag(element->flags, UI_FLAG_Left_Mouse_Clickable) && e->kind == Event_Kind_Mouse_Key)
+		{
+			if (mouse_over && e->is_down)
+			{
+				consumed = 1;
+				g_ui->hot_id[e->key] = id;
+				g_ui->active_id = id;
+				g_ui->mouse_drag_start_pos = mouse_p;
+				g_ui->recent_click_time = g_ui->input->time;
+				set_flag(interaction.flags, UI_Interaction_Pressed_Left<<e->key);
+				interaction.pos = e->pos;
+			}
+			if (!e->is_down)
+			{
+				if (ui_id_is_equal(g_ui->active_id, id))
+				{
+					consumed = 1;
+					if (ui_id_is_equal(g_ui->hot_id[e->key], id))
+						set_flag(interaction.flags, UI_Interaction_Clicked_Left<<e->key);
+					g_ui->active_id = UI_NULL_ID;
+				}
+				
+				if (ui_id_is_equal(g_ui->hot_id[e->key], id))
+				{
+					consumed = 1;
+					set_flag(interaction.flags, UI_Interaction_Released_Left<<e->key);
+					g_ui->hot_id[e->key] = UI_NULL_ID;
+				}
+				
+				if (has_flag(element->flags, UI_FLAG_Selectable))
+				{
+					if (!mouse_over && ui_id_is_equal(g_ui->selected_id, id)) g_ui->selected_id = UI_NULL_ID;
+				}
+				
+			}
+		}
+		
+		if (mouse_over && has_flag(element->flags, UI_FLAG_View_Scroll) && e->kind == Event_Kind_Mouse_Wheel)
+		{
+			consumed = 1;
+			element->view_target_scroll += element->scroll_step * e->scroll;
+			
+			V2_F32 bounds_dim = element->child_bounds;
+			element->view_target_scroll.x = CLAMP(0, element->view_target_scroll.x, bounds_dim.width);
+			element->view_target_scroll.y = CLAMP(0, element->view_target_scroll.y, bounds_dim.height);
+		}
+		
+		if (consumed)
+		{
+			DLLRemove(g_ui->input->first_event, g_ui->input->last_event, e);
+		}
+	}
+	
+	if (mouse_over)
+	{
+		set_flag(interaction.flags, UI_Interaction_Hover);
+	}
+	else
+	{
+		if (ui_id_is_equal(g_ui->active_id, id))
+		{
+			g_ui->active_id = UI_NULL_ID;
+		}
+	}
+	
+	for(u32 i = 0; i < Mouse_COUNT; i += 1)
+	{
+		if (ui_id_is_equal(g_ui->hot_id[i], id))
+			set_flag(interaction.flags, UI_Interaction_Pressed_Left<<i);
+	}
+	
+	if (has_flag(element->flags, UI_FLAG_Selectable))
+	{
+		if (interaction.clicked_left)
+		{
+			g_ui->selected_id = id;
+		}
+		if (!mouse_over && interaction.released_left && ui_id_is_equal(g_ui->selected_id, id))
+		{
+			g_ui->selected_id = UI_NULL_ID;
+		}
+		
+		if (ui_id_is_equal(g_ui->selected_id, id))
+		{
+			set_flag(interaction.flags, UI_Interaction_Selected);
+		}
+	}
+	
+	element->last_frame_interaction = interaction;
+}
+
+internal Mplayer_UI_Interaction
+ui_interaction_from_element(UI_Element *element)
+{
+	Mplayer_UI_Interaction interaction = element->last_frame_interaction;
+	return interaction;
+}
 
 //- NOTE(fakhri): layout
 internal UI_Element *
@@ -1099,7 +1283,7 @@ ui_layout(Axis2 child_layout_axis)
 internal void
 ui_spacer(UI_Size size)
 {
-	UI_Element *parent = g_ui->curr_parent;
+	UI_Element *parent = ui_stack_top(g_ui->parents);
 	if (parent)
 	{
 		ui_next_size(parent->child_layout_axis, size);
@@ -1162,7 +1346,7 @@ UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
 	UI_Input_Field_Draw_Data *data = (UI_Input_Field_Draw_Data *)element->custom_draw_data;
 	
 	// NOTE(fakhri): draw cursor
-	if (g_ui->selected_id == element->id)
+	if (ui_id_is_equal(g_ui->selected_id, element->id))
 	{
 		V2_F32 pos = range_center(element->rect);
 		f32 blink_t = (sin_f(2 * PI32 * (g_ui->input->time - g_ui->recent_click_time)) + 1) / 2;
@@ -1205,7 +1389,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 		f32 font_size = ui_stack_top(g_ui->font_sizes);
 		
 		V2_F32 text_dim = fnt_compute_text_dim(font, font_size, *buffer);
-		if (interaction.clicked || interaction.pressed)
+		if (interaction.clicked_left || interaction.pressed_left)
 		{
 			V2_F32 pos = range_center(text_input->rect);
 			f32 test_x = pos.x - 0.5f * text_dim.width;
@@ -1360,7 +1544,7 @@ ui_slider_f32(String8 string, f32 *val, f32 min, f32 max)
 	f32 percent = map_into_range_zo(min, *val, max);
 	
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(slider);
-	if (interaction.pressed)
+	if (interaction.pressed_left)
 	{
 		percent = map_into_range_zo(slider->computed_rect.min_x, 
 			g_ui->mouse_pos.x,
@@ -1383,7 +1567,7 @@ ui_slider_u64(String8 string, u64 *val, u64 min, u64 max)
 	f32 percent = (f32)map_into_range_zo((f64)min, (f64)*val, (f64)max);
 	
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(slider);
-	if (interaction.pressed)
+	if (interaction.pressed_left)
 	{
 		percent = map_into_range_zo(slider->computed_rect.min_x, 
 			g_ui->mouse_pos.x,
@@ -1735,16 +1919,19 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 		}
 		
 		// NOTE(fakhri): compute on screen position from relative positions
-		f32 parent_origin = (axis == Axis2_X)? node->computed_rect.min_x:node->computed_rect.max_y;
+		f32 parent_origin = node->computed_top_left.v[axis];
 		parent_origin += ((axis == Axis2_Y)? 1:-1) * node->view_scroll.v[axis];
 		for (UI_Element *child = node->first; child; child = child->next)
 		{
+			if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 			f32 start_offset = parent_origin;
 			if (axis == Axis2_Y)
 				start_offset -= child->computed_dim.height;
 			
 			child->computed_rect.minp.v[axis] = start_offset + child->rel_top_left_pos.v[axis];
 			child->computed_rect.maxp.v[axis]= child->computed_rect.minp.v[axis] + child->computed_dim.v[axis];
+			
+			child->computed_top_left.v[axis] = (axis == Axis2_X)? child->computed_rect.min_x:child->computed_rect.max_y;
 		}
 	}
 	
@@ -1838,7 +2025,7 @@ ui_animate_elements(UI_Element *node)
 	f32 step42 = 1 - pow_f(2, -42 * dt);
 	f32 step69 = 1 - pow_f(2, -69 * dt);
 	
-	if (node->id)
+	if (!ui_id_is_null(node->id))
 	{
 		//- NOTE(fakhri): animate position
 		if (has_flag(node->flags, UI_FLAG_Animate_Pos))
@@ -1901,10 +2088,10 @@ ui_animate_elements(UI_Element *node)
 	// TODO(fakhri): hot animations
 	// TODO(fakhri): active animations
 	
-	b32 ishot    = g_ui->active_id == node->id;
-	b32 is_hot = g_ui->hot_id == node->id;
+	b32 is_hot    = ui_id_is_equal(g_ui->hot_id[Mouse_Left], node->id);
+	b32 is_active = ui_id_is_equal(g_ui->active_id, node->id);
 	
-	node->active_t    += (!!ishot - node->active_t) * step69;
+	node->active_t    += (!!is_active - node->active_t) * step69;
 	node->hot_t += (!!is_hot - node->hot_t) * step69;
 	
 	node->rect = range_center_dim(range_center(node->rect), node->dim);
@@ -1981,6 +2168,9 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 	g_ui->mouse_pos = mouse_p;
 	g_ui->frame_index += 1;
 	
+	ui_reset_default_style();
+	ui_push_default_style();
+	
 	//-NOTE(fakhri): purge untouched elements from hashtable
 	for (u32 i = 0; i < array_count(g_ui->elements_table); i += 1)
 	{
@@ -1988,22 +2178,20 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 		for (UI_Element *element = bucket->first, *next = 0; element; element = next)
 		{
 			next = element->next_hash;
+			if (element == g_ui->root || element == g_ui->ctx_menu_root) continue;
 			
-			if (!element->id || element->frame_index + 1 < g_ui->frame_index)
+			if (ui_id_is_null(element->id) || element->frame_index + 1 < g_ui->frame_index)
 			{
 				DLLRemove_NP(bucket->first, bucket->last, element, next_hash, prev_hash);
 				StackPush_N(g_ui->free_elements, element, next_free);
-				if (g_ui->hot_id == element->id) g_ui->hot_id = 0;
-				if (g_ui->active_id == element->id) g_ui->active_id = 0;
-				if (g_ui->selected_id == element->id) g_ui->selected_id = 0;
+				if (ui_id_is_equal(g_ui->active_id, element->id)) g_ui->active_id = UI_NULL_ID;
+				for(u32 key = 0; key < Mouse_COUNT; key += 1)
+					if (ui_id_is_equal(g_ui->hot_id[key], element->id)) g_ui->hot_id[key] = UI_NULL_ID;
+				if (ui_id_is_equal(g_ui->selected_id, element->id)) g_ui->selected_id = UI_NULL_ID;
 			}
 		}
 	}
 	
-	g_ui->curr_parent = 0;
-	
-	ui_reset_default_style();
-	ui_push_default_style();
 	
 	//ui_next_width(ui_size_pixel(group->render_ctx->draw_dim.width, 1));
 	//ui_next_height(ui_size_pixel(group->render_ctx->draw_dim.height, 1));
@@ -2013,6 +2201,22 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 	ui_push_parent(root);
 	
 	g_ui->modal_root = 0;
+	
+	// NOTE(fakhri): compute ctx menu parent
+	{
+		g_ui->ctx_menu_open = g_ui->next_ctx_menu_open;
+		g_ui->ctx_menu_id = g_ui->next_ctx_menu_id;
+		g_ui->ctx_menu_origin = g_ui->next_ctx_menu_origin;
+		
+		ui_next_width(ui_size_by_childs(1));
+		ui_next_height(ui_size_by_childs(1));
+		g_ui->ctx_menu_root = ui_element(str8_lit("ui-ctx-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating);
+		g_ui->ctx_menu_root->computed_top_left = g_ui->ctx_menu_origin;
+		g_ui->ctx_menu_root->computed_rect = range_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
+			g_ui->ctx_menu_root->computed_dim);
+		
+	}
+	
 }
 
 
@@ -2021,9 +2225,9 @@ ui_end()
 {
 	ui_pop_parent();
 	
-	if (g_ui->hot_id)
+	if (!ui_id_is_null(g_ui->active_id))
 	{
-		UI_Element *hot_element = ui_element_by_id(g_ui->hot_id);
+		UI_Element *hot_element = ui_element_by_id(g_ui->active_id);
 		platform->set_cursor(hot_element->hover_cursor);
 	}
 	else
@@ -2035,12 +2239,18 @@ ui_end()
 	{
 		g_ui->root->size[Axis2_X] = ui_size_pixel(g_ui->group->render_ctx->draw_dim.x, 1);
 		g_ui->root->size[Axis2_Y] = ui_size_pixel(g_ui->group->render_ctx->draw_dim.y, 1);
-		g_ui->root->computed_rect = range_center_dim(vec2(0, 0), g_ui->root->computed_dim);
+		
+		g_ui->root->computed_top_left = vec2(-0.5f * g_ui->group->render_ctx->draw_dim.x, 
+			+0.5f * g_ui->group->render_ctx->draw_dim.y);
+		
+		g_ui->root->computed_rect = range_topleft_dim(g_ui->root->computed_top_left, g_ui->root->computed_dim);
+		
 	}
 	
 	if (g_ui->modal_root)
 	{
 		g_ui->modal_root->computed_rect = range_center_dim(vec2(0, 0), g_ui->root->computed_dim);
+		g_ui->modal_root->computed_top_left = vec2(g_ui->modal_root->computed_rect.min_x, g_ui->modal_root->computed_rect.max_y);
 	}
 	
 	ui_update_layout(g_ui->root);
