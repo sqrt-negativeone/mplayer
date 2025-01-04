@@ -1837,27 +1837,35 @@ mplayer_load_favorites(Mplayer_Context *mplayer)
 	}
 }
 
-internal void
-mplayer_add_track_to_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+internal b32
+mplayer_track_in_list(Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
 {
-	Mplayer_Library *library = &mplayer->library; 
-	b32 was_in_fav = 0;
-	for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first;
+	b32 in_list = 0;
+	for(Mplayer_Track_ID_Entry *entry = list->first;
 		entry;
 		entry = entry->next)
 	{
 		if (is_equal(entry->track_id, track_id))
 		{
-			was_in_fav = 1;
+			in_list = 1;
 			break;
 		}
 	}
+	return in_list;
+}
+
+internal void
+mplayer_add_track_to_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+{
+	Mplayer_Library *library = &mplayer->library; 
 	
-	if (!was_in_fav)
-	{
+	#if DEBUG_BUILD
+		// NOTE(fakhri): assume that whoever calls us have checked that the track
+		// was not already in the list
+		assert(!mplayer_track_in_list(&library->fav_tracks, track_id));
+	#endif
 		mplayer_add_track_id_to_list(mplayer, &library->fav_tracks, track_id);
-		mplayer_save_favorites(mplayer);
-	}
+	mplayer_save_favorites(mplayer);
 }
 
 internal void
@@ -2035,10 +2043,22 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						}
 						ui_spacer_pixels(5,1);
 						
-						if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
+						
+						if (!mplayer_track_in_list(&mplayer->library.fav_tracks, track_id))
 						{
-							mplayer_add_track_to_favorites(mplayer, track_id);
-							ui_close_ctx_menu();
+							if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
+							{
+								mplayer_add_track_to_favorites(mplayer, track_id);
+								ui_close_ctx_menu();
+							}
+						}
+						else
+						{
+							if (mplayer_ui_underlined_button(str8_lit("Remove From Favorites")).clicked_left)
+							{
+								mplayer_remove_track_from_favorites(mplayer, track_id);
+								ui_close_ctx_menu();
+							}
 						}
 						ui_spacer_pixels(5,1);
 						
