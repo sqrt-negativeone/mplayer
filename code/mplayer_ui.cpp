@@ -183,13 +183,7 @@ struct UI_Element
 	UI_Custom_Draw_Proc *custom_draw_proc;
 	void *custom_draw_data;
 	
-	#if 0	
-		V2_F32 scroll_step;
-	V2_F32 view_target_scroll;
-	V2_F32 view_scroll;
-	#endif
-		
-		f32 hot_t;
+	f32 hot_t;
 	f32 active_t;
 };
 

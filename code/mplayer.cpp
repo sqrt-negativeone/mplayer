@@ -997,6 +997,8 @@ mplayer_save_indexed_library(Mplayer_Context *mplayer)
 		Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
 		mplayer_serialize_track(file, track);
 	}
+	
+	platform->close_file(file);
 }
 
 internal Mplayer_Artist *
@@ -1054,9 +1056,6 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 	mplayer_reset_library(mplayer);
 	
 	Mplayer_Library *library = &mplayer->library;
-	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
-	
-	
 	Buffer index_content = platform->load_entire_file(MPLAYER_INDEX_FILENAME, &mplayer->library.arena);
 	if (is_valid(index_content))
 	{
@@ -1304,6 +1303,9 @@ mplayer_index_library(Mplayer_Context *mplayer)
 	mplayer_save_indexed_library(mplayer);
 }
 
+
+internal void mplayer_load_favorites(Mplayer_Context *mplayer);
+
 internal void
 mplayer_load_library(Mplayer_Context *mplayer)
 {
@@ -1311,6 +1313,8 @@ mplayer_load_library(Mplayer_Context *mplayer)
 	{
 		mplayer_index_library(mplayer);
 	}
+	
+	mplayer_load_favorites(mplayer);
 }
 
 //~ NOTE(fakhri): Mode stack stuff
@@ -1340,6 +1344,7 @@ mplayer_change_previous_mode(Mplayer_Context *mplayer)
 			case MODE_Lyrics:  fallthrough;
 			case MODE_Settings:fallthrough;
 			case MODE_Queue:   fallthrough;
+			case MODE_Favorites:   fallthrough;
 			default: break;
 		}
 	}
@@ -1370,6 +1375,7 @@ mplayer_change_next_mode(Mplayer_Context *mplayer)
 			case MODE_Lyrics:  fallthrough;
 			case MODE_Settings:fallthrough;
 			case MODE_Queue:   fallthrough;
+			case MODE_Favorites:   fallthrough;
 			default: break;
 		}
 	}
@@ -1447,7 +1453,6 @@ mplayer_save_settings(Mplayer_Context *mplayer)
 	// TODO(fakhri): save the config in user directory
 	String8 config_path = SETTINGS_FILE_NAME;
 	File_Handle *config_file = platform->open_file(config_path, File_Open_Write | File_Create_Always);
-	
 	if (config_file)
 	{
 		platform->write_block(config_file, &mplayer->settings, sizeof(mplayer->settings));
@@ -1750,6 +1755,135 @@ mplayer_ui_side_bar_button(Mplayer_Context *mplayer, String8 string, Mplayer_Mod
 	}
 }
 
+//~ NOTE(fakhri): Playlists stuff
+
+internal void
+mplayer_add_track_id_to_list(Mplayer_Context *mplayer, Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	Mplayer_Track_ID_Entry *entry = 0;
+	if (library->track_id_entries_free_list)
+	{
+		entry = library->track_id_entries_free_list;
+		library->track_id_entries_free_list = library->track_id_entries_free_list->next;
+		memory_zero_struct(entry);
+	}
+	if (!entry)
+	{
+		entry = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Track_ID_Entry);
+	}
+	assert(entry);
+	entry->track_id = track_id;
+	DLLPushBack(list->first, list->last, entry);
+	
+	list->count += 1;
+}
+
+internal void
+mplayer_reset_fav_tracks(Mplayer_Context *mplayer)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	library->fav_tracks.count = 0;
+	if (library->fav_tracks.last)
+	{
+		library->fav_tracks.last->next = library->track_id_entries_free_list;
+		library->track_id_entries_free_list = library->fav_tracks.first;
+		
+		library->fav_tracks.first = library->fav_tracks.last = 0;
+	}
+}
+
+
+#define MPLAYER_FAV_PATH str8_lit("favorites.mplayer")
+internal void
+mplayer_save_favorites(Mplayer_Context *mplayer)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	
+	File_Handle *file = platform->open_file(MPLAYER_FAV_PATH, File_Open_Write | File_Create_Always);
+	
+	mplayer_serialize(file, library->fav_tracks.count);
+	for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first;
+		entry;
+		entry = entry->next)
+	{
+		mplayer_serialize(file, entry->track_id);
+	}
+	
+	platform->close_file(file);
+}
+
+
+internal void
+mplayer_load_favorites(Mplayer_Context *mplayer)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	mplayer_reset_fav_tracks(mplayer);
+	
+	Buffer fav_content = platform->load_entire_file(MPLAYER_FAV_PATH, &mplayer->frame_arena);
+	if (is_valid(fav_content))
+	{
+		Byte_Stream bs = make_byte_stream(fav_content);
+		
+		u32 count;
+		byte_stream_read(&bs, &count);
+		for (u32 i = 0; i < count; i += 1)
+		{
+			Mplayer_Track_ID track_id;
+			byte_stream_read(&bs, &track_id);
+			
+			mplayer_add_track_id_to_list(mplayer, &library->fav_tracks, track_id);
+		}
+	}
+}
+
+internal void
+mplayer_add_track_to_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	b32 was_in_fav = 0;
+	for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first;
+		entry;
+		entry = entry->next)
+	{
+		if (is_equal(entry->track_id, track_id))
+		{
+			was_in_fav = 1;
+			break;
+		}
+	}
+	
+	if (!was_in_fav)
+	{
+		mplayer_add_track_id_to_list(mplayer, &library->fav_tracks, track_id);
+		mplayer_save_favorites(mplayer);
+	}
+}
+
+internal void
+mplayer_remove_track_from_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+{
+	Mplayer_Library *library = &mplayer->library; 
+	
+	Mplayer_Track_ID_Entry *track_entry = 0;
+	for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first;
+		entry;
+		entry = entry->next)
+	{
+		if (is_equal(entry->track_id, track_id))
+		{
+			track_entry = entry;
+			break;
+		}
+	}
+	
+	if (track_entry)
+	{
+		DLLRemove(library->fav_tracks.first, library->fav_tracks.last, track_entry);
+		library->fav_tracks.count -= 1;
+		mplayer_save_favorites(mplayer);
+	}
+}
 
 //~ NOTE(fakhri): Mplayer Exported API
 exported void
@@ -1903,6 +2037,8 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
 						{
+							mplayer_add_track_to_favorites(mplayer, track_id);
+							ui_close_ctx_menu();
 						}
 						ui_spacer_pixels(5,1);
 						
@@ -2068,6 +2204,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					ui_spacer_pixels(2, 1);
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Queue"), MODE_Queue);
+					
+					ui_spacer_pixels(2, 1);
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Favorites"), MODE_Favorites);
 					
 					ui_spacer(ui_size_parent_remaining());
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Settings"), MODE_Settings);
@@ -2235,7 +2374,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									}
 									
 									ui_spacer_pixels(10, 1);
-									
 								}
 							}
 						}
@@ -2648,6 +2786,73 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 					} break;
 					
+					case MODE_Favorites:
+					{
+						Mplayer_Library *library = &mplayer->library;
+						
+						// NOTE(fakhri): header
+						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_height(ui_size_pixel(100, 1));
+						ui_horizontal_layout()
+						{
+							ui_spacer_pixels(50, 1);
+							
+							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
+							{
+								ui_next_background_color(vec4(1, 1, 1, 0));
+								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_width(ui_size_text_dim(1));
+								ui_next_height(ui_size_text_dim(1));
+								ui_next_font_size(50);
+								String8 title = str8_f(&mplayer->frame_arena, "Favorites(%d)", library->fav_tracks.count);
+								ui_label(title);
+								
+								ui_spacer(ui_size_parent_remaining());
+								
+								ui_next_height(ui_size_by_childs(1));
+								ui_horizontal_layout()
+									ui_pref_height(ui_size_text_dim(1))
+									ui_pref_width(ui_size_text_dim(1))
+								{
+									ui_spacer_pixels(10, 1);
+									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
+									{
+										mplayer_clear_queue(mplayer);
+										for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first; entry; entry = entry->next)
+										{
+											mplayer_queue_last(mplayer, entry->track_id);
+										}
+										mplayer_queue_resume(mplayer);
+									}
+									
+									ui_spacer_pixels(10, 1);
+								}
+							}
+						}
+						
+						ui_next_width(ui_size_parent_remaining());
+						ui_next_height(ui_size_parent_remaining());
+						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
+						{
+							u32 item_index = ui_list_begin(str8_lit("favorites-tracks-list"), library->fav_tracks.count, 50.0f, 1.0f);
+							defer(ui_list_end())
+							{
+								Mplayer_Track_ID_Entry *first_entry = 0;
+								{
+									u32 count; for(count = 0, first_entry = library->fav_tracks.first; 
+										count < item_index && first_entry; 
+										count += 1, first_entry = first_entry->next);
+								}
+								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
+								{
+									mplayer_ui_track_item(mplayer, entry->track_id);
+								}
+							}
+							
+							ui_spacer_pixels(50, 0);
+						}
+						
+					} break;
 				}
 			}
 		}

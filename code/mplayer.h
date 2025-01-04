@@ -278,6 +278,32 @@ struct Mplayer_Artist_List
 	u32 count;
 };
 
+struct Mplayer_Track_ID_Entry
+{
+	Mplayer_Track_ID_Entry *next;
+	Mplayer_Track_ID_Entry *prev;
+	Mplayer_Track_ID track_id;
+};
+struct Mplayer_Track_ID_List
+{
+	Mplayer_Track_ID_Entry *first;
+	Mplayer_Track_ID_Entry *last;
+	u32 count;
+};
+struct Mplayer_Playlist
+{
+	Mplayer_Playlist *next;
+	Mplayer_Playlist *prev;
+	String8 name;
+	Mplayer_Track_ID_List tracks;
+};
+struct Mplayer_Playlist_List
+{
+	Mplayer_Playlist *first;
+	Mplayer_Playlist *last;
+	u32 count;
+};
+
 #define MAX_ARTISTS_COUNT 512
 #define MAX_ALBUMS_COUNT 1024
 #define MAX_TRACKS_COUNT 8192
@@ -299,8 +325,13 @@ struct Mplayer_Library
 	Mplayer_Album_ID  album_ids[MAX_ALBUMS_COUNT];
 	Mplayer_Track_ID  track_ids[MAX_TRACKS_COUNT];
 	
+	Mplayer_Track_ID_List fav_tracks;
+	Mplayer_Playlist_List playlists;
+	
 	Mplayer_Item_Image images[8192];
 	u32 images_count;
+	
+	Mplayer_Track_ID_Entry *track_id_entries_free_list;
 };
 
 struct Mplayer_Library_Location
@@ -329,6 +360,7 @@ enum Mplayer_Mode
 	MODE_Album_Tracks,
 	
 	MODE_Queue,
+	MODE_Favorites,
 	
 	MODE_Lyrics,
 	MODE_Settings,
