@@ -1567,6 +1567,7 @@ mplayer_ui_underlined_button(String8 string)
 	{
 		ui_spacer(ui_size_percent(0.85f, 1));
 		
+		ui_next_roundness(0);
 		ui_next_width(ui_size_percent(1, 0));
 		ui_next_height(ui_size_pixel(1, 0));
 		ui_next_background_color(button->text_color);
