@@ -183,13 +183,30 @@ struct UI_Element
 	UI_Custom_Draw_Proc *custom_draw_proc;
 	void *custom_draw_data;
 	
-	V2_F32 scroll_step;
-	
+	#if 0	
+		V2_F32 scroll_step;
 	V2_F32 view_target_scroll;
 	V2_F32 view_scroll;
-	
-	f32 hot_t;
+	#endif
+		
+		f32 hot_t;
 	f32 active_t;
+};
+
+struct UI_Element_Persistent_State
+{
+	UI_Element_Persistent_State *next_hash;
+	UI_Element_Persistent_State *prev_hash;
+	UI_ID id;
+	V2_F32 scroll_step;
+	V2_F32 view_target_scroll;
+	V2_F32 view_scroll;
+};
+
+struct UI_Element_Persistent_State_List
+{
+	UI_Element_Persistent_State *first;
+	UI_Element_Persistent_State *last;
 };
 
 struct UI_Elements_Bucket
@@ -263,6 +280,7 @@ struct UI_ID_Stack
 };
 
 #define UI_ELEMENETS_HASHTABLE_SIZE 128
+#define UI_PERSISTENT_HASHTABLE_SIZE 128
 struct Mplayer_UI
 {
 	Render_Group *group;
@@ -336,6 +354,8 @@ struct Mplayer_UI
 	
 	UI_Element *free_elements;
 	UI_Elements_Bucket elements_table[UI_ELEMENETS_HASHTABLE_SIZE];
+	
+	UI_Element_Persistent_State_List persistent_states[UI_PERSISTENT_HASHTABLE_SIZE];
 };
 
 global Mplayer_UI *g_ui;
@@ -366,6 +386,47 @@ ui_make_size(UI_Size_Kind kind, f32 value, f32 strictness)
 	result.strictness = strictness;
 	return result;
 }
+
+internal UI_Element_Persistent_State *
+ui_get_persistent_state_for_element(UI_ID id)
+{
+	UI_Element_Persistent_State *result = 0;
+	if (!ui_id_is_null(id))
+	{
+		u64 bucket_idx = id.value % array_count(g_ui->persistent_states);
+		for (UI_Element_Persistent_State *node = g_ui->persistent_states[bucket_idx].first;
+			node;
+			node = node->next_hash)
+		{
+			if (ui_id_is_equal(node->id, id))
+			{
+				result = node;
+				break;
+			}
+		}
+	}
+	
+	return result;
+}
+
+internal UI_Element_Persistent_State *
+ui_get_or_create_persistent_state_for_element(UI_ID id)
+{
+	UI_Element_Persistent_State *result = ui_get_persistent_state_for_element(id);
+	if (!result && !ui_id_is_null(id))
+	{
+		result = m_arena_push_struct_z(g_ui->arena, UI_Element_Persistent_State);
+		result->id = id;
+		u64 bucket_idx = id.value % array_count(g_ui->persistent_states);
+		DLLPushBack_NP(g_ui->persistent_states[bucket_idx].first,
+			g_ui->persistent_states[bucket_idx].last,
+			result,
+			next_hash,
+			prev_hash);
+	}
+	return result;
+}
+
 
 #define ui_stack_top(stack_name) (stack_name).stack[(stack_name).top-1]
 #define ui_stack_pop(stack_name) (stack_name).top -= 1;
@@ -944,7 +1005,9 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	
 	if (has_flag(flags, UI_FLAG_View_Scroll))
 	{
-		result->scroll_step = ui_stack_top(g_ui->scroll_steps);
+		UI_Element_Persistent_State *persistent_state = ui_get_or_create_persistent_state_for_element(id);
+		assert(persistent_state);
+		persistent_state->scroll_step = ui_stack_top(g_ui->scroll_steps);
 	}
 	
 	if (new_element && has_flag(flags, UI_FLAG_Animate_Pos))
@@ -1212,12 +1275,13 @@ ui_update_element_interaction(UI_Element *element)
 		
 		if (mouse_over && has_flag(element->flags, UI_FLAG_View_Scroll) && e->kind == Event_Kind_Mouse_Wheel)
 		{
+			UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(id);
 			consumed = 1;
-			element->view_target_scroll += element->scroll_step * e->scroll;
+			persistent_state->view_target_scroll += persistent_state->scroll_step * e->scroll;
 			
 			V2_F32 bounds_dim = element->child_bounds;
-			element->view_target_scroll.x = CLAMP(0, element->view_target_scroll.x, bounds_dim.width);
-			element->view_target_scroll.y = CLAMP(0, element->view_target_scroll.y, bounds_dim.height);
+			persistent_state->view_target_scroll.x = CLAMP(0, persistent_state->view_target_scroll.x, bounds_dim.width);
+			persistent_state->view_target_scroll.y = CLAMP(0, persistent_state->view_target_scroll.y, bounds_dim.height);
 		}
 		
 		if (consumed)
@@ -1648,7 +1712,12 @@ ui_grid_begin(String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpaddin
 	
 	u32 visible_rows_count = u32(grid->computed_dim.height / (grid_item_dim.height + vpadding)) + 2;
 	
-	f32 space_before_first_row = ABS(grid->view_scroll.y);
+	f32 space_before_first_row = 0;
+	{
+		UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(grid->id);
+		if (persistent_state)
+			space_before_first_row = ABS(persistent_state->view_scroll.y);
+	}
 	u32 first_visible_row = (u32)(space_before_first_row / (grid_item_dim.height + vpadding));
 	first_visible_row = MIN(first_visible_row, max_rows_count-1);
 	
@@ -1738,7 +1807,12 @@ ui_list_begin(String8 string, u32 items_count, f32 item_height, f32 vpadding)
 	
 	u32 visible_rows_count = u32(list->computed_dim.height / (item_height + vpadding)) + 2;
 	
-	f32 space_before_first_row = ABS(list->view_scroll.y);
+	f32 space_before_first_row = 0;
+	{
+		UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(list->id);
+		if (persistent_state)
+			space_before_first_row = ABS(persistent_state->view_scroll.y);
+	}
 	u32 first_visible_row = (u32)(space_before_first_row / (item_height + vpadding));
 	first_visible_row = MIN(first_visible_row, items_count);
 	
@@ -1850,6 +1924,7 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 {
 	if (!node->first) return;
 	
+	UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(node->id);
 	f32 parent_size = node->computed_dim.v[axis];
 	if (!has_flag(node->flags, UI_FLAG_OverflowX << axis))
 	{
@@ -1920,7 +1995,8 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 		
 		// NOTE(fakhri): compute on screen position from relative positions
 		f32 parent_origin = node->computed_top_left.v[axis];
-		parent_origin += ((axis == Axis2_Y)? 1:-1) * node->view_scroll.v[axis];
+		if (persistent_state)
+			parent_origin += ((axis == Axis2_Y)? 1:-1) * persistent_state->view_scroll.v[axis];
 		for (UI_Element *child = node->first; child; child = child->next)
 		{
 			if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
@@ -2060,28 +2136,24 @@ ui_animate_elements(UI_Element *node)
 		}
 		
 		//- NOTE(fakhri): animate scroll
-		if (has_flag(node->flags, UI_FLAG_Animate_Scroll))
+		if (has_flag(node->flags, UI_FLAG_View_Scroll|UI_FLAG_Animate_Scroll))
 		{
-			node->view_scroll += (node->view_target_scroll - node->view_scroll) * step69;
+			UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(node->id);
+			persistent_state->view_scroll += (persistent_state->view_target_scroll - persistent_state->view_scroll) * step69;
 			
-			if (ABS(node->view_scroll.x - node->view_target_scroll.x) < 1)
+			if (ABS(persistent_state->view_scroll.x - persistent_state->view_target_scroll.x) < 1)
 			{
-				node->view_scroll.x = node->view_target_scroll.x;
+				persistent_state->view_scroll.x = persistent_state->view_target_scroll.x;
 			}
-			if (ABS(node->view_scroll.y - node->view_target_scroll.y) < 1)
+			if (ABS(persistent_state->view_scroll.y - persistent_state->view_target_scroll.y) < 1)
 			{
-				node->view_scroll.y = node->view_target_scroll.y;
+				persistent_state->view_scroll.y = persistent_state->view_target_scroll.y;
 			}
-		}
-		else
-		{
-			node->view_scroll = node->view_target_scroll;
 		}
 	}
 	else
 	{
 		node->dim = node->computed_dim;
-		node->view_scroll = node->view_target_scroll;
 		node->rect = node->computed_rect;
 	}
 	
