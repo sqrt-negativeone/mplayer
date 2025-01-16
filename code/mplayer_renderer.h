@@ -7,6 +7,7 @@ enum Texture_Flag
 {
 	TEXTURE_FLAG_GRAY_BIT = (1 << 0),
 	TEXTURE_FLAG_RGB_BIT  = (1 << 1),
+	TEXTURE_FLAG_SRGB_BIT  = (1 << 3),
 };
 
 enum Texture_State

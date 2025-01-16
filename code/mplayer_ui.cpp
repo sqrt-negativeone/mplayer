@@ -1436,12 +1436,12 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(text_input);
 	if (interaction.hover)
 	{
-		text_input->background_color = vec4(0.3f, 0.3f, 0.3f, 1);
+		text_input->background_color = vec4(0.1f, 0.1f, 0.1f, 1);
 	}
 	
 	if (interaction.selected)
 	{
-		text_input->background_color = vec4(0.35f, 0.35f, 0.35f, 1);
+		text_input->background_color = vec4(0.1f, 0.1f, 0.1f, 1);
 		
 		Font *font = ui_stack_top(g_ui->fonts);
 		f32 font_size = ui_stack_top(g_ui->font_sizes);
@@ -1579,7 +1579,7 @@ UI_CUSTOM_DRAW_PROC(ui_slider_default_draw_proc)
 	
 	push_rect(group, element->rect, element->background_color, element->roundness);
 	
-	V4_F32 progress_bg_color = vec4(0.6f, 0.6f, 0.6f, 1);
+	V4_F32 progress_bg_color = vec4(0.5f, 0.5f, 0.5f, 1);
 	
 	V2_F32 full_progress_dim = slider_dim;
 	full_progress_dim.width  *= 0.99f;

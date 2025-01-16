@@ -198,10 +198,12 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 	{
 		glBindTexture(GL_TEXTURE_2D, handle);
 		
-		u32 format = GL_RGBA;
+		i32 internal_format = GL_RGBA;
+		i32 format = GL_RGBA;
 		if (has_flag(texture.flags, TEXTURE_FLAG_GRAY_BIT))
 		{
 			format = GL_RED;
+			internal_format = GL_RED;
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_ONE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_ONE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_ONE);
@@ -209,16 +211,21 @@ gl_upload_texture(OpenGL *opengl, Texture texture, Buffer buffer)
 		}
 		else if (has_flag(texture.flags, TEXTURE_FLAG_RGB_BIT))
 		{
+			internal_format = GL_RGB;
 			format = GL_RGB;
 		}
-		
+		else if (has_flag(texture.flags, TEXTURE_FLAG_SRGB_BIT))
+		{
+			internal_format = GL_SRGB_ALPHA;
+			format = GL_RGBA;
+		}
 		glTexImage2D(GL_TEXTURE_2D,
 			0,
-			i32(format), 
+			internal_format, 
 			i32(texture.width),
 			i32(texture.height),
 			0,
-			u32(format),
+			format,
 			GL_UNSIGNED_BYTE,
 			buffer.data);
 		
@@ -280,6 +287,7 @@ gl_begin_frame(OpenGL *opengl, V2_I32 window_dim, V2_I32 draw_dim, Range2_I32 dr
 internal void
 gl_end_frame(OpenGL *opengl)
 {
+	glEnable(GL_FRAMEBUFFER_SRGB);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glEnable(GL_SCISSOR_TEST);

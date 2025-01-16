@@ -1598,7 +1598,7 @@ mplayer_ui_track_item(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
 	Mplayer_Track *track = mplayer_track_by_id(&mplayer->library, track_id);
 	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 	
-	V4_F32 bg_color = vec4(0.15f, 0.15f,0.15f, 1);
+	V4_F32 bg_color = vec4(0.05f, 0.05f,0.05f, 1);
 	if (is_equal(track_id, mplayer_queue_current_track_id(mplayer)))
 	{
 		bg_color = vec4(0, 0, 0, 1);
@@ -1650,7 +1650,8 @@ mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Album_ID album_id)
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
-		ui_next_background_color(vec4(1, 1, 1, 0.35f));
+		//ui_next_background_color(vec4(1, 1, 1, 0.35f));
+		ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
 	}
 	
 	ui_next_hover_cursor(Cursor_Hand);
@@ -1691,13 +1692,13 @@ mplayer_ui_aritst_item(Mplayer_Context *mplayer, Mplayer_Artist_ID artist_id)
 	if (image_ready)
 	{
 		flags |= UI_FLAG_Draw_Image;
-		ui_next_texture_tint_color(vec4(1, 1, 1, 0.35f));
+		ui_next_texture_tint_color(vec4(1.f, 1.f, 1.f, 0.35f));
 		ui_next_texture(image->texture);
 	}
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
-		ui_next_background_color(vec4(1, 1, 1, 0.35f));
+		ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
 	}
 	
 	ui_next_hover_cursor(Cursor_Hand);
@@ -1967,7 +1968,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 	
 	M4_Inv proj = group.config.proj;
 	V2_F32 world_mouse_p = (proj.inv * vec4(mplayer->input.mouse_clip_pos)).xy;
-	push_clear_color(render_ctx, vec4(0.1f, 0.1f, 0.1f, 1));
+	push_clear_color(render_ctx, vec4(0.005f, 0.005f, 0.005f, 1));
 	
 	if (mplayer_mouse_button_clicked(&mplayer->input, Mouse_M4))
 	{
@@ -1988,7 +1989,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		{
 			ui_pref_seed({2109487})
 				ui_ctx_menu(mplayer->ctx_menu_ids[Track_Context_Menu]) 
-				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.05f, 1.0f))
+				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.02f, 1.0f))
 				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
 				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
 			{
@@ -2104,12 +2105,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					ui_next_border_color(vec4(0,0,0,1));
 					ui_next_border_thickness(2);
-					ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+					ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1.0f));
 					if (ui_input_field(str8_lit("path-input-field"), &mplayer->path_lister.user_path, sizeof(mplayer->path_lister.user_path_buffer)))
 					{
 						mplayer_refresh_path_lister_dir(&mplayer->path_lister);
 					}
-					
 				}
 				ui_spacer_pixels(10, 1);
 				
@@ -2128,13 +2128,13 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 						
 						ui_next_roundness(5);
-						ui_next_background_color(vec4(0.25f, 0.25f,0.25f, 1));
+						ui_next_background_color(vec4(0.05f, 0.05f,0.05f, 1));
 						ui_next_hover_cursor(Cursor_Hand);
 						UI_Element *option_el = ui_element_f(flags, "path-option-%.*s", STR8_EXPAND(option_path));
 						Mplayer_UI_Interaction interaction = ui_interaction_from_element(option_el);
 						if (interaction.hover)
 						{
-							option_el->background_color = vec4(0.2f, 0.2f,0.2f, 1);
+							option_el->background_color = vec4(0.15f, 0.15f,0.15f, 1);
 						}
 						if (interaction.pressed_left)
 						{
@@ -2201,17 +2201,23 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 		ui_pref_height(ui_size_parent_remaining())
 			ui_horizontal_layout()
 		{
-			ui_next_background_color(vec4(0.06f, 0.06f, 0.06f, 1.0f));
+			ui_next_background_color(vec4(0.015f, 0.015f, 0.015f, 1.0f));
 			ui_next_width(ui_size_pixel(150, 1));
 			ui_next_border_color(vec4(0.f, 0.f, 0.f, 1.0f));
 			ui_next_border_thickness(2);
 			ui_vertical_layout()
 			{
-				ui_pref_background_color(vec4(0.1f, 0.1f, 0.1f, 1)) ui_pref_text_color(vec4(1, 1, 1, 1))
+				ui_pref_background_color(vec4(0.04f, 0.04f, 0.04f, 1)) ui_pref_text_color(vec4(1, 1, 1, 1))
 					ui_pref_width(ui_size_percent(1, 1)) ui_pref_height(ui_size_pixel(30, 1)) ui_pref_roundness(15)
 				{
 					ui_spacer_pixels(20, 1);
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Tracks"), MODE_Track_Library);
+					
+					ui_spacer_pixels(2, 1);
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Favorites"), MODE_Favorites);
+					
+					ui_spacer_pixels(2, 1);
+					mplayer_ui_side_bar_button(mplayer, str8_lit("Playlists"), MODE_Playlists);
 					
 					ui_spacer_pixels(2, 1);
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Artists"), MODE_Artist_Library);
@@ -2225,9 +2231,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					ui_spacer_pixels(2, 1);
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Queue"), MODE_Queue);
 					
-					ui_spacer_pixels(2, 1);
-					mplayer_ui_side_bar_button(mplayer, str8_lit("Favorites"), MODE_Favorites);
-					
 					ui_spacer(ui_size_parent_remaining());
 					mplayer_ui_side_bar_button(mplayer, str8_lit("Settings"), MODE_Settings);
 					
@@ -2235,15 +2238,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				}
 			}
 			
+			V4_F32 header_bg_color = vec4(0.009f, 0.009f, 0.009f, 1);
 			ui_next_width(ui_size_parent_remaining());
 			ui_vertical_layout()
 			{
+				Mplayer_Item_ID item_id = mplayer->mode_stack->id;
 				switch(mplayer->mode_stack->mode)
 				{
 					case MODE_Artist_Library:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(69, 1));
 						ui_horizontal_layout()
 						{
@@ -2276,7 +2281,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Album_Library:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(69, 1));
 						ui_horizontal_layout()
 						{
@@ -2356,10 +2361,10 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					case MODE_Artist_Albums:
 					{
-						Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, mplayer->selected_artist_id);
+						Mplayer_Artist *artist = mplayer_artist_by_id(&mplayer->library, item_id.artist_id);
 						
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(90, 1));
 						ui_horizontal_layout()
 						{
@@ -2420,11 +2425,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					case MODE_Album_Tracks:
 					{
-						Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, mplayer->selected_album_id);
+						Mplayer_Album *album = mplayer_album_by_id(&mplayer->library, item_id.album_id);
 						Mplayer_Item_Image *image = mplayer_get_image_by_id(mplayer, album->image_id, 1);
 						
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(200, 1));
 						ui_horizontal_layout()
 						{
@@ -2574,7 +2579,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Settings:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(69, 1));
 						ui_horizontal_layout()
 						{
@@ -2722,7 +2727,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					case MODE_Queue:
 					{
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(100, 1));
 						ui_horizontal_layout()
 						{
@@ -2811,7 +2816,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						Mplayer_Library *library = &mplayer->library;
 						
 						// NOTE(fakhri): header
-						ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1));
+						ui_next_background_color(header_bg_color);
 						ui_next_height(ui_size_pixel(100, 1));
 						ui_horizontal_layout()
 						{
@@ -2824,8 +2829,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
-								String8 title = str8_f(&mplayer->frame_arena, "Favorites(%d)", library->fav_tracks.count);
-								ui_label(title);
+								ui_label(str8_f(&mplayer->frame_arena, "Favorites(%d)", library->fav_tracks.count));
 								
 								ui_spacer(ui_size_parent_remaining());
 								
@@ -2871,7 +2875,6 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 							
 							ui_spacer_pixels(50, 0);
 						}
-						
 					} break;
 				}
 			}
@@ -2910,7 +2913,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				
 				// NOTE(fakhri): track progres slider
 				ui_next_width(ui_size_percent(1.0f, 0.25f));
-				ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1.0f));
+				ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
 				ui_next_roundness(5);
 				if (current_track && current_track->flac_stream)
 				{
@@ -3028,7 +3031,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						ui_pref_width(ui_size_text_dim(1))
 							ui_pref_height(ui_size_text_dim(1))
-							ui_pref_background_color(vec4(0.3f, 0.3f, 0.3f, 1))
+							ui_pref_background_color(vec4(0.15f, 0.15f, 0.15f, 1))
 						{
 							ui_spacer(ui_size_parent_remaining());
 							
@@ -3088,7 +3091,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						// NOTE(fakhri): volume slider
 						{
 							ui_next_height(ui_size_pixel(12, 1));
-							ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 1.0f));
+							ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
 							ui_next_roundness(5);
 							ui_slider_f32(str8_lit("volume-control-slider"), &mplayer->volume, 0, 1);
 						}
@@ -3096,7 +3099,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_spacer(ui_size_parent_remaining());
 					}
 					
-					ui_spacer_pixels(10, 1);
+					ui_spacer_pixels(30, 1);
 				}
 			}
 		}
