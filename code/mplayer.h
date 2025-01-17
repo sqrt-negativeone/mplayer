@@ -310,6 +310,19 @@ struct Mplayer_Playlist_List
 #define MAX_ARTISTS_COUNT 512
 #define MAX_ALBUMS_COUNT 1024
 #define MAX_TRACKS_COUNT 8192
+#define MAX_PLAYLISTS_COUNT 1024
+
+struct Mplayer_Playlists
+{
+	Memory_Arena arena;
+	u32 playlists_count;
+	
+	Mplayer_Track_ID_List fav_tracks;
+	Mplayer_Playlist_List playlists_table[1024];
+	Mplayer_Playlist_ID  playlist_ids[MAX_PLAYLISTS_COUNT];
+	
+	Mplayer_Track_ID_Entry *track_id_entries_free_list;
+};
 
 struct Mplayer_Library
 {
@@ -319,24 +332,18 @@ struct Mplayer_Library
 	u32 tracks_count;
 	u32 albums_count;
 	u32 artists_count;
-	u32 playlists_count;
 	
 	Mplayer_Track_List tracks_table[1024];
 	Mplayer_Album_List albums_table[1024];
 	Mplayer_Artist_List artists_table[1024];
-	Mplayer_Playlist_List playlists_table[1024];
+	
 	
 	Mplayer_Artist_ID artist_ids[MAX_ARTISTS_COUNT];
 	Mplayer_Album_ID  album_ids[MAX_ALBUMS_COUNT];
 	Mplayer_Track_ID  track_ids[MAX_TRACKS_COUNT];
-	Mplayer_Playlist_ID  playlist_ids[MAX_TRACKS_COUNT];
-	
-	Mplayer_Track_ID_List fav_tracks;
 	
 	Mplayer_Item_Image images[8192];
 	u32 images_count;
-	
-	Mplayer_Track_ID_Entry *track_id_entries_free_list;
 };
 
 struct Mplayer_Library_Location
@@ -448,6 +455,7 @@ struct Mplayer_Context
 	Mplayer_Mode_Stack *mode_stack_free_list_first;
 	Mplayer_Mode_Stack *mode_stack_free_list_last;
 	
+	Mplayer_Playlists playlists;
 	Mplayer_Library library;
 	
 	f32 track_name_hover_t;

@@ -188,12 +188,12 @@ mplayer_compute_playlist_id(String8 playlist_name)
 }
 
 internal Mplayer_Playlist *
-mplayer_playlist_by_id(Mplayer_Library *library, Mplayer_Playlist_ID id)
+mplayer_playlist_by_id(Mplayer_Playlists *playlists, Mplayer_Playlist_ID id)
 {
-	u32 slot_index = id.v[1] % array_count(library->playlists_table);
+	u32 slot_index = id.v[1] % array_count(playlists->playlists_table);
 	
 	Mplayer_Playlist *playlist = 0;
-	for (Mplayer_Playlist *entry = library->playlists_table[slot_index].first; entry; entry = entry->next_hash)
+	for (Mplayer_Playlist *entry = playlists->playlists_table[slot_index].first; entry; entry = entry->next_hash)
 	{
 		if (is_equal(entry->id, id))
 		{
@@ -321,7 +321,7 @@ mplayer_insert_artist(Mplayer_Library *library, Mplayer_Artist *artist)
 
 
 internal void
-mplayer_insert_playlist(Mplayer_Library *library, Mplayer_Playlist *playlist)
+mplayer_add_playlist(Mplayer_Playlists *playlists, Mplayer_Playlist *playlist)
 {
 	assert(!is_equal(playlist->id, NULL_PLAYLIST_ID));
 	Mplayer_Playlist_ID id = playlist->id;
@@ -330,20 +330,20 @@ mplayer_insert_playlist(Mplayer_Library *library, Mplayer_Playlist *playlist)
 	// with the same id
 	#if DEBUG_BUILD
 	{
-		Mplayer_Playlist *test_playlist = mplayer_playlist_by_id(library, id);
+		Mplayer_Playlist *test_playlist = mplayer_playlist_by_id(playlists, id);
 		assert(test_playlist == 0);
 	}
 	#endif
 		
-		u32 slot_index = id.v[1] % array_count(library->playlists_table);
-	DLLPushBack_NP(library->playlists_table[slot_index].first, library->playlists_table[slot_index].last, 
+		u32 slot_index = id.v[1] % array_count(playlists->playlists_table);
+	DLLPushBack_NP(playlists->playlists_table[slot_index].first, playlists->playlists_table[slot_index].last, 
 		playlist, 
 		next_hash, prev_hash);
 	
-	library->playlists_table[slot_index].count += 1;
+	playlists->playlists_table[slot_index].count += 1;
 	
-	assert(library->playlists_count < array_count(library->playlist_ids));
-	library->playlist_ids[library->playlists_count++] = id;
+	assert(playlists->playlists_count < array_count(playlists->playlist_ids));
+	playlists->playlist_ids[playlists->playlists_count++] = id;
 }
 
 //~ NOTE(fakhri): Mplayer Image stuff
@@ -888,12 +888,10 @@ mplayer_reset_library(Mplayer_Context *mplayer)
 	library->artists_count = 0;
 	library->albums_count = 0;
 	library->tracks_count = 0;
-	library->playlists_count = 0;
 	
 	memory_zero_array(library->tracks_table);
 	memory_zero_array(library->albums_table);
 	memory_zero_array(library->artists_table);
-	memory_zero_array(library->playlists_table);
 	
 	for (u32 i = 1; i < library->images_count; i += 1)
 	{
@@ -1078,7 +1076,6 @@ mplayer_save_indexed_library(Mplayer_Context *mplayer)
 	mplayer_serialize(file, mplayer->library.artists_count);
 	mplayer_serialize(file, mplayer->library.albums_count);
 	mplayer_serialize(file, mplayer->library.tracks_count);
-	mplayer_serialize(file, mplayer->library.playlists_count);
 	
 	for (u32 artist_index = 0; artist_index < mplayer->library.artists_count; artist_index += 1)
 	{
@@ -1101,30 +1098,7 @@ mplayer_save_indexed_library(Mplayer_Context *mplayer)
 		mplayer_serialize_track(file, track);
 	}
 	
-	for (u32 playlist_index = 0; playlist_index < mplayer->library.playlists_count; playlist_index += 1)
-	{
-		Mplayer_Playlist_ID playlist_id = mplayer->library.playlist_ids[playlist_index];
-		Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->library, playlist_id);
-		mplayer_serialize_playlist(file, playlist);
-	}
-	
 	platform->close_file(file);
-}
-
-internal Mplayer_Playlist *
-_mplayer_create_playlist_if_not_exist(Mplayer_Library *library, String8 playlist_name)
-{
-	Mplayer_Playlist_ID playlist_id = mplayer_compute_playlist_id(playlist_name);
-	Mplayer_Playlist *playlist = mplayer_playlist_by_id(library, playlist_id);
-	if (!playlist)
-	{
-		playlist = m_arena_push_struct_z(&library->arena, Mplayer_Playlist);
-		playlist->id = playlist_id;
-		playlist->name = str8_clone(&library->arena, playlist_name);
-		mplayer_insert_playlist(library, playlist);
-	}
-	
-	return playlist;
 }
 
 internal Mplayer_Artist *
@@ -1173,8 +1147,6 @@ mplayer_setup_track_album(Mplayer_Library *library, Mplayer_Track *track, Mplaye
 	return album;
 }
 
-internal void mplayer_byte_stream_read_track_ids_list(Mplayer_Context *mplayer, Byte_Stream *bs, Mplayer_Track_ID_List *tracks);
-
 internal b32
 mplayer_load_indexed_library(Mplayer_Context *mplayer)
 {
@@ -1191,11 +1163,9 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 		u32 artists_count;
 		u32 albums_count;
 		u32 tracks_count;
-		u32 playlists_count;
 		byte_stream_read(&bs, &artists_count);
 		byte_stream_read(&bs, &albums_count);
 		byte_stream_read(&bs, &tracks_count);
-		byte_stream_read(&bs, &playlists_count);
 		
 		for (u32 artist_index = 0; artist_index < artists_count; artist_index += 1)
 		{
@@ -1244,23 +1214,6 @@ mplayer_load_indexed_library(Mplayer_Context *mplayer)
 				track->album_id = album->hash;
 			}
 		}
-		
-		for (u32 playlist_index = 0; playlist_index < playlists_count; playlist_index += 1)
-		{
-			String8 playlist_name;
-			byte_stream_read(&bs, &playlist_name);
-			Mplayer_Playlist_ID playlist_id = mplayer_compute_playlist_id(playlist_name);
-			Mplayer_Playlist *playlist = mplayer_playlist_by_id(library, playlist_id);
-			
-			assert(!playlist); // make sure there are no duplicate playlists
-			playlist = m_arena_push_struct_z(&library->arena, Mplayer_Playlist);
-			playlist->id = playlist_id;
-			playlist->name = playlist_name;
-			mplayer_insert_playlist(library, playlist);
-			
-			mplayer_byte_stream_read_track_ids_list(mplayer, &bs, &playlist->tracks);
-		}
-		
 	}
 	return success;
 }
@@ -1448,7 +1401,6 @@ mplayer_index_library(Mplayer_Context *mplayer)
 }
 
 
-internal void mplayer_load_favorites(Mplayer_Context *mplayer);
 internal void
 mplayer_load_library(Mplayer_Context *mplayer)
 {
@@ -1456,8 +1408,6 @@ mplayer_load_library(Mplayer_Context *mplayer)
 	{
 		mplayer_index_library(mplayer);
 	}
-	
-	mplayer_load_favorites(mplayer);
 }
 
 //~ NOTE(fakhri): Mode stack stuff
@@ -1781,7 +1731,7 @@ mplayer_ui_album_item(Mplayer_Context *mplayer, Mplayer_Album_ID album_id)
 internal Mplayer_UI_Interaction 
 mplayer_ui_playlist_item(Mplayer_Context *mplayer, Mplayer_Playlist_ID playlist_id)
 {
-	Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->library, playlist_id);
+	Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->playlists, playlist_id);
 	
 	UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip | UI_FLAG_Draw_Background;
 	ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
@@ -1884,19 +1834,18 @@ mplayer_ui_side_bar_button(Mplayer_Context *mplayer, String8 string, Mplayer_Mod
 //~ NOTE(fakhri): Playlists stuff
 
 internal void
-mplayer_add_track_id_to_list(Mplayer_Context *mplayer, Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
+mplayer_add_track_id_to_list(Mplayer_Playlists *playlists, Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
 {
-	Mplayer_Library *library = &mplayer->library; 
 	Mplayer_Track_ID_Entry *entry = 0;
-	if (library->track_id_entries_free_list)
+	if (playlists->track_id_entries_free_list)
 	{
-		entry = library->track_id_entries_free_list;
-		library->track_id_entries_free_list = library->track_id_entries_free_list->next;
+		entry = playlists->track_id_entries_free_list;
+		playlists->track_id_entries_free_list = playlists->track_id_entries_free_list->next;
 		memory_zero_struct(entry);
 	}
 	if (!entry)
 	{
-		entry = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_Track_ID_Entry);
+		entry = m_arena_push_struct_z(&playlists->arena, Mplayer_Track_ID_Entry);
 	}
 	assert(entry);
 	entry->track_id = track_id;
@@ -1906,7 +1855,7 @@ mplayer_add_track_id_to_list(Mplayer_Context *mplayer, Mplayer_Track_ID_List *li
 }
 
 internal void
-mplayer_byte_stream_read_track_ids_list(Mplayer_Context *mplayer, Byte_Stream *bs, Mplayer_Track_ID_List *tracks)
+mplayer_byte_stream_read_track_ids_list(Mplayer_Playlists *playlists, Byte_Stream *bs, Mplayer_Track_ID_List *tracks)
 {
 	u32 count;
 	byte_stream_read(bs, &count);
@@ -1914,48 +1863,64 @@ mplayer_byte_stream_read_track_ids_list(Mplayer_Context *mplayer, Byte_Stream *b
 	{
 		Mplayer_Track_ID track_id;
 		byte_stream_read(bs, &track_id);
-		mplayer_add_track_id_to_list(mplayer, tracks, track_id);
+		mplayer_add_track_id_to_list(playlists, tracks, track_id);
 	}
 }
 
 internal void
-mplayer_reset_fav_tracks(Mplayer_Context *mplayer)
+mplayer_reset_playlists(Mplayer_Playlists *playlists)
 {
-	Mplayer_Library *library = &mplayer->library; 
-	library->fav_tracks.count = 0;
-	if (library->fav_tracks.last)
+	m_arena_free_all(&playlists->arena);
+	memory_zero_struct(playlists);
+}
+
+
+#define MPLAYER_PLAYLISTS_PATH str8_lit("playlists.mplayer")
+internal void
+mplayer_save_playlists(Mplayer_Playlists *playlists)
+{
+	File_Handle *file = platform->open_file(MPLAYER_PLAYLISTS_PATH, File_Open_Write | File_Create_Always);
+	mplayer_serialize(file, playlists->fav_tracks);
+	mplayer_serialize(file, playlists->playlists_count);
+	for (u32 playlist_index = 0; playlist_index < playlists->playlists_count; playlist_index += 1)
 	{
-		library->fav_tracks.last->next = library->track_id_entries_free_list;
-		library->track_id_entries_free_list = library->fav_tracks.first;
-		
-		library->fav_tracks.first = library->fav_tracks.last = 0;
+		Mplayer_Playlist_ID playlist_id = playlists->playlist_ids[playlist_index];
+		Mplayer_Playlist *playlist = mplayer_playlist_by_id(playlists, playlist_id);
+		mplayer_serialize_playlist(file, playlist);
 	}
-}
-
-
-#define MPLAYER_FAV_PATH str8_lit("favorites.mplayer")
-internal void
-mplayer_save_favorites(Mplayer_Context *mplayer)
-{
-	Mplayer_Library *library = &mplayer->library; 
-	
-	File_Handle *file = platform->open_file(MPLAYER_FAV_PATH, File_Open_Write | File_Create_Always);
-	mplayer_serialize(file, library->fav_tracks);
 	platform->close_file(file);
 }
 
 
 internal void
-mplayer_load_favorites(Mplayer_Context *mplayer)
+mplayer_load_playlists(Mplayer_Playlists *playlists)
 {
-	Mplayer_Library *library = &mplayer->library; 
-	mplayer_reset_fav_tracks(mplayer);
+	mplayer_reset_playlists(playlists);
 	
-	Buffer fav_content = platform->load_entire_file(MPLAYER_FAV_PATH, &mplayer->frame_arena);
-	if (is_valid(fav_content))
+	Buffer playlists_content = platform->load_entire_file(MPLAYER_PLAYLISTS_PATH, &playlists->arena);
+	if (is_valid(playlists_content))
 	{
-		Byte_Stream bs = make_byte_stream(fav_content);
-		mplayer_byte_stream_read_track_ids_list(mplayer, &bs, &library->fav_tracks);
+		Byte_Stream bs = make_byte_stream(playlists_content);
+		
+		mplayer_byte_stream_read_track_ids_list(playlists, &bs, &playlists->fav_tracks);
+		
+		u32 playlists_count;
+		byte_stream_read(&bs, &playlists_count);
+		for (u32 playlist_index = 0; playlist_index < playlists_count; playlist_index += 1)
+		{
+			String8 playlist_name;
+			byte_stream_read(&bs, &playlist_name);
+			Mplayer_Playlist_ID playlist_id = mplayer_compute_playlist_id(playlist_name);
+			Mplayer_Playlist *playlist = mplayer_playlist_by_id(playlists, playlist_id);
+			
+			assert(!playlist); // make sure there are no duplicate playlists
+			playlist = m_arena_push_struct_z(&playlists->arena, Mplayer_Playlist);
+			playlist->id = playlist_id;
+			playlist->name = playlist_name;
+			mplayer_add_playlist(playlists, playlist);
+			
+			mplayer_byte_stream_read_track_ids_list(playlists, &bs, &playlist->tracks);
+		}
 	}
 }
 
@@ -1977,26 +1942,22 @@ mplayer_track_in_list(Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
 }
 
 internal void
-mplayer_add_track_to_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+mplayer_add_track_to_favorites(Mplayer_Playlists *playlists, Mplayer_Track_ID track_id)
 {
-	Mplayer_Library *library = &mplayer->library; 
-	
 	#if DEBUG_BUILD
 		// NOTE(fakhri): assume that whoever calls us have checked that the track
 		// was not already in the list
-		assert(!mplayer_track_in_list(&library->fav_tracks, track_id));
+		assert(!mplayer_track_in_list(&playlists->fav_tracks, track_id));
 	#endif
-		mplayer_add_track_id_to_list(mplayer, &library->fav_tracks, track_id);
-	mplayer_save_favorites(mplayer);
+		mplayer_add_track_id_to_list(playlists, &playlists->fav_tracks, track_id);
+	mplayer_save_playlists(playlists);
 }
 
 internal void
-mplayer_remove_track_from_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID track_id)
+mplayer_remove_track_from_favorites(Mplayer_Playlists *playlists, Mplayer_Track_ID track_id)
 {
-	Mplayer_Library *library = &mplayer->library; 
-	
 	Mplayer_Track_ID_Entry *track_entry = 0;
-	for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first;
+	for(Mplayer_Track_ID_Entry *entry = playlists->fav_tracks.first;
 		entry;
 		entry = entry->next)
 	{
@@ -2009,9 +1970,9 @@ mplayer_remove_track_from_favorites(Mplayer_Context *mplayer, Mplayer_Track_ID t
 	
 	if (track_entry)
 	{
-		DLLRemove(library->fav_tracks.first, library->fav_tracks.last, track_entry);
-		library->fav_tracks.count -= 1;
-		mplayer_save_favorites(mplayer);
+		DLLRemove(playlists->fav_tracks.first, playlists->fav_tracks.last, track_entry);
+		playlists->fav_tracks.count -= 1;
+		mplayer_save_playlists(playlists);
 	}
 }
 
@@ -2080,6 +2041,7 @@ mplayer_initialize(Mplayer_Context *mplayer)
 	mplayer_init_queue(mplayer);
 	mplayer_load_settings(mplayer);
 	mplayer_load_library(mplayer);
+	mplayer_load_playlists(&mplayer->playlists);
 	mplayer_change_mode(mplayer, MODE_Track_Library);
 }
 
@@ -2175,11 +2137,11 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						}
 						ui_spacer_pixels(15,1);
 						
-						if (!mplayer_track_in_list(&mplayer->library.fav_tracks, track_id))
+						if (!mplayer_track_in_list(&mplayer->playlists.fav_tracks, track_id))
 						{
 							if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
 							{
-								mplayer_add_track_to_favorites(mplayer, track_id);
+								mplayer_add_track_to_favorites(&mplayer->playlists, track_id);
 								ui_close_ctx_menu();
 							}
 						}
@@ -2187,7 +2149,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						{
 							if (mplayer_ui_underlined_button(str8_lit("Remove From Favorites")).clicked_left)
 							{
-								mplayer_remove_track_from_favorites(mplayer, track_id);
+								mplayer_remove_track_from_favorites(&mplayer->playlists, track_id);
 								ui_close_ctx_menu();
 							}
 						}
@@ -2360,17 +2322,17 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 				ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 					ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 				{
-					ui_for_each_grid_item(str8_lit("library-playlists-select-playlist-grid"), mplayer->library.playlists_count, vec2(200.0f, 200.0f), 10, playlist_index)
+					ui_for_each_grid_item(str8_lit("library-playlists-select-playlist-grid"), mplayer->playlists.playlists_count, vec2(200.0f, 200.0f), 10, playlist_index)
 					{
-						Mplayer_Playlist_ID playlist_id = mplayer->library.playlist_ids[playlist_index];
+						Mplayer_Playlist_ID playlist_id = mplayer->playlists.playlist_ids[playlist_index];
 						Mplayer_UI_Interaction interaction = mplayer_ui_playlist_item(mplayer, playlist_id);
 						if (interaction.clicked_left)
 						{
-							Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->library, playlist_id);
-							mplayer_add_track_id_to_list(mplayer, &playlist->tracks, mplayer->track_to_add_to_playlist);
+							Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->playlists, playlist_id);
+							mplayer_add_track_id_to_list(&mplayer->playlists, &playlist->tracks, mplayer->track_to_add_to_playlist);
 							mplayer->track_to_add_to_playlist = NULL_TRACK_ID;
 							
-							mplayer_save_indexed_library(mplayer);
+							mplayer_save_playlists(&mplayer->playlists);
 							ui_close_modal_menu();
 						}
 					}
@@ -2440,19 +2402,19 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						b32 should_save_library = 0;
 						
 						Mplayer_Playlist_ID playlist_id = mplayer_compute_playlist_id(mplayer->new_playlist_name);
-						Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->library, playlist_id);
+						Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->playlists, playlist_id);
 						if (!playlist)
 						{
 							playlist = m_arena_push_struct_z(&mplayer->library.arena, Mplayer_Playlist);
 							playlist->id = playlist_id;
 							playlist->name = str8_clone(&mplayer->library.arena, mplayer->new_playlist_name);
-							mplayer_insert_playlist(&mplayer->library, playlist);
+							mplayer_add_playlist(&mplayer->playlists, playlist);
 							should_save_library = 1;
 						}
 						
 						if (mplayer->add_track_to_new_playlist)
 						{
-							mplayer_add_track_id_to_list(mplayer, &playlist->tracks, mplayer->track_to_add_to_playlist);
+							mplayer_add_track_id_to_list(&mplayer->playlists, &playlist->tracks, mplayer->track_to_add_to_playlist);
 							
 							mplayer->track_to_add_to_playlist = NULL_TRACK_ID;
 							mplayer->add_track_to_new_playlist = 0;
@@ -2461,7 +2423,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						if (should_save_library)
 						{
-							mplayer_save_indexed_library(mplayer);
+							mplayer_save_playlists(&mplayer->playlists);
 						}
 						ui_close_modal_menu();
 					}
@@ -2625,9 +2587,9 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_for_each_grid_item(str8_lit("library-playlists-grid"), mplayer->library.playlists_count, vec2(300.0f, 300.0f), 10, playlist_index)
+							ui_for_each_grid_item(str8_lit("library-playlists-grid"), mplayer->playlists.playlists_count, vec2(300.0f, 300.0f), 10, playlist_index)
 							{
-								Mplayer_Playlist_ID playlist_id = mplayer->library.playlist_ids[playlist_index];
+								Mplayer_Playlist_ID playlist_id = mplayer->playlists.playlist_ids[playlist_index];
 								Mplayer_UI_Interaction interaction = mplayer_ui_playlist_item(mplayer, playlist_id);
 								if (interaction.clicked_left)
 								{
@@ -2891,7 +2853,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					case MODE_Playlist_Tracks:
 					{
-						Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->library, item_id.playlist_id);
+						Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer->playlists, item_id.playlist_id);
 						
 						// TODO(fakhri): playlist image 
 						
@@ -3283,7 +3245,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 					
 					case MODE_Favorites:
 					{
-						Mplayer_Library *library = &mplayer->library;
+						Mplayer_Playlists *playlists = &mplayer->playlists;
 						
 						// NOTE(fakhri): header
 						ui_next_background_color(header_bg_color);
@@ -3299,7 +3261,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
-								ui_label(str8_f(&mplayer->frame_arena, "Favorites(%d)", library->fav_tracks.count));
+								ui_label(str8_f(&mplayer->frame_arena, "Favorites(%d)", playlists->fav_tracks.count));
 								
 								ui_spacer(ui_size_parent_remaining());
 								
@@ -3312,7 +3274,7 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
 										mplayer_clear_queue(mplayer);
-										for(Mplayer_Track_ID_Entry *entry = library->fav_tracks.first; entry; entry = entry->next)
+										for(Mplayer_Track_ID_Entry *entry = playlists->fav_tracks.first; entry; entry = entry->next)
 										{
 											mplayer_queue_last(mplayer, entry->track_id);
 										}
@@ -3328,12 +3290,12 @@ mplayer_update_and_render(Mplayer_Context *mplayer)
 						ui_next_height(ui_size_parent_remaining());
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 						{
-							u32 item_index = ui_list_begin(str8_lit("favorites-tracks-list"), library->fav_tracks.count, 50.0f, 1.0f);
+							u32 item_index = ui_list_begin(str8_lit("favorites-tracks-list"), playlists->fav_tracks.count, 50.0f, 1.0f);
 							defer(ui_list_end())
 							{
 								Mplayer_Track_ID_Entry *first_entry = 0;
 								{
-									u32 count; for(count = 0, first_entry = library->fav_tracks.first; 
+									u32 count; for(count = 0, first_entry = playlists->fav_tracks.first; 
 										count < item_index && first_entry; 
 										count += 1, first_entry = first_entry->next);
 								}
