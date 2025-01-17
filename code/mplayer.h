@@ -170,10 +170,12 @@ struct Mplayer_Item_Image
 struct Mplayer_Track_ID{u64 v[2];};
 struct Mplayer_Album_ID{u64 v[2];};
 struct Mplayer_Artist_ID{u64 v[2];};
+struct Mplayer_Playlist_ID{u64 v[2];};
 
 #define NULL_TRACK_ID Mplayer_Track_ID{}
 #define NULL_ALBUM_ID Mplayer_Album_ID{}
 #define NULL_ARTIST_ID Mplayer_Artist_ID{}
+#define NULL_PLAYLIST_ID Mplayer_Playlist_ID{}
 
 struct Seek_Table_Work_Data
 {
@@ -292,8 +294,9 @@ struct Mplayer_Track_ID_List
 };
 struct Mplayer_Playlist
 {
-	Mplayer_Playlist *next;
-	Mplayer_Playlist *prev;
+	Mplayer_Playlist *next_hash;
+	Mplayer_Playlist *prev_hash;
+	Mplayer_Playlist_ID id;
 	String8 name;
 	Mplayer_Track_ID_List tracks;
 };
@@ -316,17 +319,19 @@ struct Mplayer_Library
 	u32 tracks_count;
 	u32 albums_count;
 	u32 artists_count;
+	u32 playlists_count;
 	
 	Mplayer_Track_List tracks_table[1024];
 	Mplayer_Album_List albums_table[1024];
 	Mplayer_Artist_List artists_table[1024];
+	Mplayer_Playlist_List playlists_table[1024];
 	
 	Mplayer_Artist_ID artist_ids[MAX_ARTISTS_COUNT];
 	Mplayer_Album_ID  album_ids[MAX_ALBUMS_COUNT];
 	Mplayer_Track_ID  track_ids[MAX_TRACKS_COUNT];
+	Mplayer_Playlist_ID  playlist_ids[MAX_TRACKS_COUNT];
 	
 	Mplayer_Track_ID_List fav_tracks;
-	Mplayer_Playlist_List playlists;
 	
 	Mplayer_Item_Image images[8192];
 	u32 images_count;
@@ -361,6 +366,8 @@ enum Mplayer_Mode
 	
 	MODE_Queue,
 	MODE_Favorites,
+	MODE_Playlists,
+	MODE_Playlist_Tracks,
 	
 	MODE_Lyrics,
 	MODE_Settings,
@@ -371,17 +378,17 @@ union Mplayer_Item_ID
 	Mplayer_Track_ID  track_id;
 	Mplayer_Album_ID  album_id;
 	Mplayer_Artist_ID artist_id;
+	Mplayer_Playlist_ID playlist_id;
 };
 
 struct Mplayer_Mode_Stack
 {
 	Mplayer_Mode_Stack *next;
 	Mplayer_Mode_Stack *prev;
-	Mplayer_Mode mode;
 	
+	Mplayer_Mode mode;
 	Mplayer_Item_ID id;
 };
-
 
 struct Mplayer_Path_Lister
 {
@@ -409,8 +416,15 @@ struct Mplayer_Queue
 enum Mplayer_Ctx_Menu
 {
 	Track_Context_Menu,
-	
 	Context_Menu_COUNT,
+};
+
+enum Mplayer_Modal_Menu
+{
+	MODAL_Path_Lister,
+	MODAL_Add_To_Playlist,
+	MODAL_Create_Playlist,
+	Modal_Menu_COUNT,
 };
 
 struct Mplayer_Context
@@ -433,16 +447,11 @@ struct Mplayer_Context
 	Mplayer_Mode_Stack *mode_stack;
 	Mplayer_Mode_Stack *mode_stack_free_list_first;
 	Mplayer_Mode_Stack *mode_stack_free_list_last;
-	// Mplayer_Mode mode;
 	
 	Mplayer_Library library;
 	
-	Mplayer_Artist_ID selected_artist_id;
-	Mplayer_Album_ID selected_album_id;
-	
 	f32 track_name_hover_t;
 	
-	b32 show_path_modal;
 	Mplayer_Path_Lister path_lister;
 	
 	Mplayer_Queue queue;
@@ -450,8 +459,15 @@ struct Mplayer_Context
 	b32 show_library_locations;
 	MPlayer_Settings settings;
 	
+	UI_ID modal_menu_ids[Modal_Menu_COUNT];
+	
 	UI_ID ctx_menu_ids[Context_Menu_COUNT];
 	Mplayer_Item_ID ctx_menu_item_id;
+	
+	b32 add_track_to_new_playlist;
+	Mplayer_Track_ID track_to_add_to_playlist;
+	u8 new_playlist_name_buffer[256];
+	String8 new_playlist_name;
 };
 
 typedef void Mplayer_Initialize_Proc(Mplayer_Context *mplayer);

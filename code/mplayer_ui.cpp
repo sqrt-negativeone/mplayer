@@ -343,7 +343,13 @@ struct Mplayer_UI
 	UI_ID ctx_menu_id;
 	V2_F32 ctx_menu_origin;
 	UI_Element *ctx_menu_root;
-	UI_Element *modal_root;
+	
+	b32 next_modal_menu_open;
+	b32 modal_menu_open;
+	UI_ID next_modal_menu_id;
+	UI_ID modal_menu_id;
+	UI_Element *modal_menu_root;
+	
 	UI_Element *root;
 	
 	UI_Element *free_elements;
@@ -1113,8 +1119,7 @@ ui_open_ctx_menu(V2_F32 origin, UI_ID id)
 		g_ui->next_ctx_menu_origin = origin;
 	}
 	
-	ui_push_layer(UI_Layer_Popup);
-	g_ui->ctx_menu_root = ui_element(str8_lit("ctx-menu"), UI_FLAG_Floating | UI_FLAG_Clip);
+	//g_ui->ctx_menu_root = ui_element(str8_lit("ctx-menu"), UI_FLAG_Floating | UI_FLAG_Clip);
 }
 #define ui_ctx_menu(id) _defer_loop_checked(ui_begin_ctx_menu(id), ui_end_ctx_menu())
 
@@ -1126,7 +1131,6 @@ ui_begin_ctx_menu(UI_ID id)
 	b32 is_open = ui_id_is_equal(g_ui->ctx_menu_id, id);
 	if (is_open)
 	{
-		
 	}
 	return is_open;
 }
@@ -1147,7 +1151,7 @@ ui_update_element_interaction(UI_Element *element)
 	UI_ID id = element->id;
 	for (UI_Element *p = element->parent; p; p = p->parent)
 	{
-		if (!ui_id_is_null(p->id))
+		if (!ui_id_is_null(p->id) || has_flag(p->flags, UI_FLAG_Clip))
 		{
 			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
 		}
@@ -1155,12 +1159,12 @@ ui_update_element_interaction(UI_Element *element)
 	
 	
 	b32 ignore = 0;
-	if (g_ui->modal_root)
+	if (g_ui->modal_menu_open)
 	{
 		b32 in_modal = 0;
 		for (UI_Element *p = element->parent; p; p = p->parent)
 		{
-			if (p == g_ui->modal_root)
+			if (p == g_ui->modal_menu_root)
 			{
 				in_modal = 1;
 				break;
@@ -1429,7 +1433,7 @@ internal b32
 ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 {
 	b32 edited = 0;
-	ui_next_childs_axis(Axis2_Y);
+	ui_next_childs_axis(Axis2_X);
 	ui_next_hover_cursor(Cursor_TextSelect);
 	UI_Element *text_input = ui_element(key, 
 		UI_FLAG_Draw_Background|UI_FLAG_Draw_Border|UI_FLAG_Clickable|UI_FLAG_Selectable);
@@ -1544,16 +1548,16 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 			g_ui->input_cursor = (u32)buffer->len;
 		}
 		
-		
 		UI_Input_Field_Draw_Data *draw_data = m_arena_push_struct_z(g_ui->frame_arena, UI_Input_Field_Draw_Data);
-		draw_data->cursor_offset_x = -0.5f * text_dim.width + fnt_compute_text_dim(font, font_size, str8(buffer->str, MIN(buffer->len, g_ui->input_cursor))).width;
+		draw_data->cursor_offset_x = fnt_compute_text_dim(font, font_size, str8(buffer->str, MIN(buffer->len, g_ui->input_cursor))).width - 0.5f * text_dim.width;
 		draw_data->cursor_dim = vec2(2.1f, 1.25f * text_dim.height);
 		ui_element_set_draw_proc(text_input, ui_input_field_default_draw, draw_data);
 	}
 	
 	ui_parent(text_input) ui_padding(ui_size_parent_remaining())
 	{
-		ui_next_height(ui_size_text_dim(1));
+		ui_next_width(ui_size_text_dim(1));
+		ui_next_height(ui_size_percent(1, 1));
 		UI_Element *text = ui_label(*buffer);
 	}
 	
@@ -1740,7 +1744,7 @@ internal void
 ui_grid_end()
 {
 	// NOTE(fakhri): pop incomplete rows
-	if (g_ui->grid_row_index < (i32)g_ui->grid_visible_rows_count && 
+	if (g_ui->grid_items_count && g_ui->grid_row_index < (i32)g_ui->grid_visible_rows_count && 
 		g_ui->grid_item_index_in_row < g_ui->grid_item_count_per_row)
 	{
 		ui_pop_parent(); // pop parent row
@@ -2189,22 +2193,50 @@ ui_handle_this_frame_input(UI_Element *node)
 	ui_update_element_interaction(node);
 }
 
-internal void
-ui_modal_begin(String8 string)
+
+internal b32
+ui_is_modal_menu_open(UI_ID id)
 {
-	assert(!g_ui->modal_root);
-	
-	ui_push_layer(UI_Layer_Popup);
-	UI_Element *modal_root = ui_element(string, UI_FLAG_Floating | UI_FLAG_Clip);
-	g_ui->modal_root = modal_root;
-	ui_push_parent(modal_root);
+	b32 result = g_ui->modal_menu_open && ui_id_is_equal(g_ui->modal_menu_id, id);
+	return result;
 }
 
 internal void
-ui_modal_end()
+ui_close_modal_menu()
+{
+	g_ui->next_modal_menu_open = 0;
+	g_ui->next_modal_menu_id = UI_NULL_ID;
+}
+
+internal void
+ui_open_modal_menu(UI_ID id)
+{
+	if (!ui_is_modal_menu_open(id))
+	{
+		g_ui->next_modal_menu_open = 1;
+		g_ui->next_modal_menu_id = id;
+	}
+}
+#define ui_modal_menu(id) _defer_loop_checked(ui_begin_modal_menu(id), ui_end_modal_menu())
+
+
+internal b32
+ui_begin_modal_menu(UI_ID id)
+{
+	ui_push_parent(g_ui->root);
+	ui_push_parent(g_ui->modal_menu_root);
+	b32 is_open = ui_id_is_equal(g_ui->modal_menu_id, id);
+	if (is_open)
+	{
+	}
+	return is_open;
+}
+
+internal void
+ui_end_modal_menu()
 {
 	ui_pop_parent();
-	ui_pop_layer();
+	ui_pop_parent();
 }
 
 internal void
@@ -2266,7 +2298,15 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 	g_ui->root = root;
 	ui_push_parent(root);
 	
-	g_ui->modal_root = 0;
+	// NOTE(fakhri): compute modal menu parent
+	{
+		g_ui->modal_menu_open = g_ui->next_modal_menu_open;
+		g_ui->modal_menu_id = g_ui->next_modal_menu_id;
+		
+		ui_next_width(ui_size_by_childs(1));
+		ui_next_height(ui_size_by_childs(1));
+		g_ui->modal_menu_root = ui_element(str8_lit("ui-modal-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating);
+	}
 	
 	// NOTE(fakhri): compute ctx menu parent
 	{
@@ -2280,7 +2320,6 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 		g_ui->ctx_menu_root->computed_top_left = g_ui->ctx_menu_origin;
 		g_ui->ctx_menu_root->computed_rect = range_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
 			g_ui->ctx_menu_root->computed_dim);
-		
 	}
 	
 }
@@ -2313,10 +2352,10 @@ ui_end()
 		
 	}
 	
-	if (g_ui->modal_root)
+	if (g_ui->modal_menu_root)
 	{
-		g_ui->modal_root->computed_rect = range_center_dim(vec2(0, 0), g_ui->root->computed_dim);
-		g_ui->modal_root->computed_top_left = vec2(g_ui->modal_root->computed_rect.min_x, g_ui->modal_root->computed_rect.max_y);
+		g_ui->modal_menu_root->computed_rect = range_center_dim(vec2(0, 0), g_ui->root->computed_dim);
+		g_ui->modal_menu_root->computed_top_left = vec2(g_ui->modal_menu_root->computed_rect.min_x, g_ui->modal_menu_root->computed_rect.max_y);
 	}
 	
 	ui_update_layout(g_ui->root);
