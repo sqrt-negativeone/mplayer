@@ -507,10 +507,10 @@ typedef char stbtt__check_size16[sizeof(stbtt_int16)==2 ? 1 : -1];
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-  
-  // private structure
-  typedef struct
+	#endif
+		
+		// private structure
+		typedef struct
   {
     unsigned char *data;
     int cursor;
@@ -581,11 +581,11 @@ extern "C" {
   
   typedef struct stbtt_pack_context stbtt_pack_context;
   typedef struct stbtt_fontinfo stbtt_fontinfo;
-#ifndef STB_RECT_PACK_VERSION
-  typedef struct stbrp_rect stbrp_rect;
-#endif
-  
-  STBTT_DEF int  stbtt_PackBegin(stbtt_pack_context *spc, unsigned char *pixels, int width, int height, int stride_in_bytes, int padding, void *alloc_context);
+	#ifndef STB_RECT_PACK_VERSION
+		typedef struct stbrp_rect stbrp_rect;
+	#endif
+		
+		STBTT_DEF int  stbtt_PackBegin(stbtt_pack_context *spc, unsigned char *pixels, int width, int height, int stride_in_bytes, int padding, void *alloc_context);
   // Initializes a packing context stored in the passed-in stbtt_pack_context.
   // Future calls using this context will pack characters into the bitmap passed
   // in here: a 1-channel bitmap that is width * height. stride_in_bytes is
@@ -599,9 +599,9 @@ extern "C" {
   STBTT_DEF void stbtt_PackEnd  (stbtt_pack_context *spc);
   // Cleans up the packing context and frees all memory.
   
-#define STBTT_POINT_SIZE(x)   (-(x))
-  
-  STBTT_DEF int  stbtt_PackFontRange(stbtt_pack_context *spc, const unsigned char *fontdata, int font_index, float font_size,
+	#define STBTT_POINT_SIZE(x)   (-(x))
+		
+		STBTT_DEF int  stbtt_PackFontRange(stbtt_pack_context *spc, const unsigned char *fontdata, int font_index, float font_size,
     int first_unicode_char_in_range, int num_chars_in_range, stbtt_packedchar *chardata_for_range);
   // Creates character bitmaps from the font_index'th font found in fontdata (use
   // font_index=0 if you don't know what that is). It creates num_chars_in_range
@@ -820,26 +820,26 @@ extern "C" {
   // the bitmaps for C declaration-order reasons)
   //
   
-#ifndef STBTT_vmove // you can predefine these to use different values (but why?)
-  enum {
+	#ifndef STBTT_vmove // you can predefine these to use different values (but why?)
+		enum {
     STBTT_vmove=1,
     STBTT_vline,
     STBTT_vcurve,
     STBTT_vcubic
   };
-#endif
-  
-#ifndef stbtt_vertex // you can predefine this to use different values
-  // (we share this with other code at RAD)
-#define stbtt_vertex_type short // can't use stbtt_int16 because that's not visible in the header file
-  typedef struct
+	#endif
+		
+	#ifndef stbtt_vertex // you can predefine this to use different values
+		// (we share this with other code at RAD)
+	#define stbtt_vertex_type short // can't use stbtt_int16 because that's not visible in the header file
+		typedef struct
   {
     stbtt_vertex_type x,y,cx,cy,cx1,cy1;
     unsigned char type,padding;
   } stbtt_vertex;
-#endif
-  
-  STBTT_DEF int stbtt_IsGlyphEmpty(const stbtt_fontinfo *info, int glyph_index);
+	#endif
+		
+		STBTT_DEF int stbtt_IsGlyphEmpty(const stbtt_fontinfo *info, int glyph_index);
   // returns non-zero if nothing is drawn for this glyph
   
   STBTT_DEF int stbtt_GetCodepointShape(const stbtt_fontinfo *info, int unicode_codepoint, stbtt_vertex **vertices);
@@ -1023,13 +1023,13 @@ extern "C" {
   //   if you use STBTT_MACSTYLE_DONTCARE, use a font name like "Arial Bold".
   //   if you use any other flag, use a font name like "Arial"; this checks
   //     the 'macStyle' header field; i don't know if fonts set this consistently
-#define STBTT_MACSTYLE_DONTCARE     0
-#define STBTT_MACSTYLE_BOLD         1
-#define STBTT_MACSTYLE_ITALIC       2
-#define STBTT_MACSTYLE_UNDERSCORE   4
-#define STBTT_MACSTYLE_NONE         8   // <= not same as 0, this makes us check the bitfield is 0
+	#define STBTT_MACSTYLE_DONTCARE     0
+	#define STBTT_MACSTYLE_BOLD         1
+	#define STBTT_MACSTYLE_ITALIC       2
+	#define STBTT_MACSTYLE_UNDERSCORE   4
+	#define STBTT_MACSTYLE_NONE         8   // <= not same as 0, this makes us check the bitfield is 0
   
-  STBTT_DEF int stbtt_CompareUTF8toUTF16_bigendian(const char *s1, int len1, const char *s2, int len2);
+		STBTT_DEF int stbtt_CompareUTF8toUTF16_bigendian(const char *s1, int len1, const char *s2, int len2);
   // returns 1/0 whether the first string interpreted as utf8 is identical to
   // the second string interpreted as big-endian utf16... useful for strings from next func
   
@@ -1090,7 +1090,7 @@ extern "C" {
     STBTT_MAC_LANG_ITALIAN      =3 ,   STBTT_MAC_LANG_CHINESE_TRAD =19
   };
   
-#ifdef __cplusplus
+	#ifdef __cplusplus
 }
 #endif
 
@@ -2015,10 +2015,10 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
   stbtt__buf subr_stack[10], subrs = info->subrs, b;
   float f;
   
-#define STBTT__CSERR(s) (0)
-  
-  // this currently ignores the initial width value, which isn't needed if we have hmtx
-  b = stbtt__cff_index_get(info->charstrings, glyph_index);
+	#define STBTT__CSERR(s) (0)
+		
+		// this currently ignores the initial width value, which isn't needed if we have hmtx
+		b = stbtt__cff_index_get(info->charstrings, glyph_index);
   while (b.cursor < b.size) {
     i = 0;
     clear_stack = 1;
@@ -2263,7 +2263,7 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
   }
   return STBTT__CSERR("no endchar");
   
-#undef STBTT__CSERR
+	#undef STBTT__CSERR
 }
 
 static int stbtt__GetGlyphShapeT2(const stbtt_fontinfo *info, int glyph_index, stbtt_vertex **pvertices)
@@ -2660,13 +2660,13 @@ STBTT_DEF void stbtt_GetFontBoundingBox(const stbtt_fontinfo *info, int *x0, int
 STBTT_DEF float stbtt_ScaleForPixelHeight(const stbtt_fontinfo *info, float height)
 {
   int fheight = ttSHORT(info->data + info->hhea + 4) - ttSHORT(info->data + info->hhea + 6);
-  return (float) height / fheight;
+  return (float) height / (float)fheight;
 }
 
 STBTT_DEF float stbtt_ScaleForMappingEmToPixels(const stbtt_fontinfo *info, float pixels)
 {
   int unitsPerEm = ttUSHORT(info->data + info->head + 18);
-  return pixels / unitsPerEm;
+  return pixels / (float)unitsPerEm;
 }
 
 STBTT_DEF void stbtt_FreeShape(const stbtt_fontinfo *info, stbtt_vertex *v)
@@ -2813,18 +2813,18 @@ typedef struct stbtt__edge {
 typedef struct stbtt__active_edge
 {
   struct stbtt__active_edge *next;
-#if STBTT_RASTERIZER_VERSION==1
-  int x,dx;
+	#if STBTT_RASTERIZER_VERSION==1
+		int x,dx;
   float ey;
   int direction;
-#elif STBTT_RASTERIZER_VERSION==2
-  float fx,fdx,fdy;
+	#elif STBTT_RASTERIZER_VERSION==2
+		float fx,fdx,fdy;
   float direction;
   float sy;
   float ey;
-#else
-#error "Unrecognized value of STBTT_RASTERIZER_VERSION"
-#endif
+	#else
+	#error "Unrecognized value of STBTT_RASTERIZER_VERSION"
+	#endif
 } stbtt__active_edge;
 
 #if STBTT_RASTERIZER_VERSION == 1
@@ -3492,17 +3492,17 @@ static void stbtt__rasterize(stbtt__bitmap *result, stbtt__point *pts, int *wcou
   float y_scale_inv = invert ? -scale_y : scale_y;
   stbtt__edge *e;
   int n,i,j,k,m;
-#if STBTT_RASTERIZER_VERSION == 1
-  int vsubsample = result->h < 8 ? 15 : 5;
-#elif STBTT_RASTERIZER_VERSION == 2
-  int vsubsample = 1;
-#else
-#error "Unrecognized value of STBTT_RASTERIZER_VERSION"
-#endif
-  // vsubsample should divide 255 evenly; otherwise we won't reach full opacity
+	#if STBTT_RASTERIZER_VERSION == 1
+		int vsubsample = result->h < 8 ? 15 : 5;
+	#elif STBTT_RASTERIZER_VERSION == 2
+		int vsubsample = 1;
+	#else
+	#error "Unrecognized value of STBTT_RASTERIZER_VERSION"
+	#endif
+		// vsubsample should divide 255 evenly; otherwise we won't reach full opacity
   
-  // now we have to blow out the windings into explicit edge lists
-  n = 0;
+		// now we have to blow out the windings into explicit edge lists
+		n = 0;
   for (i=0; i < windings; ++i)
     n += wcount[i];
   

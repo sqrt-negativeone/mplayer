@@ -138,7 +138,7 @@ sin_f(f32 angle)
 }
 
 internal V2_I32
-vec2i(u32 x, u32 y)
+vec2i(i32 x, i32 y)
 {
 	V2_I32 result;
 	result.x = x;

@@ -208,7 +208,7 @@ fnt_raster_init(Font_Raster *raster)
 	{
 		raster->atlas.buf = arena_push_buffer(&g_fonts_ctx->arena, atlas_dim.width * atlas_dim.height);
 	}
-	assert(raster->atlas.buf.size == atlas_dim.width * atlas_dim.height);
+	assert((i64)raster->atlas.buf.size == atlas_dim.width * atlas_dim.height);
 	raster->atlas.handle = reserve_texture_handle(g_fonts_ctx->render_ctx, (u16)atlas_dim.width, (u16)atlas_dim.height, TEXTURE_FLAG_GRAY_BIT);
 	
 	stbtt_PackBegin(&raster->ctx, raster->atlas.buf.data, raster->atlas.dim.width, raster->atlas.dim.height, 0, 1, 0);

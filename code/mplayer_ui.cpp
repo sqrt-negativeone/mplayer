@@ -279,7 +279,6 @@ struct Mplayer_UI
 {
 	Render_Group *group;
 	Font *def_font;
-	Mplayer_Input *input;
 	Memory_Arena *arena;
 	Memory_Arena *frame_arena;
 	
@@ -294,29 +293,6 @@ struct Mplayer_UI
 	
 	f32 recent_click_time;
 	u32 input_cursor;
-	
-	// NOTE(fakhri): these probably better stored outside of the UI context but in the app side instead
-	// {
-	u32 list_items_count;
-	u32 list_item_index;
-	u32 list_first_visible_row;
-	u32 list_max_rows_count;
-	u32 list_row_index;
-	u32 list_visible_rows_count;
-	f32 list_vpadding;
-	f32 list_item_height;
-	
-	u32 grid_item_index;
-	u32 grid_items_count;
-	u32 grid_first_visible_row;
-	u32 grid_item_count_per_row;
-	u32 grid_max_rows_count;
-	u32 grid_visible_rows_count;
-	u32 grid_item_index_in_row;
-	i32 grid_row_index;
-	f32 grid_vpadding;
-	V2_F32 grid_item_dim;
-	// }
 	
 	UI_ID_Stack seeds;
 	UI_Elements_Stack parents;
@@ -1207,7 +1183,7 @@ ui_update_element_interaction(UI_Element *element)
 	// If we click somewhere empty and drag the mouse over the element
 	// and release we get a click event. this should not happen.
 	
-	for (Mplayer_Input_Event *e = g_ui->input->first_event, *next = 0; e; e = next)
+	for (Mplayer_Input_Event *e = g_input->first_event, *next = 0; e; e = next)
 	{
 		next = e->next;
 		b32 consumed = 0;
@@ -1242,7 +1218,7 @@ ui_update_element_interaction(UI_Element *element)
 				g_ui->hot_id[e->key] = id;
 				g_ui->active_id = id;
 				g_ui->mouse_drag_start_pos = mouse_p;
-				g_ui->recent_click_time = g_ui->input->time;
+				g_ui->recent_click_time = g_input->time;
 				set_flag(interaction.flags, UI_Interaction_Pressed_Left<<e->key);
 				interaction.pos = e->pos;
 			}
@@ -1284,7 +1260,7 @@ ui_update_element_interaction(UI_Element *element)
 		
 		if (consumed)
 		{
-			DLLRemove(g_ui->input->first_event, g_ui->input->last_event, e);
+			DLLRemove(g_input->first_event, g_input->last_event, e);
 		}
 	}
 	
@@ -1411,8 +1387,8 @@ UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
 	if (ui_id_is_equal(g_ui->selected_id, element->id))
 	{
 		V2_F32 pos = range_center(element->rect);
-		f32 blink_t = (sin_f(2 * PI32 * (g_ui->input->time - g_ui->recent_click_time)) + 1) / 2;
-		if (g_ui->input->time - g_ui->recent_click_time > 5)
+		f32 blink_t = (sin_f(2 * PI32 * (g_input->time - g_ui->recent_click_time)) + 1) / 2;
+		if (g_input->time - g_ui->recent_click_time > 5)
 		{
 			blink_t = 1.0f;
 		}
@@ -1473,7 +1449,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 			}
 		}
 		
-		for (Mplayer_Input_Event *event = g_ui->input->first_event; event; event = event->next)
+		for (Mplayer_Input_Event *event = g_input->first_event; event; event = event->next)
 		{
 			b32 consumed = 0;
 			switch(event->kind)
@@ -1540,7 +1516,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 			
 			if (consumed)
 			{
-				DLLRemove(g_ui->input->first_event, g_ui->input->last_event, event);
+				DLLRemove(g_input->first_event, g_input->last_event, event);
 			}
 		}
 		if (g_ui->input_cursor > buffer->len)
@@ -1645,198 +1621,6 @@ ui_slider_u64(String8 string, u64 *val, u64 min, u64 max)
 	return interaction;
 }
 
-
-internal void
-ui_grid_push_row()
-{
-	ui_next_height(ui_size_pixel(g_ui->grid_item_dim.height, 1));
-	ui_push_parent(ui_layout(Axis2_X));
-	ui_spacer(ui_size_parent_remaining());
-	g_ui->grid_item_index_in_row = 0;
-}
-
-internal b32
-ui_grid_item_begin()
-{
-	b32 good = 0;
-	if (g_ui->grid_item_index < g_ui->grid_items_count && 
-		g_ui->grid_item_index_in_row < g_ui->grid_item_count_per_row)
-	{
-		good = 1;
-		
-		g_ui->grid_item_index += 1;
-		g_ui->grid_item_index_in_row += 1;
-		ui_next_width(ui_size_pixel(g_ui->grid_item_dim.width, 1));
-		ui_next_height(ui_size_pixel(g_ui->grid_item_dim.height, 1));
-		UI_Element *grid_item = ui_element({0}, 0);
-		ui_push_parent(grid_item);
-	}
-	return good;
-}
-
-
-internal void
-ui_grid_item_end()
-{
-	// NOTE(fakhri): pop grid item
-	ui_pop_parent();
-	ui_spacer(ui_size_parent_remaining());
-	
-	// NOTE(fakhri): check if row is full
-	if (g_ui->grid_item_index_in_row == g_ui->grid_item_count_per_row)
-	{
-		ui_pop_parent(); // pop parent row
-		ui_spacer_pixels(g_ui->grid_vpadding, 1);
-		g_ui->grid_row_index += 1;
-		
-		if (g_ui->grid_row_index < (i32)g_ui->grid_visible_rows_count)
-		{
-			ui_grid_push_row();
-		}
-	}
-}
-
-internal u32
-ui_grid_begin(String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpadding)
-{
-	ui_next_childs_axis(Axis2_Y);
-	UI_Element *grid = ui_element(string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
-	ui_push_parent(grid);
-	
-	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
-	item_count_per_row = MAX(item_count_per_row, 1);
-	
-	u32 max_rows_count = ((items_count + item_count_per_row - 1) / item_count_per_row);
-	
-	u32 visible_rows_count = u32(grid->computed_dim.height / (grid_item_dim.height + vpadding)) + 2;
-	
-	f32 space_before_first_row = 0;
-	{
-		UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(grid->id);
-		if (persistent_state)
-			space_before_first_row = ABS(persistent_state->view_scroll.y);
-	}
-	u32 first_visible_row = (u32)(space_before_first_row / (grid_item_dim.height + vpadding));
-	first_visible_row = MIN(first_visible_row, max_rows_count-1);
-	
-	ui_spacer_pixels(first_visible_row * (grid_item_dim.height + vpadding), 1);
-	
-	g_ui->grid_items_count = items_count;
-	g_ui->grid_first_visible_row = first_visible_row;
-	g_ui->grid_item_count_per_row = item_count_per_row;
-	g_ui->grid_max_rows_count = max_rows_count;
-	g_ui->grid_item_index_in_row = 0;
-	g_ui->grid_row_index = 0;
-	g_ui->grid_visible_rows_count = visible_rows_count;
-	g_ui->grid_vpadding = vpadding;
-	g_ui->grid_item_dim = grid_item_dim;
-	
-	if (items_count)
-	{
-		ui_grid_push_row();
-	}
-	
-	g_ui->grid_item_index = first_visible_row * item_count_per_row;
-	return g_ui->grid_item_index;
-}
-
-internal void
-ui_grid_end()
-{
-	// NOTE(fakhri): pop incomplete rows
-	if (g_ui->grid_items_count && g_ui->grid_row_index < (i32)g_ui->grid_visible_rows_count && 
-		g_ui->grid_item_index_in_row < g_ui->grid_item_count_per_row)
-	{
-		ui_pop_parent(); // pop parent row
-	}
-	
-	u32 rows_remaining = g_ui->grid_max_rows_count - MIN(g_ui->grid_first_visible_row + g_ui->grid_visible_rows_count, g_ui->grid_max_rows_count);
-	ui_spacer_pixels(rows_remaining * (g_ui->grid_item_dim.height + g_ui->grid_vpadding), 1);
-	
-	// NOTE(fakhri): pop grid
-	ui_pop_parent();
-}
-
-#define ui_for_each_grid_item(string, items_count, item_dim, vpadding, item_index) \
-defer(ui_grid_end()) for (u32 item_index = ui_grid_begin(string, items_count, item_dim, vpadding); \
-ui_grid_item_begin();\
-(item_index += 1, ui_grid_item_end()))
-
-#define ui_for_each_list_item(string, items_count, item_height, vpadding, item_index) \
-defer(ui_list_end()) for (u32 item_index = ui_list_begin(string, items_count, item_height, vpadding); \
-ui_list_item_begin();\
-(item_index += 1, ui_list_item_end()))
-
-
-internal b32
-ui_list_item_begin()
-{
-	b32 good = 0;
-	if (g_ui->list_item_index < g_ui->list_items_count && 
-		g_ui->list_row_index < g_ui->list_visible_rows_count)
-	{
-		good = 1;
-		
-		g_ui->list_item_index += 1;
-		g_ui->list_row_index += 1;
-		
-		ui_next_width(ui_size_parent_remaining());
-		ui_next_height(ui_size_pixel(g_ui->list_item_height, 1));
-		UI_Element *list_item = ui_element({0}, 0);
-		
-		ui_push_parent(list_item);
-	}
-	return good;
-}
-
-internal void
-ui_list_item_end()
-{
-	ui_pop_parent();
-	ui_spacer_pixels(g_ui->list_vpadding, 1);
-}
-
-internal u32
-ui_list_begin(String8 string, u32 items_count, f32 item_height, f32 vpadding)
-{
-	UI_Element *list = ui_element(string, UI_FLAG_Draw_Border | UI_FLAG_Draw_Background | UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
-	list->child_layout_axis = Axis2_Y;
-	ui_push_parent(list);
-	
-	u32 visible_rows_count = u32(list->computed_dim.height / (item_height + vpadding)) + 2;
-	
-	f32 space_before_first_row = 0;
-	{
-		UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(list->id);
-		if (persistent_state)
-			space_before_first_row = ABS(persistent_state->view_scroll.y);
-	}
-	u32 first_visible_row = (u32)(space_before_first_row / (item_height + vpadding));
-	first_visible_row = MIN(first_visible_row, items_count);
-	
-	ui_spacer_pixels(first_visible_row * (item_height + vpadding), 1);
-	
-	g_ui->list_items_count = items_count;
-	g_ui->list_first_visible_row = first_visible_row;
-	g_ui->list_max_rows_count = items_count;
-	g_ui->list_row_index = 0;
-	g_ui->list_visible_rows_count = visible_rows_count;
-	g_ui->list_vpadding = vpadding;
-	g_ui->list_item_height = item_height;
-	
-	g_ui->list_item_index = first_visible_row;
-	return g_ui->list_item_index;
-}
-
-internal void
-ui_list_end()
-{
-	u32 rows_remaining = g_ui->list_max_rows_count - MIN(g_ui->list_first_visible_row + g_ui->list_visible_rows_count, g_ui->list_max_rows_count);
-	ui_spacer_pixels(rows_remaining * (g_ui->list_item_height + g_ui->list_vpadding), 1);
-	
-	// NOTE(fakhri): pop list
-	ui_pop_parent();
-}
 
 
 internal void
@@ -2094,7 +1878,7 @@ ui_cache_or_dispose_hierarchy(UI_Element *node)
 internal void
 ui_animate_elements(UI_Element *node)
 {
-	f32 dt = g_ui->input->frame_dt;
+	f32 dt = g_input->frame_dt;
 	
 	f32 step42 = 1 - pow_f(2, -42 * dt);
 	f32 step69 = 1 - pow_f(2, -69 * dt);
@@ -2246,14 +2030,13 @@ ui_set_context(Mplayer_UI *ui)
 }
 
 internal Mplayer_UI *
-ui_init(Mplayer_Context *mplayer, Font *default_font)
+ui_init(Font *default_font)
 {
-	Mplayer_UI *ui = m_arena_push_struct_z(&mplayer->main_arena, Mplayer_UI);
+	Mplayer_UI *ui = m_arena_push_struct_z(&mplayer_ctx->main_arena, Mplayer_UI);
 	ui_set_context(ui);
 	
-	g_ui->input = &mplayer->input;
-	g_ui->frame_arena = &mplayer->frame_arena;
-	g_ui->arena       = &mplayer->main_arena;
+	g_ui->frame_arena = mplayer_ctx->frame_arena;
+	g_ui->arena       = &mplayer_ctx->main_arena;
 	g_ui->def_font    = default_font;
 	
 	return ui;

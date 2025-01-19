@@ -1,47 +1,4 @@
 
-struct String8
-{
-	union
-	{
-		u8 *str;
-		char *cstr;
-	};
-	u64 len;
-};
-
-struct String16
-{
-	u16 *str;
-	u64 len;
-};
-
-struct Decoded_Codepoint
-{
-  u32 codepoint;
-  u32 advance;
-};
-
-struct String8_Node
-{
-	String8_Node *next;
-	String8 str;
-};
-struct String8_List
-{
-	String8_Node *first;
-	String8_Node *last;
-	u64 count;
-	u64 total_len;
-};
-struct String_Join
-{
-  String8 pre;
-  String8 sep;
-  String8 post;
-};
-
-
-
 internal b32
 char_is_alpha_upper(u8 c)
 {
@@ -173,17 +130,6 @@ global u8 utf8_class[32] =
 {
   1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,2,2,2,2,3,3,4,5,
 };
-
-#define bitmask1 0x01
-#define bitmask2 0x03
-#define bitmask3 0x07
-#define bitmask4 0x0F
-#define bitmask5 0x1F
-#define bitmask6 0x3F
-#define bitmask7 0x7F
-#define bitmask8 0xFF
-#define bitmask9  0x01FF
-#define bitmask10 0x03FF
 
 internal Decoded_Codepoint
 decode_codepoint_from_utf8(u8 *str, u64 max)
@@ -410,17 +356,6 @@ suffix8(String8 str, u64 size)
 {
   return substr8(str, str.len-size, str.len);
 }
-
-typedef u32 Match_Flags;
-enum
-{
-  MatchFlag_CaseInsensitive  = (1<<0),
-  MatchFlag_RightSideSloppy  = (1<<1),
-  MatchFlag_SlashInsensitive = (1<<2),
-  MatchFlag_FindLast         = (1<<3),
-  MatchFlag_SkipFirst        = (1<<4),
-};
-
 
 //- NOTE(fakhri): Matching
 internal b32
@@ -720,14 +655,6 @@ str8_chop_last_slash(String8 string)
 	}
 	return string;
 }
-
-struct String8_UTF8_Iterator
-{
-	u8 *str;
-	u64 max;
-	Decoded_Codepoint utf8;
-	u64 offset;
-};
 
 internal b32
 str8_utf8_it_valid(String8_UTF8_Iterator *it)

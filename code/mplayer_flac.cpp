@@ -907,7 +907,7 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	u64 resample_factor = (1ull << (bits_depth - 1));
 	for (u32 i = 0; i < block_size * nb_channels; i += 1)
 	{
-		decoded_block->samples[i] = decoded_samples[i] / f32(resample_factor);
+		decoded_block->samples[i] = (f32)decoded_samples[i] / f32(resample_factor);
 	}
 	
 	// NOTE(fakhri): decode footer

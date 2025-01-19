@@ -14,9 +14,6 @@
 #undef near
 #undef far
 
-#include "mplayer_base.h"
-#include "mplayer_math.h"
-
 #include "mplayer.h"
 
 
@@ -870,10 +867,7 @@ struct Mplayer_Code
 	HMODULE dll;
 	FILETIME last_write_time;
 	
-	Mplayer_Initialize_Proc *mplayer_initialize;
-	Mplayer_Hotload_Proc    *mplayer_hotload;
-	Mplayer_Update_And_Render_Proc *mplayer_update_and_render;
-	Mplayer_Get_Audio_Samples_Proc *mplayer_get_audio_samples;
+	Mplayer_Exported_Vtable vtable;
 };
 
 global Mplayer_Code w32_app_code;
@@ -900,10 +894,7 @@ w32_get_last_write_time(char *filename)
 internal void
 w32_set_code_stub(Mplayer_Code *code)
 {
-	code->mplayer_initialize        = mplayer_initialize_stub;
-	code->mplayer_hotload           = mplayer_hotload_stub;
-	code->mplayer_update_and_render = mplayer_update_and_render_stub;
-	code->mplayer_get_audio_samples = mplayer_get_audio_samples_stub;
+	code->vtable = g_vtable_stub;
 }
 
 internal b32
@@ -917,17 +908,12 @@ w32_load_app_code(Mplayer_Code *code)
 		{
 			code->last_write_time = w32_get_last_write_time(w32_temp_app_dll_path);
 			
-			code->mplayer_initialize = (Mplayer_Initialize_Proc *)GetProcAddress(code->dll, "mplayer_initialize");
-			code->mplayer_hotload    = (Mplayer_Hotload_Proc *)GetProcAddress(code->dll, "mplayer_hotload");
-			code->mplayer_update_and_render = (Mplayer_Update_And_Render_Proc *)GetProcAddress(code->dll, "mplayer_update_and_render");
-			code->mplayer_get_audio_samples = (Mplayer_Get_Audio_Samples_Proc *)GetProcAddress(code->dll, "mplayer_get_audio_samples");
+			Mplayer_Get_Vtable *mplayer_get_vtable = (Mplayer_Get_Vtable *)GetProcAddress(code->dll, "mplayer_get_vtable");
 			
-			if (code->mplayer_initialize && 
-				code->mplayer_hotload && 
-				code->mplayer_update_and_render && 
-				code->mplayer_get_audio_samples)
+			if (mplayer_get_vtable)
 			{
 				result = 1;
+				code->vtable = mplayer_get_vtable();
 			}
 			else
 			{
@@ -950,7 +936,7 @@ w32_code_unload(Mplayer_Code *code)
 }
 
 internal void
-w32_update_code(Mplayer_Context *mplayer, Mplayer_Code *code)
+w32_update_code(Mplayer_Context *mplayer, Mplayer_Input *input, Mplayer_Code *code)
 {
 	FILETIME last_write_time = w32_get_last_write_time(w32_app_dll_path);
 	if (CompareFileTime(&last_write_time, &code->last_write_time))
@@ -958,7 +944,7 @@ w32_update_code(Mplayer_Context *mplayer, Mplayer_Code *code)
 		// TODO(fakhri): wait for all worker threads to finish their work before active reloading
 		w32_code_unload(code);
 		w32_load_app_code(code);
-		code->mplayer_hotload(mplayer);
+		code->vtable.mplayer_hotload(mplayer, input, &w32_vtable);
 	}
 }
 
@@ -972,17 +958,15 @@ w32_main_thread(void *unused)
 	
 	if (window)
 	{
+		Mplayer_Input input = ZERO_STRUCT;
+		
 		HDC wdc = GetDC(window);
 		
+		Memory_Arena frame_arena = ZERO_STRUCT;
 		W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
-		Mplayer_Context *mplayer = (Mplayer_Context *)_m_arena_bootstrap_push(gigabytes(1), member_offset(Mplayer_Context, main_arena));
-		{
-			mplayer->render_ctx  = (Render_Context*)w32_renderer;
-			mplayer->os = w32_vtable;
-			assert(w32_load_app_code(&w32_app_code));
-			w32_app_code.mplayer_hotload(mplayer);
-			w32_app_code.mplayer_initialize(mplayer);
-		}
+		
+		assert(w32_load_app_code(&w32_app_code));
+		Mplayer_Context *mplayer = w32_app_code.vtable.mplayer_initialize(&frame_arena, (Render_Context *)w32_renderer, &input, &w32_vtable);
 		
 		u32 sample_rate    = 96000;
 		u16 channels_count = 2;
@@ -1010,20 +994,20 @@ w32_main_thread(void *unused)
 		b32 running = true;
 		for (;running;)
 		{
-			w32_update_code(mplayer, &w32_app_code);
-			m_arena_free_all(&mplayer->frame_arena);
+			w32_update_code(mplayer, &input, &w32_app_code);
+			m_arena_free_all(&frame_arena);
 			
-			mplayer->input.frame_dt = w32_get_seconds_elapsed(&timer);
-			mplayer->input.time += mplayer->input.frame_dt;
+			input.frame_dt = w32_get_seconds_elapsed(&timer);
+			input.time += input.frame_dt;
 			w32_update_timer(&timer);
 			
-			for (u32 i = 0; i < array_count(mplayer->input.keyboard_buttons); i += 1)
+			for (u32 i = 0; i < array_count(input.keyboard_buttons); i += 1)
 			{
-				mplayer->input.keyboard_buttons[i].was_down = mplayer->input.keyboard_buttons[i].is_down;
+				input.keyboard_buttons[i].was_down = input.keyboard_buttons[i].is_down;
 			}
-			for (u32 i = 0; i < array_count(mplayer->input.mouse_buttons); i += 1)
+			for (u32 i = 0; i < array_count(input.mouse_buttons); i += 1)
 			{
-				mplayer->input.mouse_buttons[i].was_down = mplayer->input.mouse_buttons[i].is_down;
+				input.mouse_buttons[i].was_down = input.mouse_buttons[i].is_down;
 				
 			}
 			
@@ -1038,8 +1022,8 @@ w32_main_thread(void *unused)
 			V2_I32 draw_dim = window_dim;
 			Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
 			
-			mplayer->input.first_event = 0;
-			mplayer->input.last_event = 0;
+			input.first_event = 0;
+			input.last_event = 0;
 			for (;w32_event_queue.head != w32_event_queue.tail;)
 			{
 				Mplayer_Input_Event w32_event = w32_event_queue.events[w32_event_queue.tail % array_count(w32_event_queue.events)];
@@ -1050,11 +1034,11 @@ w32_main_thread(void *unused)
 				{
 					case Event_Kind_Keyboard_Key: fallthrough;
 					{
-						mplayer->input.keyboard_buttons[w32_event.key].is_down = (w32_event.is_down);
+						input.keyboard_buttons[w32_event.key].is_down = (w32_event.is_down);
 					} break;
 					case Event_Kind_Mouse_Key: fallthrough;
 					{
-						mplayer->input.mouse_buttons[w32_event.key].is_down = (w32_event.is_down);
+						input.mouse_buttons[w32_event.key].is_down = (w32_event.is_down);
 					} break;
 					case Event_Kind_Mouse_Move:
 					{
@@ -1066,7 +1050,7 @@ w32_main_thread(void *unused)
 						mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
 						mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
 						
-						mplayer->input.mouse_clip_pos = mouse_clip_pos;
+						input.mouse_clip_pos = mouse_clip_pos;
 					} break;
 					
 					case Event_Kind_Null: fallthrough;
@@ -1076,9 +1060,9 @@ w32_main_thread(void *unused)
 					default: break;
 				}
 				
-				Mplayer_Input_Event *event = m_arena_push_struct_z(&mplayer->frame_arena, Mplayer_Input_Event);
+				Mplayer_Input_Event *event = m_arena_push_struct_z(&frame_arena, Mplayer_Input_Event);
 				memory_copy_struct(event, &w32_event);
-				DLLPushBack(mplayer->input.first_event, mplayer->input.last_event, event);
+				DLLPushBack(input.first_event, input.last_event, event);
 			}
 			
 			if (global_request_quit)
@@ -1087,7 +1071,7 @@ w32_main_thread(void *unused)
 			}
 			
 			w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
-			w32_app_code.mplayer_update_and_render(mplayer);
+			w32_app_code.vtable.mplayer_update_and_render();
 			w32_gl_render_end(w32_renderer);
 			
 			// NOTE(fakhri): audio
@@ -1096,7 +1080,7 @@ w32_main_thread(void *unused)
 				u32 max_lag_sample_count = max_ms_lag * sound_output.config.sample_rate / 1000;
 				
 				u32 frame_padding_count = 0;
-				u32 samples_per_frame = (u32)round_f32_i32(mplayer->input.frame_dt * sound_output.config.sample_rate);
+				u32 samples_per_frame = (u32)round_f32_i32(input.frame_dt * sound_output.config.sample_rate);
 				
 				// See how much buffer space is available.
 				sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
@@ -1112,7 +1096,7 @@ w32_main_thread(void *unused)
 						sound_output.render_client->GetBuffer(frames_to_write, &data);
 						
 						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
-						w32_app_code.mplayer_get_audio_samples(sound_output.config, mplayer, data, frames_to_write);
+						w32_app_code.vtable.mplayer_get_audio_samples(sound_output.config, data, frames_to_write);
 						
 						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
 					}
