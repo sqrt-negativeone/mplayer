@@ -183,7 +183,7 @@ struct Mplayer_Playlist_List
 
 #define MAX_ARTISTS_COUNT 512
 #define MAX_ALBUMS_COUNT 1024
-#define MAX_TRACKS_COUNT 8192
+#define MAX_TRACKS_COUNT 65536
 #define MAX_PLAYLISTS_COUNT 1024
 
 struct Mplayer_Playlists
@@ -1825,28 +1825,6 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 			}
 			
 			Flac_Picture *front_cover = tmp_flac_stream.front_cover;
-			Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
-			Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
-			{
-				// TODO(fakhri): do this only after all the tracks have loaded!!
-				// if no image is on disk there is absolutely no reason search for it
-				// again each time we find a new track belonging to this album!
-				Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-				if (!image->in_disk && !image->texture_data.size)
-				{
-					String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
-					if (cover_file_path.len)
-					{
-						image->in_disk = true;
-						image->path = cover_file_path;
-					}
-					else if (front_cover)
-					{
-						image->in_disk = false;
-						image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
-					}
-				}
-			}
 			
 			if (cuesheet)
 			{
@@ -1868,7 +1846,29 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 					if (cuesheet_track->performer.len && !track_artist.len)
 					{
 						track_artist = str8_clone(&library->arena, cuesheet_track->performer);
-						artist = mplayer_setup_track_artist(library, track_artist);
+					}
+					
+					Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
+					Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
+					{
+						// TODO(fakhri): do this only after all the tracks have loaded!!
+						// if no image is on disk there is absolutely no reason search for it
+						// again each time we find a new track belonging to this album!
+						Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
+						if (!image->in_disk && !image->texture_data.size)
+						{
+							String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
+							if (cover_file_path.len)
+							{
+								image->in_disk = true;
+								image->path = cover_file_path;
+							}
+							else if (front_cover)
+							{
+								image->in_disk = false;
+								image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+							}
+						}
 					}
 					
 					mplayer_make_track(info, samples_start, samples_end, album, artist,
@@ -1878,6 +1878,29 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 			}
 			else
 			{
+				Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
+				Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
+				{
+					// TODO(fakhri): do this only after all the tracks have loaded!!
+					// if no image is on disk there is absolutely no reason search for it
+					// again each time we find a new track belonging to this album!
+					Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
+					if (!image->in_disk && !image->texture_data.size)
+					{
+						String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
+						if (cover_file_path.len)
+						{
+							image->in_disk = true;
+							image->path = cover_file_path;
+						}
+						else if (front_cover)
+						{
+							image->in_disk = false;
+							image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+						}
+					}
+				}
+				
 				mplayer_make_track(info, 0, tmp_flac_stream.streaminfo.samples_count, album, artist,
 					track_title, track_date, track_genre, track_track_number);
 			}
