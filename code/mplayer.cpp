@@ -1105,6 +1105,14 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	if (index >= queue->count) 
 		index = 0;
 	
+	// TODO(fakhri): Since now we have tracks that point to 
+	// parts of a file, when we play these track we seek
+	// to wherever the start offset of the track is, if the file
+	// that contains them doesn't have a seek table then when we
+	// seek we rebuild the seektable, building the seektable
+	// can be slow, which cause some files to have noticeable
+	// delay when played...
+	
 	if (is_valid(queue->current_index))
 	{
 		mplayer_unload_track(mplayer_queue_get_current_track());
@@ -1617,29 +1625,6 @@ mplayer_load_indexed_library()
 	return success;
 }
 
-internal String8
-mplayer_attempt_find_cover_image_in_dir(Memory_Arena *arena, Directory dir)
-{
-	String8 result = ZERO_STRUCT;
-	for (u32 i = 0; i < dir.count; i += 1)
-	{
-		File_Info info = dir.files[i];
-		
-		if (!has_flag(info.flags, FileFlag_Directory))
-		{
-			if (str8_ends_with(info.name, str8_lit(".jpg"), MatchFlag_CaseInsensitive)  ||
-				str8_ends_with(info.name, str8_lit(".jpeg"), MatchFlag_CaseInsensitive) ||
-				str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)
-			)
-			{
-				result = str8_clone(arena, info.path);
-				break;
-			}
-		}
-	}
-	return result;
-}
-
 #define CUESHEET_FRAMES_PER_SECOND 75
 struct Cuesheet_Track_Index
 {
@@ -1747,7 +1732,26 @@ mplayer_make_track(File_Info info, u64 samples_start, u64 samples_end, Mplayer_A
 }
 
 internal void
-mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesheet_list)
+mplayer_setup_album_image(Memory_Arena *arena, Mplayer_Image_ID image_id, String8 cover_image_path, Flac_Picture *front_cover)
+{
+	Mplayer_Item_Image *image = mplayer_get_image_by_id(image_id, 0);
+	if (!image->in_disk && !image->texture_data.size)
+	{
+		if (cover_image_path.len)
+		{
+			image->in_disk = true;
+			image->path = str8_clone(arena, cover_image_path);
+		}
+		else if (front_cover)
+		{
+			image->in_disk = false;
+			image->texture_data = clone_buffer(arena, front_cover->buffer);
+		}
+	}
+}
+
+internal void
+mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesheet_list, String8 cover_image_path)
 {
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	Cuesheet_File *cuesheet = mplayer_find_cuesheet_for_file(cuesheet_list, info.name);
@@ -1850,26 +1854,7 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 					
 					Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
 					Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
-					{
-						// TODO(fakhri): do this only after all the tracks have loaded!!
-						// if no image is on disk there is absolutely no reason search for it
-						// again each time we find a new track belonging to this album!
-						Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-						if (!image->in_disk && !image->texture_data.size)
-						{
-							String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
-							if (cover_file_path.len)
-							{
-								image->in_disk = true;
-								image->path = cover_file_path;
-							}
-							else if (front_cover)
-							{
-								image->in_disk = false;
-								image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
-							}
-						}
-					}
+					mplayer_setup_album_image(&library->arena, album->image_id, cover_image_path, front_cover);
 					
 					mplayer_make_track(info, samples_start, samples_end, album, artist,
 						cue_track_title, track_date, track_genre, track_track_number);
@@ -1880,26 +1865,7 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 			{
 				Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
 				Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
-				{
-					// TODO(fakhri): do this only after all the tracks have loaded!!
-					// if no image is on disk there is absolutely no reason search for it
-					// again each time we find a new track belonging to this album!
-					Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-					if (!image->in_disk && !image->texture_data.size)
-					{
-						String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
-						if (cover_file_path.len)
-						{
-							image->in_disk = true;
-							image->path = cover_file_path;
-						}
-						else if (front_cover)
-						{
-							image->in_disk = false;
-							image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
-						}
-					}
-				}
+				mplayer_setup_album_image(&library->arena, album->image_id, cover_image_path, front_cover);
 				
 				mplayer_make_track(info, 0, tmp_flac_stream.streaminfo.samples_count, album, artist,
 					track_title, track_date, track_genre, track_track_number);
@@ -1931,11 +1897,20 @@ mplayer_load_tracks_in_directory(String8 library_path)
 	Directory dir = platform->read_directory(temp_mem.arena, library_path);
 	
 	// NOTE(fakhri): extract cuesheets if exist
+	String8 cover_image_path = ZERO_STRUCT;
 	Cuesheet_List cuesheet_list = ZERO_STRUCT;
 	
 	for (u32 info_index = 0; info_index < dir.count; info_index += 1)
 	{
 		File_Info info = dir.files[info_index];
+		if (has_flag(info.flags, FileFlag_Directory)) continue;
+		
+		if (!cover_image_path.len && (str8_ends_with(info.name, str8_lit(".jpg"), MatchFlag_CaseInsensitive)  ||
+				str8_ends_with(info.name, str8_lit(".jpeg"), MatchFlag_CaseInsensitive) ||
+				str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)))
+		{
+			cover_image_path = info.path;
+		}
 		
 		if (str8_ends_with(info.path, str8_lit(".cue"), MatchFlag_CaseInsensitive))
 		{
@@ -2134,7 +2109,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 		{
 			if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
 			{
-				mplayer_parse_flac_track_file(info, dir, cuesheet_list);
+				mplayer_parse_flac_track_file(info, dir, cuesheet_list, cover_image_path);
 			}
 		}
 	}
