@@ -16,7 +16,8 @@ set compiler_warnings= ^
 	/wd4533 /wd4505 ^
   /wd4459 /wd4471 ^
   /wd4324 ^
-  /we4061 /we4062
+  /we4061 /we4062 ^
+  /we6244
 
 set common_compiler_flags=/FC /Z7 /GR- /EHsc /nologo
 

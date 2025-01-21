@@ -93,7 +93,12 @@ struct Mplayer_Track
 	Buffer flac_file_buffer;
 	
 	Seek_Table_Work_Data build_seektable_work_data;
+	
+	// NOTE(fakhri): tracks can be parts of a file
+	u64 start_sample_offset;
+	u64 end_sample_offset;
 };
+
 struct Mplayer_Track_List
 {
 	Mplayer_Track *first;
@@ -384,6 +389,33 @@ struct Mplayer_Context
 global Mplayer_Input *g_input;
 global Mplayer_Context *mplayer_ctx;
 
+//~ NOTE(fakhri): Timestamp stuff
+struct Mplayer_Timestamp
+{
+	u8 hours;
+	u8 minutes;
+	u8 seconds;
+};
+
+
+internal Mplayer_Timestamp
+flac_get_current_timestap(u64 current_sample, u64 sample_rate)
+{
+	Mplayer_Timestamp result = ZERO_STRUCT;
+	u64 seconds_elapsed = current_sample / sample_rate;
+	u64 hours = seconds_elapsed / 3600;
+	seconds_elapsed %= 3600;
+	
+	u64 minutes = seconds_elapsed / 60;
+	seconds_elapsed %= 60;
+	
+	result.hours   = u8(hours);
+	result.minutes = u8(minutes);
+	result.seconds = u8(seconds_elapsed);
+	
+	return result;
+}
+
 //~ NOTE(fakhri): string hashing stuff
 internal u64
 str8_hash(String8 string)
@@ -574,11 +606,17 @@ mplayer_playlist_by_id(Mplayer_Playlists *playlists, Mplayer_Playlist_ID id)
 }
 
 internal Mplayer_Track_ID
-mplayer_compute_track_id(String8 track_path)
+mplayer_compute_track_id(String8 track_path, u64 samples_offset, u64 samples_end)
 {
 	Mplayer_Track_ID id = NULL_TRACK_ID;
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
-	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, track_path.len, track_path.str);
+	Buffer buffer = arena_push_buffer(scratch.arena, track_path.len + sizeof(samples_offset) + sizeof(samples_end));
+	((u64*)buffer.data)[0] = samples_offset;
+	((u64*)buffer.data)[1] = samples_end;
+	memory_copy(buffer.data + 2 * sizeof(u64), track_path.str, track_path.len);
+	
+	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, buffer.size, buffer.data);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
 	
 	return id;
@@ -830,7 +868,7 @@ mplayer_track_reset(Mplayer_Track *track)
 {
 	if (track && track->flac_stream)
 	{
-		flac_seek_stream(track->flac_stream, 0);
+		flac_seek_stream(track->flac_stream, track->start_sample_offset);
 	}
 }
 
@@ -901,7 +939,8 @@ internal b32
 is_track_still_playing(Mplayer_Track *track)
 {
 	b32 result = (track->flac_stream && 
-		!bitstream_is_empty(&track->flac_stream->bitstream));
+		!bitstream_is_empty(&track->flac_stream->bitstream) && 
+		track->flac_stream->next_sample_number < track->end_sample_offset);
 	
 	return result;
 }
@@ -1365,6 +1404,8 @@ mplayer_serialize_track(File_Handle *file, Mplayer_Track *track)
 	mplayer_serialize(file, track->genre);
 	mplayer_serialize(file, track->date);
 	mplayer_serialize(file, track->track_number);
+	mplayer_serialize(file, track->start_sample_offset);
+	mplayer_serialize(file, track->end_sample_offset);
 }
 
 internal void
@@ -1403,6 +1444,8 @@ mplayer_deserialize_track(Byte_Stream *bs, Mplayer_Track *track)
 	byte_stream_read(bs, &track->genre);
 	byte_stream_read(bs, &track->date);
 	byte_stream_read(bs, &track->track_number);
+	byte_stream_read(bs, &track->start_sample_offset);
+	byte_stream_read(bs, &track->end_sample_offset);
 }
 
 internal void
@@ -1466,36 +1509,32 @@ mplayer_save_indexed_library()
 }
 
 internal Mplayer_Artist *
-mplayer_setup_track_artist(Mplayer_Library *library, Mplayer_Track *track)
+mplayer_setup_track_artist(Mplayer_Library *library, String8 artist_name)
 {
-	Mplayer_Artist_ID artist_hash = mplayer_compute_artist_id(track->artist);
+	Mplayer_Artist_ID artist_hash = mplayer_compute_artist_id(artist_name);
 	Mplayer_Artist *artist = mplayer_artist_by_id(library, artist_hash);
 	if (!artist)
 	{
 		artist = m_arena_push_struct_z(&library->arena, Mplayer_Artist);
 		artist->hash   = artist_hash;
-		artist->name   = track->artist;
+		artist->name   = artist_name;
 		mplayer_insert_artist(library, artist);
 	}
-	
-	DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next_artist, prev_artist);
-	artist->tracks.count += 1;
-	track->artist_id = artist->hash;
 	
 	return artist;
 }
 
 internal Mplayer_Album *
-mplayer_setup_track_album(Mplayer_Library *library, Mplayer_Track *track, Mplayer_Artist *artist)
+mplayer_setup_track_album(Mplayer_Library *library, String8 album_name, Mplayer_Artist *artist)
 {
-	Mplayer_Album_ID album_hash = mplayer_compute_album_id(track->artist, track->album);
+	Mplayer_Album_ID album_hash = mplayer_compute_album_id(artist->name, album_name);
 	Mplayer_Album *album = mplayer_album_by_id(library, album_hash);
 	if (!album)
 	{
 		album = m_arena_push_struct_z(&library->arena, Mplayer_Album);
 		album->hash   = album_hash;
-		album->name   = track->album;
-		album->artist = track->artist;
+		album->name   = album_name;
+		album->artist = artist->name;
 		album->image_id = mplayer_reserve_image_id(library);
 		mplayer_insert_album(library, album);
 		
@@ -1503,10 +1542,6 @@ mplayer_setup_track_album(Mplayer_Library *library, Mplayer_Track *track, Mplaye
 		artist->albums.count += 1;
 		album->artist_id = artist->hash;
 	}
-	
-	DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next_album, prev_album);
-	album->tracks.count += 1;
-	track->album_id = album->hash;
 	
 	return album;
 }
@@ -1605,12 +1640,461 @@ mplayer_attempt_find_cover_image_in_dir(Memory_Arena *arena, Directory dir)
 	return result;
 }
 
+#define CUESHEET_FRAMES_PER_SECOND 75
+struct Cuesheet_Track_Index
+{
+	u32 minutes;
+	u32 seconds;
+	u32 frames;
+};
+struct Cuesheet_Track
+{
+	Cuesheet_Track *next;
+	Cuesheet_Track *prev;
+	String8 title;
+	String8 performer;
+	Cuesheet_Track_Index index;
+};
+
+struct Cuesheet_File
+{
+	Cuesheet_File *next;
+	Cuesheet_File *prev;
+	
+	String8 performer;
+	String8 title;
+	String8 file;
+	
+	Cuesheet_Track *first_tracks;
+	Cuesheet_Track *last_tracks;
+};
+
+struct Cuesheet_List
+{
+	Cuesheet_File *first;
+	Cuesheet_File *last;
+};
+
+internal u64 
+mplayer_sample_number_from_cue_index(Cuesheet_Track_Index index, u64 samples_per_second)
+{
+	u64 seconds = index.minutes * 60 + index.seconds;
+	u64 samples_count = seconds * samples_per_second;
+	samples_count += (index.frames * samples_per_second / CUESHEET_FRAMES_PER_SECOND);
+	return samples_count;
+}
+
+internal Cuesheet_File *
+mplayer_find_cuesheet_for_file(Cuesheet_List cuesheet_list, String8 file_name)
+{
+	Cuesheet_File *result = 0;
+	for (Cuesheet_File *cuesheet = cuesheet_list.first; cuesheet; cuesheet = cuesheet->next)
+	{
+		if (find_substr8(cuesheet->file, file_name, 0, MatchFlag_CaseInsensitive) < cuesheet->file.len)
+		{
+			result = cuesheet;
+			break;
+		}
+	}
+	return result;
+}
+
+internal void
+mplayer_make_track(File_Info info, u64 samples_start, u64 samples_end, Mplayer_Album *album,
+	Mplayer_Artist *artist, 
+	String8 track_title, String8 track_date, String8 track_genre, String8 track_track_number)
+{
+	Mplayer_Library *library = &mplayer_ctx->library;
+	Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path, samples_start, samples_end);
+	Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
+	if (!track)
+	{
+		track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
+		track->path = str8_clone(&library->arena, info.path);
+		track->hash = track_hash;
+		mplayer_insert_track(library, track);
+		
+		track->start_sample_offset = samples_start;
+		track->end_sample_offset = samples_end;
+		
+		
+		if (!track_title.len)
+		{
+			track_title = str8_clone(&library->arena, info.name);
+		}
+		
+		track->title        = track_title;
+		track->album        = album->name;
+		track->artist       = artist->name;
+		track->date         = track_date;
+		track->genre        = track_genre;
+		track->track_number = track_track_number;
+		
+		// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
+		
+		DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next_artist, prev_artist);
+		artist->tracks.count += 1;
+		track->artist_id = artist->hash;
+		
+		// NOTE(fakhri): setup album
+		{
+			DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next_album, prev_album);
+			album->tracks.count += 1;
+			track->album_id = album->hash;
+			
+		}
+	}
+}
+
+internal void
+mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesheet_list)
+{
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
+	Cuesheet_File *cuesheet = mplayer_find_cuesheet_for_file(cuesheet_list, info.name);
+	if (cuesheet)
+	{
+		Log("cuesheet found: %.*s", STR8_EXPAND(cuesheet->file));
+	}
+	
+	Buffer tmp_file_block = arena_push_buffer(scratch.arena, megabytes(1));
+	File_Handle *file = platform->open_file(info.path, File_Open_Read);
+	Flac_Stream tmp_flac_stream = ZERO_STRUCT;
+	assert(file);
+	if (file)
+	{
+		Mplayer_Library *library = &mplayer_ctx->library;
+		Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
+		platform->close_file(file);
+		// NOTE(fakhri): init flac stream
+		{
+			tmp_flac_stream.bitstream.buffer = buffer;
+			tmp_flac_stream.bitstream.pos.byte_index = 0;
+			tmp_flac_stream.bitstream.pos.bits_left  = 8;
+		}
+		
+		if (flac_process_metadata(&tmp_flac_stream, scratch.arena))
+		{
+			String8 track_title        = str8_lit("");
+			String8 track_album        = str8_lit("");
+			String8 track_artist       = str8_lit("");
+			String8 track_date         = str8_lit("");
+			String8 track_genre        = str8_lit("");
+			String8 track_track_number = str8_lit("");
+			
+			for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
+				node;
+				node = node->next)
+			{
+				String8 value = ZERO_STRUCT;
+				String8 key = ZERO_STRUCT;
+				for (u32 i = 0; i < node->str.len; i += 1)
+				{
+					if (node->str.str[i] == '=')
+					{
+						key   = prefix8(node->str, i);
+						value = suffix8(node->str, node->str.len - i - 1);
+						break;
+					}
+				}
+				
+				if (false) {}
+				else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
+				{
+					track_title = str8_clone(&library->arena, value);
+				}
+				else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
+				{
+					track_album = str8_clone(&library->arena, value);
+				}
+				else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
+				{
+					track_artist = str8_clone(&library->arena, value);
+				}
+				else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
+				{
+					track_genre = str8_clone(&library->arena, value);
+				}
+				else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
+				{
+					track_date = str8_clone(&library->arena, value);
+				}
+				else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
+				{
+					track_track_number = str8_clone(&library->arena, value);
+				}
+			}
+			
+			Flac_Picture *front_cover = tmp_flac_stream.front_cover;
+			Mplayer_Artist *artist = mplayer_setup_track_artist(library, track_artist);
+			Mplayer_Album *album = mplayer_setup_track_album(library, track_album, artist);
+			{
+				// TODO(fakhri): do this only after all the tracks have loaded!!
+				// if no image is on disk there is absolutely no reason search for it
+				// again each time we find a new track belonging to this album!
+				Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
+				if (!image->in_disk && !image->texture_data.size)
+				{
+					String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
+					if (cover_file_path.len)
+					{
+						image->in_disk = true;
+						image->path = cover_file_path;
+					}
+					else if (front_cover)
+					{
+						image->in_disk = false;
+						image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
+					}
+				}
+			}
+			
+			if (cuesheet)
+			{
+				for (Cuesheet_Track *cuesheet_track = cuesheet->first_tracks; cuesheet_track; cuesheet_track = cuesheet_track->next)
+				{
+					u64 samples_start = mplayer_sample_number_from_cue_index(cuesheet_track->index, tmp_flac_stream.streaminfo.sample_rate);
+					u64 samples_end   = tmp_flac_stream.streaminfo.samples_count;
+					if (cuesheet_track->next)
+					{
+						samples_end = mplayer_sample_number_from_cue_index(cuesheet_track->next->index, tmp_flac_stream.streaminfo.sample_rate);
+					}
+					
+					String8 cue_track_title = track_title;
+					if (cuesheet_track->title.len)
+					{
+						cue_track_title = str8_clone(&library->arena, cuesheet_track->title);
+					}
+					
+					if (cuesheet_track->performer.len && !track_artist.len)
+					{
+						track_artist = str8_clone(&library->arena, cuesheet_track->performer);
+						artist = mplayer_setup_track_artist(library, track_artist);
+					}
+					
+					mplayer_make_track(info, samples_start, samples_end, album, artist,
+						cue_track_title, track_date, track_genre, track_track_number);
+					
+				}
+			}
+			else
+			{
+				mplayer_make_track(info, 0, tmp_flac_stream.streaminfo.samples_count, album, artist,
+					track_title, track_date, track_genre, track_track_number);
+			}
+			
+		}
+	}
+}
+
+
+
+internal String8
+str8_chop_quotes(String8 str)
+{
+	String8 result = str;
+	if (result.str[0] == '"')
+	{
+		result = str8_skip_first(result, 1);
+		result = str8_chop_last(result, 1);
+	}
+	return result;
+}
+
 internal void
 mplayer_load_tracks_in_directory(String8 library_path)
 {
 	Memory_Checkpoint_Scoped temp_mem(mplayer_ctx->frame_arena);
 	
 	Directory dir = platform->read_directory(temp_mem.arena, library_path);
+	
+	// NOTE(fakhri): extract cuesheets if exist
+	Cuesheet_List cuesheet_list = ZERO_STRUCT;
+	
+	for (u32 info_index = 0; info_index < dir.count; info_index += 1)
+	{
+		File_Info info = dir.files[info_index];
+		
+		if (str8_ends_with(info.path, str8_lit(".cue"), MatchFlag_CaseInsensitive))
+		{
+			enum Cuesheet_Context_Kind
+			{
+				Cuesheet_Context_None,
+				Cuesheet_Context_File,
+				Cuesheet_Context_Track,
+			} current_ctx_kind = Cuesheet_Context_None;
+			
+			String8 global_performer = ZERO_STRUCT;
+			String8 global_title = ZERO_STRUCT;
+			
+			Cuesheet_File *current_cuesheet_file = 0;
+			Cuesheet_Track *current_cuesheet_track = 0;
+			
+			// TODO(fakhri): parse cue file
+			String8 content = to_string(platform->load_entire_file(info.path, temp_mem.arena));
+			
+			for (u32 line_start_offset = 0; line_start_offset < content.len;)
+			{
+				u32 line_len = 0;
+				for (; line_start_offset + line_len < content.len; line_len += 1)
+				{
+					if (content.str[line_start_offset + line_len] == '\n' || 
+						content.str[line_start_offset + line_len] == '\r' && content.str[line_start_offset + line_len + 1] == '\n')
+					{
+						String8 line = str8(content.str + line_start_offset, line_len);
+						line_len += ((content.str[line_start_offset + line_len] == '\r')? 2:1);
+						
+						// NOTE(fakhri): skip whitespaces at the begining of the line
+						line = str8_skip_first(line, string_find_first_non_whitespace(line));
+						
+						String8 command = prefix8(line, string_find_first_whitespace(line));
+						if (0) {}
+						else if (str8_match(command, str8_lit("REM"), MatchFlag_CaseInsensitive)) {/*NOTE(fakhri): do nothing*/}
+						else if (str8_match(command, str8_lit("FILE"), MatchFlag_CaseInsensitive)) 
+						{
+							String8 file_cmd_str = str8_skip_first(line, command.len);
+							String8 file_name_str = str8_skip_leading_spaces(file_cmd_str);
+							if (file_name_str.str[0] == '"')
+							{
+								file_name_str = str8_skip_first(file_name_str, 1);
+								file_name_str = prefix8(file_name_str, string_find_first_characer(file_name_str, '"'));
+							}
+							
+							Cuesheet_File *cuesheet = m_arena_push_struct_z(temp_mem.arena, Cuesheet_File);
+							DLLPushBack(cuesheet_list.first, cuesheet_list.last, cuesheet);
+							current_cuesheet_file = cuesheet;
+							current_ctx_kind = Cuesheet_Context_File;
+							
+							cuesheet->file = file_name_str;
+						}
+						else if (str8_match(command, str8_lit("TRACK"), MatchFlag_CaseInsensitive)) 
+						{
+							String8 track_cmd_str = str8_skip_first(line, command.len);
+							// TODO(fakhri): parse track number
+							assert(current_cuesheet_file);
+							if (current_cuesheet_file)
+							{
+								Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(temp_mem.arena, Cuesheet_Track);
+								DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
+								current_cuesheet_track = cuesheet_track;
+								current_ctx_kind = Cuesheet_Context_Track;
+							}
+						}
+						else if (str8_match(command, str8_lit("PERFORMER"), MatchFlag_CaseInsensitive)) 
+						{
+							String8 performer_str = str8_skip_first(line, command.len);
+							performer_str = str8_skip_leading_spaces(performer_str);
+							performer_str = str8_chop_quotes(performer_str);
+							
+							switch(current_ctx_kind)
+							{
+								case Cuesheet_Context_None:
+								{
+									global_performer = performer_str;
+								} break;
+								case Cuesheet_Context_Track:
+								{
+									assert(current_cuesheet_track);
+									if (current_cuesheet_track)
+									{
+										current_cuesheet_track->performer = performer_str;
+									}
+								} break;
+								case Cuesheet_Context_File:
+								{
+									// invalid_code_path("PERFORMER is not allowed in FILE context");
+								} break;
+							}
+						}
+						else if (str8_match(command, str8_lit("TITLE"), MatchFlag_CaseInsensitive)) 
+						{
+							String8 title_str = str8_skip_first(line, command.len);
+							title_str = str8_skip_leading_spaces(title_str);
+							title_str = str8_chop_quotes(title_str);
+							
+							switch(current_ctx_kind)
+							{
+								case Cuesheet_Context_None:
+								{
+									global_title = title_str;
+								} break;
+								case Cuesheet_Context_Track:
+								{
+									assert(current_cuesheet_track);
+									if (current_cuesheet_track)
+									{
+										current_cuesheet_track->title = title_str;
+									}
+								} break;
+								case Cuesheet_Context_File:
+								{
+									//invalid_code_path("TITLE is not allowed in FILE context");
+								} break;
+							}
+						}
+						else if (str8_match(command, str8_lit("INDEX"), MatchFlag_CaseInsensitive))
+						{
+							line = str8_skip_leading_spaces(str8_skip_first(line, command.len));
+							String8 index_number = prefix8(line, string_find_first_whitespace(line));
+							
+							// TODO(fakhri): handle multiple index numbers
+							
+							Cuesheet_Track_Index track_index_ts = ZERO_STRUCT;
+							if (u64_from_str8_base10(index_number) == 1)
+							{
+								String8 index_timestamp = str8_skip_leading_spaces(str8_skip_first(line, index_number.len));
+								
+								String8 minutes_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
+								index_timestamp = str8_skip_first(index_timestamp, minutes_str.len + 1);
+								
+								String8 seconds_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
+								index_timestamp = str8_skip_first(index_timestamp, seconds_str.len + 1);
+								
+								String8 frames_str = index_timestamp;
+								
+								track_index_ts.minutes = (u32)u64_from_str8_base10(minutes_str);
+								track_index_ts.seconds = (u32)u64_from_str8_base10(seconds_str);
+								track_index_ts.frames  = (u32)u64_from_str8_base10(frames_str);
+							}
+							
+							if (current_ctx_kind == Cuesheet_Context_File)
+							{
+								// NOTE(fakhri): altho it's not allowed in official specification, some files 
+								// allow index command in file context, for these cases we create an implecit track
+								assert(current_cuesheet_file);
+								if (current_cuesheet_file)
+								{
+									Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(temp_mem.arena, Cuesheet_Track);
+									DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
+									current_cuesheet_track = cuesheet_track;
+									current_ctx_kind = Cuesheet_Context_Track;
+								}
+							}
+							
+							if (current_ctx_kind == Cuesheet_Context_Track)
+							{
+								assert(current_cuesheet_track);
+								if (current_cuesheet_track)
+								{
+									current_cuesheet_track->index = track_index_ts;
+								}
+							}
+							else 
+							{
+								invalid_code_path("INDEX command is not allowed in this context");
+							}
+							
+						}
+						
+						break;
+					}
+				}
+				
+				line_start_offset += line_len;
+			}
+			
+		}
+	}
+	
 	for (u32 info_index = 0; info_index < dir.count; info_index += 1)
 	{
 		File_Info info = dir.files[info_index];
@@ -1625,124 +2109,9 @@ mplayer_load_tracks_in_directory(String8 library_path)
 		}
 		else
 		{
-			Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 			if (str8_ends_with(info.name, str8_lit(".flac"), MatchFlag_CaseInsensitive))
 			{
-				Buffer tmp_file_block = arena_push_buffer(scratch.arena, megabytes(1));
-				File_Handle *file = platform->open_file(info.path, File_Open_Read);
-				Flac_Stream tmp_flac_stream = ZERO_STRUCT;
-				assert(file);
-				if (file)
-				{
-					Mplayer_Library *library = &mplayer_ctx->library;
-					Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path);
-					Buffer buffer = platform->read_block(file, tmp_file_block.data, tmp_file_block.size);
-					platform->close_file(file);
-					// NOTE(fakhri): init flac stream
-					{
-						tmp_flac_stream.bitstream.buffer = buffer;
-						tmp_flac_stream.bitstream.pos.byte_index = 0;
-						tmp_flac_stream.bitstream.pos.bits_left  = 8;
-					}
-					if (flac_process_metadata(&tmp_flac_stream, scratch.arena))
-					{
-						Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
-						if (!track)
-						{
-							track = m_arena_push_struct_z(&library->arena, Mplayer_Track);
-							track->path = str8_clone(&library->arena, info.path);
-							track->hash = track_hash;
-							mplayer_insert_track(library, track);
-							
-							
-							Flac_Picture *front_cover = tmp_flac_stream.front_cover;
-							
-							// TODO(fakhri): should we have these values be defaulted to empty strings instead?
-							track->album        = str8_lit("***Unkown Album***");
-							track->artist       = str8_lit("***Unkown Artist***");
-							track->date         = str8_lit("***Unkown Date***");
-							track->genre        = str8_lit("***Unkown Gener***");
-							track->track_number = str8_lit("-");
-							
-							for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
-								node;
-								node = node->next)
-							{
-								String8 value = ZERO_STRUCT;
-								String8 key = ZERO_STRUCT;
-								for (u32 i = 0; i < node->str.len; i += 1)
-								{
-									if (node->str.str[i] == '=')
-									{
-										key   = prefix8(node->str, i);
-										value = suffix8(node->str, node->str.len - i - 1);
-										break;
-									}
-								}
-								
-								if (false) {}
-								else if (str8_match(key, str8_lit("title"), MatchFlag_CaseInsensitive))
-								{
-									track->title = str8_clone(&library->arena, value);
-								}
-								else if (str8_match(key, str8_lit("album"), MatchFlag_CaseInsensitive))
-								{
-									track->album = str8_clone(&library->arena, value);
-								}
-								else if (str8_match(key, str8_lit("artist"), MatchFlag_CaseInsensitive))
-								{
-									track->artist = str8_clone(&library->arena, value);
-								}
-								else if (str8_match(key, str8_lit("genre"), MatchFlag_CaseInsensitive))
-								{
-									track->genre = str8_clone(&library->arena, value);
-								}
-								else if (str8_match(key, str8_lit("data"), MatchFlag_CaseInsensitive))
-								{
-									track->date = str8_clone(&library->arena, value);
-								}
-								else if (str8_match(key, str8_lit("tracknumber"), MatchFlag_CaseInsensitive))
-								{
-									track->track_number = str8_clone(&library->arena, value);
-								}
-							}
-							
-							if (!track->title.len)
-							{
-								track->title = str8_clone(&library->arena, info.name);
-							}
-							
-							// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
-							
-							Mplayer_Artist *artist = mplayer_setup_track_artist(library, track);
-							
-							// NOTE(fakhri): setup album
-							{
-								Mplayer_Album *album = mplayer_setup_track_album(library, track, artist);
-								
-								// TODO(fakhri): do this only after all the tracks have loaded!!
-								// if no image is on disk there is absolutely no reason search for it
-								// again each time we find a new track belonging to this album!
-								Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-								if (!image->in_disk && !image->texture_data.size)
-								{
-									String8 cover_file_path = mplayer_attempt_find_cover_image_in_dir(&library->arena, dir);
-									if (cover_file_path.len)
-									{
-										image->in_disk = true;
-										image->path = cover_file_path;
-									}
-									else if (front_cover)
-									{
-										image->in_disk = false;
-										image->texture_data = clone_buffer(&library->arena, front_cover->buffer);
-									}
-								}
-							}
-							
-						}
-					}
-				}
+				mplayer_parse_flac_track_file(info, dir, cuesheet_list);
 			}
 		}
 	}
@@ -1871,33 +2240,6 @@ mplayer_save_settings()
 		platform->write_block(config_file, &mplayer_ctx->settings, sizeof(mplayer_ctx->settings));
 		platform->close_file(config_file);
 	}
-}
-
-//~ NOTE(fakhri): Timestamp stuff
-struct Mplayer_Timestamp
-{
-	u8 hours;
-	u8 minutes;
-	u8 seconds;
-};
-
-
-internal Mplayer_Timestamp
-flac_get_current_timestap(u64 current_sample, u64 sample_rate)
-{
-	Mplayer_Timestamp result = ZERO_STRUCT;
-	u64 seconds_elapsed = current_sample / sample_rate;
-	u64 hours = seconds_elapsed / 3600;
-	seconds_elapsed %= 3600;
-	
-	u64 minutes = seconds_elapsed / 60;
-	seconds_elapsed %= 60;
-	
-	result.hours   = u8(hours);
-	result.minutes = u8(minutes);
-	result.seconds = u8(seconds_elapsed);
-	
-	return result;
 }
 
 
@@ -3902,7 +4244,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					String8 timestamp_string = str8_lit("--:--:--");
 					if (current_track && current_track->flac_stream)
 					{
-						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_track->flac_stream->next_sample_number, u64(current_track->flac_stream->streaminfo.sample_rate));
+						u64 sample_number = current_track->flac_stream->next_sample_number - current_track->start_sample_offset;
+						Mplayer_Timestamp timestamp = flac_get_current_timestap(sample_number, u64(current_track->flac_stream->streaminfo.sample_rate));
 						timestamp_string = str8_f(mplayer_ctx->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
 					
@@ -3917,16 +4260,15 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				ui_next_roundness(5);
 				if (current_track && current_track->flac_stream)
 				{
-					u64 samples_count = 0;
 					u64 current_playing_sample = 0;
-					samples_count = current_track->flac_stream->streaminfo.samples_count;
-					current_playing_sample = current_track->flac_stream->next_sample_number;
+					u64 samples_count = current_track->end_sample_offset - current_track->start_sample_offset;
+					current_playing_sample = current_track->flac_stream->next_sample_number - current_track->start_sample_offset;
 					
 					Mplayer_UI_Interaction progress = ui_slider_u64(str8_lit("track_progress_slider"), &current_playing_sample, 0, samples_count);
 					if (progress.pressed_left)
 					{
 						mplayer_queue_pause();
-						flac_seek_stream(current_track->flac_stream, (u64)current_playing_sample);
+						flac_seek_stream(current_track->flac_stream, current_track->start_sample_offset + (u64)current_playing_sample);
 					}
 					else if (progress.released_left)
 					{
@@ -3947,7 +4289,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					String8 timestamp_string = str8_lit("--:--:--");
 					if (current_track && current_track->flac_stream)
 					{
-						Mplayer_Timestamp timestamp = flac_get_current_timestap(current_track->flac_stream->streaminfo.samples_count, u64(current_track->flac_stream->streaminfo.sample_rate));
+						u64 samples_count = current_track->end_sample_offset - current_track->start_sample_offset;
+						Mplayer_Timestamp timestamp = flac_get_current_timestap(samples_count, u64(current_track->flac_stream->streaminfo.sample_rate));
 						timestamp_string = str8_f(mplayer_ctx->frame_arena, "%.2d:%.2d:%.2d", timestamp.hours, timestamp.minutes, timestamp.seconds);
 					}
 					ui_label(timestamp_string);

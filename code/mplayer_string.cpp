@@ -357,6 +357,13 @@ suffix8(String8 str, u64 size)
   return substr8(str, str.len-size, str.len);
 }
 
+internal String8
+str8_skip_leading_spaces(String8 str)
+{
+	String8 result = str8_skip_first(str, string_find_first_non_whitespace(str));
+	return result;
+}
+
 //- NOTE(fakhri): Matching
 internal b32
 str8_match(String8 a, String8 b, Match_Flags flags)
@@ -496,6 +503,20 @@ internal u64
 string_find_first_non_whitespace(String8 str){
   u64 i = 0;
   for (;i < str.len && char_is_space(str.str[i]); i += 1);
+  return(i);
+}
+
+internal u64
+string_find_first_characer(String8 str, u8 ch){
+  u64 i = 0;
+  for (;i < str.len && str.str[i] != ch; i += 1);
+  return(i);
+}
+
+internal u64
+string_find_first_whitespace(String8 str){
+  u64 i = 0;
+  for (;i < str.len && !char_is_space(str.str[i]); i += 1);
   return(i);
 }
 
@@ -656,6 +677,18 @@ str8_chop_last_slash(String8 string)
 	return string;
 }
 
+internal String8
+str8_chop_last_dot(String8 string)
+{
+	u64 dot_pos = find_substr8(string, str8_lit("."), 0,
+		MatchFlag_FindLast);
+	if(dot_pos < string.len)
+	{
+		string.len = dot_pos;
+	}
+	return string;
+}
+
 internal b32
 str8_utf8_it_valid(String8_UTF8_Iterator *it)
 {
@@ -682,4 +715,17 @@ str8_utf8_iterator(String8 string)
 	it.max = string.len;
 	
 	return it;
+}
+
+
+internal u64
+u64_from_str8_base10(String8 str)
+{
+	u64 result = 0;
+	for (u32 i = 0; i < str.len; i += 1)
+	{
+		assert(str.str[i] >= '0' && str.str[i] <= '9');
+		result = result * 10 + (str.str[i] - '0');
+	}
+	return result;
 }

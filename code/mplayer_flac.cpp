@@ -132,9 +132,6 @@ global i16 flac_bits_depth[] = {
 #define flac_access(samples, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
 #define flac_access2(samples, nb_channels, channel_index, sample_index) (samples)[(nb_channels) * (sample_index) + (channel_index)]
 
-
-
-
 internal void
 flac_skip_coded_residuals(Bit_Stream *bitstream, u32 block_size, u32 order)
 {
@@ -1133,7 +1130,44 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			case 5:
 			{
 				// NOTE(fakhri): cuesheet
+#if 1
 				Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
+#else
+				Buffer media_catalog_number = bitstream_read_buffer(bitstream, 128);
+				
+				u64 leadin_samples_count = bitstream_read_u64be(bitstream);
+				
+				b32 is_cd_da = b32(bitstream_read_bits_unsafe(bitstream, 1));
+				
+				// TODO(fakhri): check that all of these bits are set to 0
+				bitstream_skip_bits(bitstream, 7 + 258 * 8);
+				
+				u8 cue_tracks_count = bitstream_read_u8(bitstream);
+				
+				for (u8 cue_track_idx = 0; cue_track_idx < cue_tracks_count; cue_track_idx += 1)
+				{
+					u64 first_idx_point_track_offset = bitstream_read_u64be(bitstream);
+					u64 track_number = bitstream_read_u8(bitstream);
+					
+					Buffer track_isrc = bitstream_read_buffer(bitstream, 12);
+					u64 track_type = bitstream_read_bits_unsafe(bitstream, 1);
+					u64 pre_emphasis_flag = bitstream_read_bits_unsafe(bitstream, 1);
+					
+					// TODO(fakhri): check that all of these bits are set to 0
+					bitstream_skip_bits(bitstream, 6 + 13 * 8);
+					
+					u8 track_index_points_count = bitstream_read_u8(bitstream);
+					for (u32 point_index = 0; point_index < track_index_points_count; point_index += 1)
+					{
+						u64 samples_offset = bitstream_read_u64be(bitstream);
+						u8 track_index_piont_number = bitstream_read_u8(bitstream);
+						
+						// TODO(fakhri): check that all of these bits are set to 0
+						bitstream_skip_bytes(bitstream, 3);
+					}
+					
+				}
+#endif
 			} break;
 			case 6:
 			{

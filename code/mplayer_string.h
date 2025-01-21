@@ -116,6 +116,8 @@ internal u64 find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_
 internal b32 str8_starts_with(String8 a, String8 prefix, Match_Flags flags);
 internal b32 str8_ends_with(String8 a, String8 b, Match_Flags flags);
 internal u64 string_find_first_non_whitespace(String8 str);
+internal u64 string_find_first_whitespace(String8 str);
+internal u64 string_find_first_characer(String8 str, u8 ch);
 internal void str8_list_push_node(String8_List *list, String8_Node *node);
 internal void str8_list_push(Memory_Arena *arena, String8_List *list, String8 str);
 internal void str8_list_push_fv(Memory_Arena *arena, String8_List *list, const char *fmt, va_list args);
@@ -123,7 +125,9 @@ internal void str8_list_push_f(Memory_Arena *arena, String8_List *list, const ch
 internal void str8_list_concat(String8_List *list, String8_List *to_push);
 internal String8_List str8_split(Memory_Arena *arena, String8 string, int split_count, String8 *splits);
 internal String8 str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_params);
+
 internal String8 str8_chop_last_slash(String8 string);
+internal String8 str8_chop_last_dot(String8 string);
 
 internal b32 str8_utf8_it_valid(String8_UTF8_Iterator *it);
 internal void str8_utf8_advance(String8_UTF8_Iterator *it);
