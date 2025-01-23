@@ -338,7 +338,6 @@ add_v2(V2_F32 lhs, V2_F32 rhs)
 	return result;
 }
 
-// NOTE(fakhri): addition
 internal inline V2_F32
 sub_v2(V2_F32 lhs, V2_F32 rhs)
 {
@@ -347,6 +346,7 @@ sub_v2(V2_F32 lhs, V2_F32 rhs)
 	result.y -= rhs.y;
 	return result;
 }
+
 
 internal inline V4_F32
 add_v4(V4_F32 lhs, V4_F32 rhs)
@@ -380,10 +380,36 @@ sub_v4(V4_F32 lhs, V4_F32 rhs)
 		return result;
 }
 
+internal f32
+length_v2(V2_F32 v)
+{
+	f32 result = sqrtf(v.x * v.x + v.y * v.y);
+	return result;
+}
+
+internal b32
+equal_v2(V2_F32 a, V2_F32 b)
+{
+	b32 result = a.x == b.x && a.y == b.y;
+	return result;
+}
+
 internal inline V2_F32
 operator+(V2_F32 lhs, V2_F32 rhs)
 {
 	return add_v2(lhs, rhs);
+}
+
+internal b32
+operator==(V2_F32 lhs, V2_F32 rhs)
+{
+	return equal_v2(lhs, rhs);
+}
+
+internal b32
+operator!=(V2_F32 lhs, V2_F32 rhs)
+{
+	return !equal_v2(lhs, rhs);
 }
 
 internal inline V2_F32 &

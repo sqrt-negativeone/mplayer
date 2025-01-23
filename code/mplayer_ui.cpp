@@ -1260,6 +1260,9 @@ ui_update_element_interaction(UI_Element *element)
 		
 		if (consumed)
 		{
+			// TODO(fakhri): since we have the 1-frame we have to animate the next frame in order
+			// to properly act on this event. I don't like this...
+			mplayer_animate_next_frame();
 			DLLRemove(g_input->first_event, g_input->last_event, e);
 		}
 	}
@@ -1892,6 +1895,19 @@ ui_animate_elements(UI_Element *node)
 			V2_F32 target_pos = range_center(node->computed_rect);
 			
 			pos += (target_pos - pos) * step42;
+			
+			if (ABS(pos.x - target_pos.x) < 1)
+			{
+				pos.x = target_pos.x;
+			}
+			else mplayer_animate_next_frame();
+			
+			if (ABS(pos.y - target_pos.y) < 1)
+			{
+				pos.y = target_pos.y;
+			}
+			else mplayer_animate_next_frame();
+			
 			node->rect = range_center_dim(pos, node->dim);
 		}
 		else
@@ -1907,10 +1923,14 @@ ui_animate_elements(UI_Element *node)
 			{
 				node->dim.x = node->computed_dim.x;
 			}
+			else mplayer_animate_next_frame();
+			
 			if (ABS(node->dim.y - node->computed_dim.y) < 1)
 			{
 				node->dim.y = node->computed_dim.y;
 			}
+			else mplayer_animate_next_frame();
+			
 		}
 		else
 		{
@@ -1927,10 +1947,13 @@ ui_animate_elements(UI_Element *node)
 			{
 				persistent_state->view_scroll.x = persistent_state->view_target_scroll.x;
 			}
+			else mplayer_animate_next_frame();
+			
 			if (ABS(persistent_state->view_scroll.y - persistent_state->view_target_scroll.y) < 1)
 			{
 				persistent_state->view_scroll.y = persistent_state->view_target_scroll.y;
 			}
+			else mplayer_animate_next_frame();
 		}
 	}
 	else
@@ -1945,8 +1968,8 @@ ui_animate_elements(UI_Element *node)
 	b32 is_hot    = ui_id_is_equal(g_ui->hot_id[Mouse_Left], node->id);
 	b32 is_active = ui_id_is_equal(g_ui->active_id, node->id);
 	
-	node->active_t    += (!!is_active - node->active_t) * step69;
-	node->hot_t += (!!is_hot - node->hot_t) * step69;
+	node->active_t += (!!is_active - node->active_t) * step69;
+	node->hot_t    += (!!is_hot - node->hot_t) * step69;
 	
 	node->rect = range_center_dim(range_center(node->rect), node->dim);
 	

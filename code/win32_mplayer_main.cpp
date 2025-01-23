@@ -17,11 +17,18 @@
 #include "mplayer.h"
 
 
+struct W32_Timer
+{
+	LARGE_INTEGER start_counter;
+};
+
+
 global Mplayer_OS_Vtable w32_vtable;
 
-
+global W32_Timer g_w32_audio_timer;
 global Cursor_Shape g_w32_cursor = Cursor_Arrow;
 global DWORD g_w32_main_thread_id;
+global HANDLE g_audio_mutex; 
 
 internal void
 w32_fix_path_slashes(String8 path)
@@ -270,6 +277,7 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		case WM_CLOSE:
 		{
 			global_request_quit = 1;
+			ExitProcess(0);
 		} break;
 		case WM_GETMINMAXINFO:
 		{
@@ -450,6 +458,7 @@ struct W32_Sound_Output
 	REFERENCE_TIME buffer_duration;
 	Sound_Config config;
 };
+global W32_Sound_Output g_w32_sound_output;
 
 internal W32_Sound_Output
 w32_init_wasapi(u32 sample_rate, u16 channels_count)
@@ -493,7 +502,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
     new_wf.cbSize = 0;
 	}
 	
-	REFERENCE_TIME requested_duration = REFTIMES_PER_SEC;
+	REFERENCE_TIME requested_duration = 5 * REFTIMES_PER_SEC;
 	res = audio_client->Initialize(
 		AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -529,11 +538,6 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 }
 
 global LARGE_INTEGER w32_timer_freq;
-
-struct W32_Timer
-{
-	LARGE_INTEGER start_counter;
-};
 
 internal void
 w32_update_timer(W32_Timer *timer)
@@ -1114,7 +1118,56 @@ w32_process_pending_messages(Memory_Arena *frame_arena, Mplayer_Input *input,  V
 	}
 }
 
-DWORD WINAPI 
+internal void
+w32_update_audio()
+{
+	u32 max_ms_lag = 50;
+	f32 audio_dt = w32_get_seconds_elapsed(&g_w32_audio_timer);
+	w32_update_timer(&g_w32_audio_timer);
+	
+	u32 max_lag_sample_count = max_ms_lag * g_w32_sound_output.config.sample_rate / 1000;
+	
+	f32 needed_audio_duration = audio_dt;
+	u32 needed_audio_samples = (u32)round_f32_i32(needed_audio_duration * g_w32_sound_output.config.sample_rate);
+	
+	// See how much buffer space is available.
+	u32 frame_padding_count = 0;
+	g_w32_sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
+	if (frame_padding_count < max_lag_sample_count)
+	{
+		u32 available_frames_count = g_w32_sound_output.buffer_frame_count - frame_padding_count;
+		u32 frames_to_write = MIN(needed_audio_samples, available_frames_count);
+		
+		if (frames_to_write)
+		{
+			u32 flags = 0;
+			u8 *data;
+			g_w32_sound_output.render_client->GetBuffer(frames_to_write, &data);
+			
+			memory_zero(data, frames_to_write * g_w32_sound_output.config.channels_count * sizeof(f32));
+			w32_app_code.vtable.mplayer_get_audio_samples(g_w32_sound_output.config, data, frames_to_write);
+			
+			g_w32_sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
+		}
+	}
+}
+
+internal DWORD WINAPI
+w32_audio_thread(void *unused)
+{
+	for(;;)
+	{
+		Sleep(6);
+		DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
+		if (wait_result == WAIT_OBJECT_0)
+		{
+			w32_update_audio();
+			ReleaseMutex(g_audio_mutex);
+		}
+	}
+}
+
+internal DWORD WINAPI 
 w32_main_thread(void *unused)
 {
 	HINSTANCE hInstance = GetModuleHandleA(0);
@@ -1135,9 +1188,8 @@ w32_main_thread(void *unused)
 		
 		u32 sample_rate    = 96000;
 		u16 channels_count = 2;
-		W32_Sound_Output sound_output = w32_init_wasapi(sample_rate, channels_count);
-		assert(sound_output.initialized);
-		
+		g_w32_sound_output = w32_init_wasapi(sample_rate, channels_count);
+		assert(g_w32_sound_output.initialized);
 		
 		// NOTE(fakhri): Find refresh rate
 		f32 refresh_rate = 60.0f;
@@ -1150,21 +1202,45 @@ w32_main_thread(void *unused)
 		}
 		f32 target_fps = refresh_rate;
 		
+		
 		W32_Timer timer;
 		w32_update_timer(&timer);
+		w32_update_timer(&g_w32_audio_timer);
 		
 		ShowWindow(window, SW_SHOWNORMAL);
 		UpdateWindow(window);
 		
+		input.target_frame_dt = 1.0f / refresh_rate;
+		
+		g_audio_mutex = CreateMutex(0, 0, 0);
+		
+		HANDLE audio_thread_handle = CreateThread(0, 0, w32_audio_thread, 0, 0, 0);
+		CloseHandle(audio_thread_handle);
+		
+		
 		b32 running = true;
 		for (;running;)
 		{
-			w32_update_code(mplayer, &input, &w32_app_code);
 			m_arena_free_all(&frame_arena);
 			
 			input.frame_dt = w32_get_seconds_elapsed(&timer);
 			input.time += input.frame_dt;
+			
+			// NOTE(fakhri): wait until we get user message or timer run-out 
+			if (input.next_animation_timer_request > 0)
+			{
+				f32 wait_request_time = input.next_animation_timer_request;
+				DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
+				MsgWaitForMultipleObjects(0, 0, FALSE, wait_requst_time_ms, QS_ALLINPUT|QS_ALLEVENTS|QS_ALLPOSTMESSAGE);
+			}
+			else if (input.next_animation_timer_request < 0)
+			{
+				WaitMessage();
+			}
+			
 			w32_update_timer(&timer);
+			
+			w32_update_code(mplayer, &input, &w32_app_code);
 			
 			for (u32 i = 0; i < array_count(input.keyboard_buttons); i += 1)
 			{
@@ -1198,41 +1274,24 @@ w32_main_thread(void *unused)
 			}
 			
 			w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
+			
+			WaitForSingleObject(g_audio_mutex, INFINITE);
 			w32_app_code.vtable.mplayer_update_and_render();
+			ReleaseMutex(g_audio_mutex);
+			
 			w32_gl_render_end(w32_renderer);
 			
-			// NOTE(fakhri): audio
+			#if 0			
+				// NOTE(fakhri): audio
 			{
-				u32 max_ms_lag = 100;
-				u32 max_lag_sample_count = max_ms_lag * sound_output.config.sample_rate / 1000;
-				
-				u32 frame_padding_count = 0;
-				u32 samples_per_frame = (u32)round_f32_i32(input.frame_dt * sound_output.config.sample_rate);
-				
-				// See how much buffer space is available.
-				sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
-				if (frame_padding_count < max_lag_sample_count)
-				{
-					u32 available_frames_count = sound_output.buffer_frame_count - frame_padding_count;
-					u32 frames_to_write = MIN(samples_per_frame, available_frames_count);
-					
-					if (frames_to_write)
-					{
-						u32 flags = 0;
-						u8 *data;
-						sound_output.render_client->GetBuffer(frames_to_write, &data);
-						
-						memory_zero(data, frames_to_write * sound_output.config.channels_count * sizeof(f32));
-						w32_app_code.vtable.mplayer_get_audio_samples(sound_output.config, data, frames_to_write);
-						
-						sound_output.render_client->ReleaseBuffer(frames_to_write, flags);
-					}
-				}
+				w32_update_audio();
 			}
+			#endif
+				
+				//ReleaseMutex(g_audio_mutex);
 			
-			running = !(global_request_quit);
+				running = !(global_request_quit);
 		}
-		
 	}
 	
 	ExitProcess(0);
@@ -1313,12 +1372,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 		Worker_Thread_Context *worker_thread_ctx = g_worker_threads + thread_index;
 		worker_thread_ctx->id = thread_index + 1;
 		
-		HANDLE thread_handle = CreateThread(0,
-			0,
-			w32_worker_thread_main,
-			(void*)worker_thread_ctx,
-			0,
-			0);
+		HANDLE thread_handle = CreateThread(0, 0, w32_worker_thread_main, (void*)worker_thread_ctx, 0, 0);
 		CloseHandle(thread_handle);
 	}
 	
@@ -1355,6 +1409,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				
 				switch(msg.message)
 				{
+					case WM_QUIT:       // fallthrough;
+					case WM_CLOSE:       // fallthrough;
 					case WM_SYSKEYDOWN:  // fallthrough;
 					case WM_SYSKEYUP:    // fallthrough;
 					case WM_KEYDOWN:     // fallthrough;

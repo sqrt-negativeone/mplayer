@@ -149,12 +149,19 @@ struct Mplayer_Input
 {
 	f32 time;
 	f32 frame_dt;
+	f32 target_frame_dt;
 	V2_F32 mouse_clip_pos;
 	Mplayer_Input_Event *first_event;
 	Mplayer_Input_Event *last_event;
 	
 	Mplayer_Input_Key keyboard_buttons[Keyboard_COUNT];
 	Mplayer_Input_Key mouse_buttons[Mouse_COUNT];
+	
+	// NOTE(fakhri): set by application, tells the platform
+	// layer how many seconds the application is willing to wait before
+	// updated_and_render should be called, -1 means wait indefintely 
+	// until user event happen
+	f32 next_animation_timer_request;
 };
 
 #endif //MPLAYER_INPUT_H

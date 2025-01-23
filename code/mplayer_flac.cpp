@@ -1130,10 +1130,10 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			case 5:
 			{
 				// NOTE(fakhri): cuesheet
-#if 1
-				Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
-#else
-				Buffer media_catalog_number = bitstream_read_buffer(bitstream, 128);
+				#if 1
+					Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
+				#else
+					Buffer media_catalog_number = bitstream_read_buffer(bitstream, 128);
 				
 				u64 leadin_samples_count = bitstream_read_u64be(bitstream);
 				
@@ -1167,7 +1167,7 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 					}
 					
 				}
-#endif
+				#endif
 			} break;
 			case 6:
 			{

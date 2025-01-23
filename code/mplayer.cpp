@@ -389,6 +389,14 @@ struct Mplayer_Context
 global Mplayer_Input *g_input;
 global Mplayer_Context *mplayer_ctx;
 
+//~ NOTE(fakhri): Animation timer stuff
+internal void
+mplayer_animate_next_frame()
+{
+	g_input->next_animation_timer_request = 0;
+}
+
+
 //~ NOTE(fakhri): Timestamp stuff
 struct Mplayer_Timestamp
 {
@@ -1188,12 +1196,14 @@ internal void
 mplayer_queue_pause()
 {
 	mplayer_ctx->queue.playing = 0;
+	mplayer_animate_next_frame();
 }
 
 internal void
 mplayer_queue_resume()
 {
 	mplayer_ctx->queue.playing = 1;
+	mplayer_animate_next_frame();
 }
 
 internal void
@@ -2875,6 +2885,7 @@ mplayer_remove_track_from_favorites(Mplayer_Playlists *playlists, Mplayer_Track_
 	}
 }
 
+
 internal
 MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 {
@@ -2964,6 +2975,13 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 exported
 MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 {
+	g_input->next_animation_timer_request = -1;
+	if (mplayer_is_queue_playing())
+	{
+		// NOTE(fakhri): update each second
+		g_input->next_animation_timer_request = 1;
+	}
+	
 	Render_Context *render_ctx = mplayer_ctx->render_ctx;
 	
 	Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
