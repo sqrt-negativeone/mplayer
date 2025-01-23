@@ -21,6 +21,7 @@ global Mplayer_OS_Vtable w32_vtable;
 
 
 global Cursor_Shape g_w32_cursor = Cursor_Arrow;
+global DWORD g_w32_main_thread_id;
 
 internal void
 w32_fix_path_slashes(String8 path)
@@ -860,8 +861,6 @@ struct W32_Event_Queue
 	volatile u64 tail;
 };
 
-global W32_Event_Queue w32_event_queue;
-
 struct Mplayer_Code
 {
 	HMODULE dll;
@@ -949,6 +948,172 @@ w32_update_code(Mplayer_Context *mplayer, Mplayer_Input *input, Mplayer_Code *co
 }
 
 
+internal void
+w32_process_pending_messages(Memory_Arena *frame_arena, Mplayer_Input *input,  V2_I32 window_dim, Range2_I32 draw_region, HWND window)
+{
+	MSG msg;
+	for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
+	{
+		Mplayer_Input_Event *event = 0;
+		switch (msg.message)
+		{
+			case WM_DESTROY: 
+			case WM_CLOSE:
+			{
+				global_request_quit = true;
+			} break;
+			
+			
+			case WM_SYSKEYDOWN: // fallthrough;
+			case WM_SYSKEYUP: // fallthrough;
+			case WM_KEYDOWN: // fallthrough;
+			case WM_KEYUP:
+			{
+				WPARAM vk_code = msg.wParam;
+				
+				b32 alt_key_down = (msg.lParam & (1 << 29)) != 0;
+				b32 was_down = (msg.lParam & (1 << 30)) != 0;
+				b32 is_down = (msg.lParam & (1 << 31)) == 0;
+				
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				
+				event->kind = Event_Kind_Keyboard_Key;
+				event->key = w32_resolve_vk_code(vk_code);
+				event->is_down = b32(is_down);
+				
+				input->keyboard_buttons[event->key].is_down = event->is_down;
+			} break;
+			
+			
+			case WM_CHAR: // fallthrough;
+			case WM_SYSCHAR:
+			{
+				u32 char_input = u32(msg.wParam);
+				
+				if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
+				{
+					event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+					
+					event->kind = Event_Kind_Text;
+					event->text_character = char_input;
+				}
+			} break;
+			
+			case WM_MBUTTONDOWN: // fallthrough;
+			case WM_MBUTTONUP:
+			{
+				b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				event->kind = Event_Kind_Mouse_Key;
+				event->key = Mouse_Middle;
+				event->is_down = is_down;
+				
+				input->mouse_buttons[event->key].is_down = event->is_down;
+			} break;
+			
+			case WM_LBUTTONDOWN: // fallthrough;
+			case WM_LBUTTONUP:
+			{
+				b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				event->kind = Event_Kind_Mouse_Key;
+				event->key = Mouse_Left;
+				event->is_down = is_down;
+				
+				input->mouse_buttons[event->key].is_down = event->is_down;
+			} break;
+			
+			case WM_RBUTTONDOWN: // fallthrough;
+			case WM_RBUTTONUP:
+			{
+				b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				event->kind = Event_Kind_Mouse_Key;
+				event->key = Mouse_Right;
+				event->is_down = is_down;
+				
+				input->mouse_buttons[event->key].is_down = event->is_down;
+			} break;
+			
+			case WM_MOUSEWHEEL:
+			{
+				i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				event->kind = Event_Kind_Mouse_Wheel;
+				event->scroll.x = 0;
+				event->scroll.y = f32(wheel_delta) / WHEEL_DELTA;
+			} break;
+			
+			case WM_MOUSEMOVE:
+			{
+				f32 mouse_x = f32(GET_X_LPARAM(msg.lParam)); 
+				f32 mouse_y = f32(GET_Y_LPARAM(msg.lParam)); 
+				mouse_y = f32(window_dim.y - 1) - mouse_y;
+				
+				input->mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
+				input->mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
+				
+				event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+				event->kind = Event_Kind_Mouse_Move;
+				event->pos.x = mouse_x;
+				event->pos.y = mouse_y;
+			} break;
+			
+			case WM_XBUTTONDOWN: // fallthrough;
+			case WM_XBUTTONUP:
+			{
+				b32 is_down = b32(msg.message == WM_XBUTTONDOWN);
+				switch(HIWORD(msg.wParam))
+				{
+					case XBUTTON1:
+					{
+						event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+						event->key = Mouse_M4;
+					} break;
+					case XBUTTON2:
+					{
+						event = m_arena_push_struct_z(frame_arena, Mplayer_Input_Event);
+						event->key = Mouse_M5;
+					} break;
+				}
+				
+				if (event)
+				{
+					event->kind = Event_Kind_Mouse_Key;
+					event->is_down = is_down;
+					input->mouse_buttons[event->key].is_down = is_down;
+				}
+			} break;
+		}
+		
+		if (event != 0)
+		{
+			if (event->kind != Event_Kind_Text)
+			{
+				if ((u16(GetKeyState(VK_SHIFT)) & 0x8000) != 0)
+				{
+					set_flag(event->modifiers, Modifier_Shift);
+				}
+				
+				if ((u16(GetKeyState(VK_CONTROL)) & 0x8000) != 0)
+				{
+					set_flag(event->modifiers, Modifier_Ctrl);
+				}
+				
+				if ((u16(GetKeyState(VK_MENU)) & 0x8000) != 0)
+				{
+					set_flag(event->modifiers, Modifier_Alt);
+				}
+			}
+			
+			DLLPushBack(input->first_event, input->last_event, event);
+		}
+		
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+}
+
 DWORD WINAPI 
 w32_main_thread(void *unused)
 {
@@ -1024,46 +1189,8 @@ w32_main_thread(void *unused)
 			
 			input.first_event = 0;
 			input.last_event = 0;
-			for (;w32_event_queue.head != w32_event_queue.tail;)
-			{
-				Mplayer_Input_Event w32_event = w32_event_queue.events[w32_event_queue.tail % array_count(w32_event_queue.events)];
-				CompletePreviousWritesBeforeFutureWrites();
-				platform->atomic_increment64((volatile i64*)&w32_event_queue.tail);
-				
-				switch(w32_event.kind)
-				{
-					case Event_Kind_Keyboard_Key: fallthrough;
-					{
-						input.keyboard_buttons[w32_event.key].is_down = (w32_event.is_down);
-					} break;
-					case Event_Kind_Mouse_Key: fallthrough;
-					{
-						input.mouse_buttons[w32_event.key].is_down = (w32_event.is_down);
-					} break;
-					case Event_Kind_Mouse_Move:
-					{
-						f32 mouse_x = w32_event.pos.x;
-						f32 mouse_y = w32_event.pos.y;
-						mouse_y = f32(window_dim.y - 1) - mouse_y;
-						
-						V2_F32 mouse_clip_pos;
-						mouse_clip_pos.x = map_into_range_no(f32(draw_region.min_x), mouse_x, f32(draw_region.max_x));
-						mouse_clip_pos.y = map_into_range_no(f32(draw_region.min_y), mouse_y, f32(draw_region.max_y));
-						
-						input.mouse_clip_pos = mouse_clip_pos;
-					} break;
-					
-					case Event_Kind_Null: fallthrough;
-					case Event_Kind_Text: fallthrough;
-					case Event_Kind_Mouse_Wheel: fallthrough;
-					
-					default: break;
-				}
-				
-				Mplayer_Input_Event *event = m_arena_push_struct_z(&frame_arena, Mplayer_Input_Event);
-				memory_copy_struct(event, &w32_event);
-				DLLPushBack(input.first_event, input.last_event, event);
-			}
+			
+			w32_process_pending_messages(&frame_arena, &input, window_dim, draw_region, window);
 			
 			if (global_request_quit)
 			{
@@ -1216,166 +1343,45 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 		{
 			HDC wdc = GetDC(window);
 			
-			HANDLE thread_handle = CreateThread(0,
-				0,
-				w32_main_thread,
-				0,
-				0,
-				0);
+			HANDLE thread_handle = CreateThread(0,0,w32_main_thread,0,0,&g_w32_main_thread_id);
 			CloseHandle(thread_handle);
 			
 			for (;;)
 			{
 				b32 request_close = false;
+				MSG msg;
+				GetMessageW(&msg, 0, 0, 0);
+				TranslateMessage(&msg);
 				
-				WaitMessage();
-				
-				// NOTE(fakhri): process pending event
+				switch(msg.message)
 				{
-					MSG msg;
-					for (;PeekMessage(&msg, 0, 0, 0, PM_REMOVE);)
+					case WM_SYSKEYDOWN:  // fallthrough;
+					case WM_SYSKEYUP:    // fallthrough;
+					case WM_KEYDOWN:     // fallthrough;
+					case WM_KEYUP:       // fallthrough;
+					case WM_CHAR:        // fallthrough;
+					case WM_SYSCHAR:     // fallthrough;
+					case WM_MBUTTONDOWN: // fallthrough;
+					case WM_MBUTTONUP:   // fallthrough;
+					case WM_LBUTTONDOWN: // fallthrough;
+					case WM_LBUTTONUP:   // fallthrough;
+					case WM_RBUTTONDOWN: // fallthrough;
+					case WM_RBUTTONUP:   // fallthrough;
+					case WM_MOUSEWHEEL:  // fallthrough;
+					case WM_MOUSEMOVE:   // fallthrough;
+					case WM_XBUTTONDOWN: // fallthrough;
+					case WM_XBUTTONUP:
 					{
-						Mplayer_Input_Event event = ZERO_STRUCT;
-						switch (msg.message)
-						{
-							case WM_CLOSE:
-							{
-								global_request_quit = true;
-							} break;
-							
-							case WM_SYSKEYDOWN: fallthrough;
-							case WM_SYSKEYUP: fallthrough;
-							case WM_KEYDOWN: fallthrough;
-							case WM_KEYUP:
-							{
-								WPARAM vk_code = msg.wParam;
-								
-								b32 alt_key_down = (msg.lParam & (1 << 29)) != 0;
-								b32 was_down = (msg.lParam & (1 << 30)) != 0;
-								b32 is_down = (msg.lParam & (1 << 31)) == 0;
-								
-								event.kind = Event_Kind_Keyboard_Key;
-								event.is_down = is_down;
-								event.key = w32_resolve_vk_code(vk_code);
-							} break;
-							
-							
-							case WM_CHAR: fallthrough;
-							case WM_SYSCHAR:
-							{
-								u32 char_input = u32(msg.wParam);
-								
-								if ((char_input >= 32 && char_input != 127) || char_input == '\t' || char_input == '\n')
-								{
-									event.kind = Event_Kind_Text;
-									event.text_character = char_input;
-								}
-							} break;
-							
-							case WM_MBUTTONDOWN: fallthrough;
-							case WM_MBUTTONUP:
-							{
-								b32 is_down = b32(msg.message == WM_MBUTTONDOWN);
-								event.kind = Event_Kind_Mouse_Key;
-								event.is_down = is_down;
-								event.key = Mouse_Middle;
-							} break;
-							
-							case WM_LBUTTONDOWN: fallthrough;
-							case WM_LBUTTONUP:
-							{
-								b32 is_down = b32(msg.message == WM_LBUTTONDOWN);
-								event.kind = Event_Kind_Mouse_Key;
-								event.is_down = is_down;
-								event.key = Mouse_Left;
-							} break;
-							
-							case WM_RBUTTONDOWN: fallthrough;
-							case WM_RBUTTONUP:
-							{
-								b32 is_down = b32(msg.message == WM_RBUTTONDOWN);
-								event.kind = Event_Kind_Mouse_Key;
-								event.is_down = is_down;
-								event.key = Mouse_Right;
-							} break;
-							
-							case WM_MOUSEWHEEL:
-							{
-								i16 wheel_delta = i16(HIWORD(u32(msg.wParam)));
-								event.kind = Event_Kind_Mouse_Wheel;
-								event.scroll.x = 0;
-								event.scroll.y = f32(wheel_delta) / WHEEL_DELTA;
-							} break;
-							
-							case WM_MOUSEMOVE:
-							{
-								f32 mouse_x = f32(GET_X_LPARAM(msg.lParam)); 
-								f32 mouse_y = f32(GET_Y_LPARAM(msg.lParam)); 
-								
-								event.kind = Event_Kind_Mouse_Move;
-								event.pos.x = mouse_x;
-								event.pos.y = mouse_y;
-							} break;
-							
-							case WM_XBUTTONDOWN: fallthrough;
-							case WM_XBUTTONUP:
-							{
-								b32 is_down = b32(msg.message == WM_XBUTTONDOWN);
-								switch(HIWORD(msg.wParam))
-								{
-									case XBUTTON1:
-									{
-										event.kind = Event_Kind_Mouse_Key;
-										event.is_down = is_down;
-										event.key = Mouse_M4;
-									} break;
-									case XBUTTON2:
-									{
-										event.kind = Event_Kind_Mouse_Key;
-										event.is_down = is_down;
-										event.key = Mouse_M5;
-									} break;
-									
-								}
-							} break;
-						}
-						
-						if (event.kind)
-						{
-							if (event.kind != Event_Kind_Text)
-							{
-								if ((u16(GetKeyState(VK_SHIFT)) & 0x8000) != 0)
-								{
-									set_flag(event.modifiers, Modifier_Shift);
-								}
-								
-								if ((u16(GetKeyState(VK_CONTROL)) & 0x8000) != 0)
-								{
-									set_flag(event.modifiers, Modifier_Ctrl);
-								}
-								
-								if ((u16(GetKeyState(VK_MENU)) & 0x8000) != 0)
-								{
-									set_flag(event.modifiers, Modifier_Alt);
-								}
-							}
-							
-							for (;w32_event_queue.head - w32_event_queue.tail == array_count(w32_event_queue.events);)
-							{
-								_mm_pause();
-							}
-							
-							w32_event_queue.events[w32_event_queue.head % array_count(w32_event_queue.events)] = event;
-							CompletePreviousWritesBeforeFutureWrites();
-							platform->atomic_increment64((volatile i64*)&w32_event_queue.head);
-						}
-						
-						TranslateMessage(&msg);
+						PostThreadMessageW(g_w32_main_thread_id, msg.message, msg.wParam, msg.lParam);
+					} break;
+					
+					
+					default:
+					{
 						DispatchMessage(&msg);
-					}
+					} break;
 				}
 			}
-			
 		}
 	}
 	
