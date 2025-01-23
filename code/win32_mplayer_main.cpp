@@ -25,6 +25,12 @@ struct W32_Timer
 
 global Mplayer_OS_Vtable w32_vtable;
 
+global HANDLE g_shit_event;
+global HWND g_w32_window;
+global Mplayer_Context *g_w32_mplayer;
+global Mplayer_Input g_w32_input;
+global Memory_Arena g_w32_frame_arena;
+global W32_Timer g_w32_update_timer;
 global W32_Timer g_w32_audio_timer;
 global Cursor_Shape g_w32_cursor = Cursor_Arrow;
 global DWORD g_w32_main_thread_id;
@@ -261,6 +267,7 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 }
 
 #include "win32_mplayer_renderer_gl.cpp"
+global W32_GL_Renderer *g_w32_renderer;
 
 #define W32_EXE_NAME "mplayer"
 #define W32_WINDOW_NAME "mplayer"
@@ -269,6 +276,8 @@ w32_load_entire_file(String8 file_path, Memory_Arena *arena)
 #define W32_WINDOW_H 720
 
 b32 global_request_quit = 0;
+internal void w32_update();
+
 internal LRESULT
 Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -276,6 +285,7 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	{
 		case WM_CLOSE:
 		{
+			SetEvent(g_shit_event);
 			global_request_quit = 1;
 			ExitProcess(0);
 		} break;
@@ -334,6 +344,20 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				return 0;
 			}
 		} break;
+		
+		case WM_SIZE:
+		{
+			SetEvent(g_shit_event);
+		}
+		#if 0
+			case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			BeginPaint(g_w32_window, &ps);
+			w32_update();
+			EndPaint(g_w32_window, &ps);
+		} break;
+		#endif
 	}
 	return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
@@ -1167,24 +1191,82 @@ w32_audio_thread(void *unused)
 	}
 }
 
+internal void
+w32_update()
+{
+	m_arena_free_all(&g_w32_frame_arena);
+	
+	g_w32_input.frame_dt = w32_get_seconds_elapsed(&g_w32_update_timer);
+	g_w32_input.time += g_w32_input.frame_dt;
+	
+	#if 1
+		// NOTE(fakhri): wait until we get user message or timer run-out 
+		if (g_w32_input.next_animation_timer_request > 0)
+	{
+		f32 wait_request_time = g_w32_input.next_animation_timer_request;
+		DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
+		MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, wait_requst_time_ms, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
+	}
+	else if (g_w32_input.next_animation_timer_request < 0)
+	{
+		WaitMessage();
+	}
+	#endif
+		
+		w32_update_timer(&g_w32_update_timer);
+	
+	w32_update_code(g_w32_mplayer, &g_w32_input, &w32_app_code);
+	
+	for (u32 i = 0; i < array_count(g_w32_input.keyboard_buttons); i += 1)
+	{
+		g_w32_input.keyboard_buttons[i].was_down = g_w32_input.keyboard_buttons[i].is_down;
+	}
+	for (u32 i = 0; i < array_count(g_w32_input.mouse_buttons); i += 1)
+	{
+		g_w32_input.mouse_buttons[i].was_down = g_w32_input.mouse_buttons[i].is_down;
+		
+	}
+	
+	V2_I32 window_dim;
+	{
+		RECT client_rect;
+		GetClientRect(g_w32_window, &client_rect);
+		window_dim.x = client_rect.right - client_rect.left;
+		window_dim.y = client_rect.bottom - client_rect.top;
+	}
+	
+	V2_I32 draw_dim = window_dim;
+	Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
+	
+	g_w32_input.first_event = 0;
+	g_w32_input.last_event = 0;
+	
+	w32_process_pending_messages(&g_w32_frame_arena, &g_w32_input, window_dim, draw_region, g_w32_window);
+	
+	w32_gl_render_begin(g_w32_renderer, window_dim, draw_dim, draw_region);
+	
+	WaitForSingleObject(g_audio_mutex, INFINITE);
+	w32_app_code.vtable.mplayer_update_and_render();
+	ReleaseMutex(g_audio_mutex);
+	
+	w32_gl_render_end(g_w32_renderer);
+}
+
 internal DWORD WINAPI 
 w32_main_thread(void *unused)
 {
 	HINSTANCE hInstance = GetModuleHandleA(0);
 	init_thread_context();
-	HWND window = FindWindowA(W32_CLASS_NAME, W32_WINDOW_NAME);
+	g_w32_window = FindWindowA(W32_CLASS_NAME, W32_WINDOW_NAME);
 	
-	if (window)
+	if (g_w32_window)
 	{
-		Mplayer_Input input = ZERO_STRUCT;
+		HDC wdc = GetDC(g_w32_window);
 		
-		HDC wdc = GetDC(window);
-		
-		Memory_Arena frame_arena = ZERO_STRUCT;
-		W32_GL_Renderer *w32_renderer = w32_gl_make_renderer(hInstance, wdc);
+		g_w32_renderer = w32_gl_make_renderer(hInstance, wdc);
 		
 		assert(w32_load_app_code(&w32_app_code));
-		Mplayer_Context *mplayer = w32_app_code.vtable.mplayer_initialize(&frame_arena, (Render_Context *)w32_renderer, &input, &w32_vtable);
+		g_w32_mplayer = w32_app_code.vtable.mplayer_initialize(&g_w32_frame_arena, (Render_Context *)g_w32_renderer, &g_w32_input, &w32_vtable);
 		
 		u32 sample_rate    = 96000;
 		u16 channels_count = 2;
@@ -1203,94 +1285,24 @@ w32_main_thread(void *unused)
 		f32 target_fps = refresh_rate;
 		
 		
-		W32_Timer timer;
-		w32_update_timer(&timer);
+		w32_update_timer(&g_w32_update_timer);
 		w32_update_timer(&g_w32_audio_timer);
 		
-		ShowWindow(window, SW_SHOWNORMAL);
-		UpdateWindow(window);
+		ShowWindow(g_w32_window, SW_SHOWNORMAL);
+		UpdateWindow(g_w32_window);
 		
-		input.target_frame_dt = 1.0f / refresh_rate;
+		g_w32_input.target_frame_dt = 1.0f / refresh_rate;
 		
 		g_audio_mutex = CreateMutex(0, 0, 0);
 		
 		HANDLE audio_thread_handle = CreateThread(0, 0, w32_audio_thread, 0, 0, 0);
 		CloseHandle(audio_thread_handle);
 		
-		
 		b32 running = true;
 		for (;running;)
 		{
-			m_arena_free_all(&frame_arena);
-			
-			input.frame_dt = w32_get_seconds_elapsed(&timer);
-			input.time += input.frame_dt;
-			
-			// NOTE(fakhri): wait until we get user message or timer run-out 
-			if (input.next_animation_timer_request > 0)
-			{
-				f32 wait_request_time = input.next_animation_timer_request;
-				DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
-				MsgWaitForMultipleObjects(0, 0, FALSE, wait_requst_time_ms, QS_ALLINPUT|QS_ALLEVENTS|QS_ALLPOSTMESSAGE);
-			}
-			else if (input.next_animation_timer_request < 0)
-			{
-				WaitMessage();
-			}
-			
-			w32_update_timer(&timer);
-			
-			w32_update_code(mplayer, &input, &w32_app_code);
-			
-			for (u32 i = 0; i < array_count(input.keyboard_buttons); i += 1)
-			{
-				input.keyboard_buttons[i].was_down = input.keyboard_buttons[i].is_down;
-			}
-			for (u32 i = 0; i < array_count(input.mouse_buttons); i += 1)
-			{
-				input.mouse_buttons[i].was_down = input.mouse_buttons[i].is_down;
-				
-			}
-			
-			V2_I32 window_dim;
-			{
-				RECT client_rect;
-				GetClientRect(window, &client_rect);
-				window_dim.x = client_rect.right - client_rect.left;
-				window_dim.y = client_rect.bottom - client_rect.top;
-			}
-			
-			V2_I32 draw_dim = window_dim;
-			Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
-			
-			input.first_event = 0;
-			input.last_event = 0;
-			
-			w32_process_pending_messages(&frame_arena, &input, window_dim, draw_region, window);
-			
-			if (global_request_quit)
-			{
-				break;
-			}
-			
-			w32_gl_render_begin(w32_renderer, window_dim, draw_dim, draw_region);
-			
-			WaitForSingleObject(g_audio_mutex, INFINITE);
-			w32_app_code.vtable.mplayer_update_and_render();
-			ReleaseMutex(g_audio_mutex);
-			
-			w32_gl_render_end(w32_renderer);
-			
-			#if 0			
-				// NOTE(fakhri): audio
-			{
-				w32_update_audio();
-			}
-			#endif
-				
-				//ReleaseMutex(g_audio_mutex);
-			
-				running = !(global_request_quit);
+			w32_update();
+			running = !(global_request_quit);
 		}
 	}
 	
@@ -1376,6 +1388,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 		CloseHandle(thread_handle);
 	}
 	
+	g_shit_event = CreateEvent(0, 0, 0, 0);
+	
 	WNDCLASSA wc = ZERO_STRUCT;
 	{
 		wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -1387,15 +1401,14 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
   
 	if (RegisterClassA(&wc))
 	{
-		HWND window = CreateWindowA(W32_CLASS_NAME,
+		g_w32_window = CreateWindowA(W32_CLASS_NAME,
 			W32_WINDOW_NAME,
 			WS_OVERLAPPEDWINDOW,
 			CW_USEDEFAULT, CW_USEDEFAULT,
 			W32_WINDOW_W, W32_WINDOW_H,
 			0, 0, hInstance, 0);
-		if (window)
+		if (g_w32_window)
 		{
-			HDC wdc = GetDC(window);
 			
 			HANDLE thread_handle = CreateThread(0,0,w32_main_thread,0,0,&g_w32_main_thread_id);
 			CloseHandle(thread_handle);
@@ -1406,6 +1419,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				MSG msg;
 				GetMessageW(&msg, 0, 0, 0);
 				TranslateMessage(&msg);
+				PostThreadMessageW(g_w32_main_thread_id, msg.message, msg.wParam, msg.lParam);
 				
 				switch(msg.message)
 				{
@@ -1430,7 +1444,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 					{
 						PostThreadMessageW(g_w32_main_thread_id, msg.message, msg.wParam, msg.lParam);
 					} break;
-					
 					
 					default:
 					{
