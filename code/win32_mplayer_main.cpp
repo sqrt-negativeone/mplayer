@@ -349,15 +349,6 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		{
 			SetEvent(g_shit_event);
 		}
-		#if 0
-			case WM_PAINT:
-		{
-			PAINTSTRUCT ps;
-			BeginPaint(g_w32_window, &ps);
-			w32_update();
-			EndPaint(g_w32_window, &ps);
-		} break;
-		#endif
 	}
 	return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
@@ -1199,9 +1190,8 @@ w32_update()
 	g_w32_input.frame_dt = w32_get_seconds_elapsed(&g_w32_update_timer);
 	g_w32_input.time += g_w32_input.frame_dt;
 	
-	#if 1
-		// NOTE(fakhri): wait until we get user message or timer run-out 
-		if (g_w32_input.next_animation_timer_request > 0)
+	// NOTE(fakhri): wait until we get user message or timer run-out 
+	if (g_w32_input.next_animation_timer_request > 0)
 	{
 		f32 wait_request_time = g_w32_input.next_animation_timer_request;
 		DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
@@ -1209,11 +1199,10 @@ w32_update()
 	}
 	else if (g_w32_input.next_animation_timer_request < 0)
 	{
-		WaitMessage();
+		MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, INFINITE, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
 	}
-	#endif
-		
-		w32_update_timer(&g_w32_update_timer);
+	
+	w32_update_timer(&g_w32_update_timer);
 	
 	w32_update_code(g_w32_mplayer, &g_w32_input, &w32_app_code);
 	
