@@ -297,6 +297,7 @@ struct Mplayer_Queue
 enum Mplayer_Ctx_Menu
 {
 	Track_Context_Menu,
+	Queue_Track_Context_Menu,
 	Context_Menu_COUNT,
 };
 
@@ -306,6 +307,12 @@ enum Mplayer_Modal_Menu
 	MODAL_Add_To_Playlist,
 	MODAL_Create_Playlist,
 	Modal_Menu_COUNT,
+};
+
+struct Context_Menu_Data
+{
+	Mplayer_Item_ID item_id;
+	Mplayer_Queue_Index queue_index;
 };
 
 struct Mplayer_Context
@@ -341,7 +348,7 @@ struct Mplayer_Context
 	UI_ID modal_menu_ids[Modal_Menu_COUNT];
 	
 	UI_ID ctx_menu_ids[Context_Menu_COUNT];
-	Mplayer_Item_ID ctx_menu_item_id;
+	Context_Menu_Data ctx_menu_data;
 	
 	b32 add_track_to_new_playlist;
 	Mplayer_Track_ID track_to_add_to_playlist;
@@ -1173,6 +1180,14 @@ mplayer_play_prev_in_queue()
 	mplayer_set_current(queue->current_index - 1);
 }
 
+
+internal void
+mplayer_queue_pause()
+{
+	mplayer_ctx->queue.playing = 0;
+	mplayer_animate_next_frame();
+}
+
 internal void
 mplayer_update_queue()
 {
@@ -1190,13 +1205,11 @@ mplayer_update_queue()
 			mplayer_play_next_in_queue();
 		}
 	}
-}
-
-internal void
-mplayer_queue_pause()
-{
-	mplayer_ctx->queue.playing = 0;
-	mplayer_animate_next_frame();
+	
+	if (queue->count == 0)
+	{
+		mplayer_queue_pause();
+	}
 }
 
 internal void
@@ -1224,6 +1237,37 @@ mplayer_is_queue_playing()
 {
 	b32 result = mplayer_ctx->queue.playing;
 	return result;
+}
+
+
+internal void
+mplayer_queue_remove_at(Mplayer_Queue_Index index)
+{
+	Mplayer_Queue *queue = &mplayer_ctx->queue;
+	if (!queue->count || index >= queue->count) return;
+	
+	if (index == queue->current_index && is_valid(index))
+	{
+		Mplayer_Track *track = mplayer_queue_get_track_from_queue_index(index);
+		mplayer_unload_track(track);
+	}
+	
+	if (index < queue->count - 1)
+	{
+		memory_move(queue->tracks + index, 
+			queue->tracks + index + 1,
+			sizeof(queue->tracks[0]) * (queue->count - index - 1));
+		
+	}
+	
+	queue->count -= 1;
+	
+	if (index == queue->current_index && is_valid(index))
+	{
+		Mplayer_Track *track = mplayer_queue_get_track_from_queue_index(index);
+		mplayer_load_track(track);
+	}
+	
 }
 
 internal void
@@ -2551,7 +2595,7 @@ mplayer_ui_underlined_button_f(const char *fmt, ...)
 	return mplayer_ui_underlined_button(string);
 }
 
-internal void
+internal Mplayer_UI_Interaction 
 mplayer_ui_track_item(Mplayer_Track_ID track_id)
 {
 	Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
@@ -2567,7 +2611,8 @@ mplayer_ui_track_item(Mplayer_Track_ID track_id)
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *track_el = ui_element_f(flags, "library_track_%p", track);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
-	if (interaction.clicked_left)
+	#if 0
+		if (interaction.clicked_left)
 	{
 		mplayer_queue_play_track(track_id);
 		mplayer_queue_resume();
@@ -2577,8 +2622,9 @@ mplayer_ui_track_item(Mplayer_Track_ID track_id)
 		ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
 		mplayer_ctx->ctx_menu_item_id = to_item_id(track_id);
 	}
-	
-	ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+	#endif
+		
+		ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 		ui_horizontal_layout()
 	{
 		ui_spacer_pixels(10, 1);
@@ -2588,6 +2634,8 @@ mplayer_ui_track_item(Mplayer_Track_ID track_id)
 		ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
 			STR8_EXPAND(track->title), track);
 	}
+	
+	return interaction;
 }
 
 
@@ -2951,6 +2999,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	// NOTE(fakhri): ctx menu ids
 	{
 		mplayer_ctx->ctx_menu_ids[Track_Context_Menu] = ui_id_from_string(UI_NULL_ID, str8_lit("track-ctx-menu-id"));
+		mplayer_ctx->ctx_menu_ids[Queue_Track_Context_Menu] = ui_id_from_string(UI_NULL_ID, str8_lit("queue-track-ctx-menu-id"));
 	}
 	
 	// NOTE(fakhri): modal menu ids
@@ -3009,14 +3058,14 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 	ui_pref_layer(UI_Layer_Ctx_Menu)
 	{
 		// NOTE(fakhri): track context menu
+		ui_pref_seed({2109487})
 		{
-			ui_pref_seed({2109487})
-				ui_ctx_menu(mplayer_ctx->ctx_menu_ids[Track_Context_Menu]) 
+			ui_ctx_menu(mplayer_ctx->ctx_menu_ids[Track_Context_Menu]) 
 				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.02f, 1.0f))
 				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
 				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
 			{
-				Mplayer_Track_ID track_id = mplayer_ctx->ctx_menu_item_id.track_id;
+				Mplayer_Track_ID track_id = mplayer_ctx->ctx_menu_data.item_id.track_id;
 				Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 				
 				ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
@@ -3099,6 +3148,108 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					}
 				}
 			}
+			
+			
+			
+			ui_ctx_menu(mplayer_ctx->ctx_menu_ids[Queue_Track_Context_Menu]) 
+				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.02f, 1.0f))
+				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
+				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
+			{
+				Mplayer_Queue_Index index = mplayer_ctx->ctx_menu_data.queue_index;;
+				Mplayer_Track *track = mplayer_queue_get_track_from_queue_index(index);
+				Mplayer_Track_ID track_id = track->hash;
+				
+				ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
+					ui_pref_width(ui_size_text_dim(1)) ui_pref_height(ui_size_text_dim(1))
+				{
+					ui_next_font_size(25);
+					ui_label(track->title);
+					
+					ui_spacer_pixels(20, 1);
+					
+					ui_pref_font_size(18)
+					{
+						if (mplayer_ui_underlined_button(str8_lit("Play")).clicked_left)
+						{
+							mplayer_queue_play_track(track_id);
+							mplayer_queue_resume();
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Remove From Queue")).clicked_left)
+						{
+							mplayer_queue_remove_at(index);
+							mplayer_queue_resume();
+							ui_close_ctx_menu();
+						}
+						
+						ui_spacer_pixels(5,1);
+						if (mplayer_ui_underlined_button(str8_lit("Play Next")).clicked_left)
+						{
+							mplayer_queue_next(track_id);
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Queue")).clicked_left)
+						{
+							mplayer_queue_last(track_id);
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(15,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Album")).clicked_left)
+						{
+							mplayer_change_mode(MODE_Album_Tracks, to_item_id(track->album_id));
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Artist")).clicked_left)
+						{
+							mplayer_change_mode(MODE_Artist_Albums, to_item_id(track->artist_id));
+							ui_close_ctx_menu();
+						}
+						ui_spacer_pixels(15,1);
+						
+						if (!mplayer_track_in_list(&mplayer_ctx->playlists.fav_tracks, track_id))
+						{
+							if (mplayer_ui_underlined_button(str8_lit("Add to Favorites")).clicked_left)
+							{
+								mplayer_add_track_to_favorites(&mplayer_ctx->playlists, track_id);
+								ui_close_ctx_menu();
+							}
+						}
+						else
+						{
+							if (mplayer_ui_underlined_button(str8_lit("Remove From Favorites")).clicked_left)
+							{
+								mplayer_remove_track_from_favorites(&mplayer_ctx->playlists, track_id);
+								ui_close_ctx_menu();
+							}
+						}
+						ui_spacer_pixels(5,1);
+						
+						if (mplayer_ui_underlined_button(str8_lit("Add to Playlist")).clicked_left)
+						{
+							ui_close_ctx_menu();
+							mplayer_ctx->track_to_add_to_playlist = track_id;
+							ui_open_modal_menu(mplayer_ctx->modal_menu_ids[MODAL_Add_To_Playlist]);
+						}
+						ui_spacer_pixels(5,1);
+						
+						ui_spacer_pixels(20, 1);
+						if (mplayer_ui_underlined_button(str8_lit("Edit Info")).clicked_left)
+						{
+							// TODO(fakhri): open a model to edit track info
+						}
+					}
+				}
+			}
+			
+			
 		}
 	}
 	
@@ -3576,7 +3727,17 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer_ctx->library.tracks_count, 50.0f, 1.0f, track_index)
 							{
 								Mplayer_Track_ID track_id = mplayer_ctx->library.track_ids[track_index];
-								mplayer_ui_track_item(track_id);
+								Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+								if (interaction.clicked_left)
+								{
+									mplayer_queue_play_track(track_id);
+									mplayer_queue_resume();
+								}
+								if (interaction.clicked_right)
+								{
+									ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
+									mplayer_ctx->ctx_menu_data.item_id = to_item_id(track_id);
+								}
 							}
 						}
 					} break;
@@ -3770,7 +3931,18 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								}
 								for(Mplayer_Track *track = first_track; ui_list_item_begin(); (track = track->next_album, ui_list_item_end()))
 								{
-									mplayer_ui_track_item(track->hash);
+									Mplayer_Track_ID track_id = track->hash;
+									Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+									if (interaction.clicked_left)
+									{
+										mplayer_queue_play_track(track_id);
+										mplayer_queue_resume();
+									}
+									if (interaction.clicked_right)
+									{
+										ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
+										mplayer_ctx->ctx_menu_data.item_id = to_item_id(track_id);
+									}
 								}
 							}
 							
@@ -3897,7 +4069,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (interaction.clicked_right)
 									{
 										ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
-										mplayer_ctx->ctx_menu_item_id = to_item_id(track_id);
+										mplayer_ctx->ctx_menu_data.item_id = to_item_id(track_id);
 									}
 									
 									ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
@@ -4159,7 +4331,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								{
 									mplayer_set_current(Mplayer_Queue_Index(queue_index));
 								}
-								
+								if (interaction.clicked_right)
+								{
+									ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Queue_Track_Context_Menu]);
+									mplayer_ctx->ctx_menu_data.queue_index = queue_index;
+								}
 								ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 									ui_horizontal_layout()
 								{
@@ -4233,7 +4409,18 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								}
 								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
 								{
-									mplayer_ui_track_item(entry->track_id);
+									Mplayer_Track_ID track_id = entry->track_id;
+									Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+									if (interaction.clicked_left)
+									{
+										mplayer_queue_play_track(track_id);
+										mplayer_queue_resume();
+									}
+									if (interaction.clicked_right)
+									{
+										ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
+										mplayer_ctx->ctx_menu_data.item_id = to_item_id(track_id);
+									}
 								}
 							}
 							
