@@ -1906,7 +1906,7 @@ ui_animate_elements(UI_Element *node)
 		//- NOTE(fakhri): animate dim
 		if (has_flag(node->flags, UI_FLAG_Animate_Dim))
 		{
-			node->dim += (node->computed_dim - node->dim) * step42;
+			node->dim += (node->computed_dim - node->dim) * step69;
 			if (ABS(node->dim.x - node->computed_dim.x) < 1)
 			{
 				node->dim.x = node->computed_dim.x;
@@ -2089,7 +2089,7 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 		
 		ui_next_width(ui_size_by_childs(1));
 		ui_next_height(ui_size_by_childs(1));
-		g_ui->ctx_menu_root = ui_element(str8_lit("ui-ctx-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating);
+		g_ui->ctx_menu_root = ui_element(str8_lit("ui-ctx-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating|UI_FLAG_Animate_Dim);
 		g_ui->ctx_menu_root->computed_top_left = g_ui->ctx_menu_origin;
 		g_ui->ctx_menu_root->computed_rect = range_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
 			g_ui->ctx_menu_root->computed_dim);
