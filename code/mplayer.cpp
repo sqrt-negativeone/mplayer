@@ -2381,6 +2381,7 @@ ui_grid_begin(String8 string, u32 items_count, V2_F32 grid_item_dim, f32 vpaddin
 {
 	ui_next_childs_axis(Axis2_Y);
 	UI_Element *grid = ui_element(string, UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
+	ui_interaction_from_element(grid);
 	ui_push_parent(grid);
 	
 	u32 item_count_per_row = (u32)((grid->computed_dim.width) / grid_item_dim.width);
@@ -2480,6 +2481,7 @@ internal u32
 ui_list_begin(String8 string, u32 items_count, f32 item_height, f32 vpadding)
 {
 	UI_Element *list = ui_element(string, UI_FLAG_Draw_Border | UI_FLAG_Draw_Background | UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Animate_Scroll | UI_FLAG_Clip);
+	ui_interaction_from_element(list);
 	list->child_layout_axis = Axis2_Y;
 	ui_push_parent(list);
 	
@@ -3953,7 +3955,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							ui_next_childs_axis(Axis2_Y);
-							ui_parent(ui_element(str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll))
+							
+							UI_Element *setting_root_ui = ui_element(str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll);
+							ui_parent(setting_root_ui)
 								ui_padding(ui_size_pixel(20, 1))
 							{
 								ui_next_height(ui_size_by_childs(1));
@@ -4079,6 +4083,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									platform->set_cursor(Cursor_Arrow);
 								}
 							}
+							
+							ui_interaction_from_element(setting_root_ui);
 						}
 					} break;
 					

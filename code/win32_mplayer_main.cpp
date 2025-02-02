@@ -721,7 +721,7 @@ w32_read_directory(Memory_Arena *arena, String8 path)
 			info->name = str8_from_16(arena, filename16);
 			info->size = ((((u64)find_data.nFileSizeHigh) << 32) |
 				((u64)find_data.nFileSizeLow));
-			
+			// TODO(fakhri): set the extension
 			info->path = str8_f(arena, "%.*s%.*s", search_path.len - 1, search_path.str, STR8_EXPAND(info->name));
 			if (!FindNextFileW(hFind, &find_data))
 			{

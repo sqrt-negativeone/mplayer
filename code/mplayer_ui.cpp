@@ -148,7 +148,6 @@ struct UI_Element
 	UI_ID id;
 	
 	u64 frame_index;
-	Mplayer_UI_Interaction last_frame_interaction;
 	
 	Axis2 child_layout_axis;
 	UI_Size size[Axis2_COUNT];
@@ -948,12 +947,6 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	result->flags |= ui_stack_top(g_ui->flags_stack);
 	result->roundness = ui_stack_top(g_ui->roundness_stack);
 	
-	if (result->last_frame_interaction.element != result)
-	{
-		result->last_frame_interaction = ZERO_STRUCT;
-		result->last_frame_interaction.element = result;
-	}
-	
 	if (has_flag(flags, UI_FLAG_Draw_Background))
 	{
 		result->background_color = ui_stack_top(g_ui->bg_colors);
@@ -1118,8 +1111,9 @@ ui_end_ctx_menu()
 	ui_pop_parent();
 }
 
-internal void
-ui_update_element_interaction(UI_Element *element)
+
+internal Mplayer_UI_Interaction
+ui_interaction_from_element(UI_Element *element)
 {
 	Mplayer_UI_Interaction interaction = ZERO_STRUCT;
 	interaction.element = element;
@@ -1247,22 +1241,22 @@ ui_update_element_interaction(UI_Element *element)
 			}
 		}
 		
-		if (mouse_over && has_flag(element->flags, UI_FLAG_View_Scroll) && e->kind == Event_Kind_Mouse_Wheel)
+		if (e->kind == Event_Kind_Mouse_Wheel)
 		{
-			UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(id);
-			consumed = 1;
-			persistent_state->view_target_scroll += persistent_state->scroll_step * e->scroll;
-			
-			V2_F32 bounds_dim = element->child_bounds;
-			persistent_state->view_target_scroll.x = CLAMP(0, persistent_state->view_target_scroll.x, bounds_dim.width);
-			persistent_state->view_target_scroll.y = CLAMP(0, persistent_state->view_target_scroll.y, bounds_dim.height);
+			if (mouse_over && has_flag(element->flags, UI_FLAG_View_Scroll))
+			{
+				UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(id);
+				consumed = 1;
+				persistent_state->view_target_scroll += persistent_state->scroll_step * e->scroll;
+				
+				V2_F32 bounds_dim = element->child_bounds;
+				persistent_state->view_target_scroll.x = CLAMP(0, persistent_state->view_target_scroll.x, bounds_dim.width);
+				persistent_state->view_target_scroll.y = CLAMP(0, persistent_state->view_target_scroll.y, bounds_dim.height);
+			}
 		}
 		
 		if (consumed)
 		{
-			// TODO(fakhri): since we have the 1-frame we have to animate the next frame in order
-			// to properly act on this event. I don't like this...
-			mplayer_animate_next_frame();
 			DLLRemove(g_input->first_event, g_input->last_event, e);
 		}
 	}
@@ -1302,13 +1296,7 @@ ui_update_element_interaction(UI_Element *element)
 		}
 	}
 	
-	element->last_frame_interaction = interaction;
-}
-
-internal Mplayer_UI_Interaction
-ui_interaction_from_element(UI_Element *element)
-{
-	Mplayer_UI_Interaction interaction = element->last_frame_interaction;
+	
 	return interaction;
 }
 
@@ -1980,27 +1968,6 @@ ui_animate_elements(UI_Element *node)
 }
 
 
-internal void
-ui_handle_this_frame_input(UI_Element *node)
-{
-	// NOTE(fakhri): Process the input at the end of the frame after we have built the 
-	// hierarchy, this is done so that we can handle events in the correct order, when
-	// child ui elements also process events (childs should consume events first)
-	// This however introduces a 1-frame delay as the events from the current frame
-	// won't be processed until the next frame... 
-	
-	// TODO(fakhri): is there a better way to do this without having
-	// to introduce the 1-frame delay
-	
-	for (UI_Element *child = node->first; child; child = child->next)
-	{
-		ui_handle_this_frame_input(child);
-	}
-	
-	ui_update_element_interaction(node);
-}
-
-
 internal b32
 ui_is_modal_menu_open(UI_ID id)
 {
@@ -2166,6 +2133,5 @@ ui_end()
 	
 	ui_update_layout(g_ui->root);
 	ui_animate_elements(g_ui->root);
-	ui_handle_this_frame_input(g_ui->root);
 	ui_draw_elements(g_ui->group, g_ui->root);
 }
