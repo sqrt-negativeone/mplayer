@@ -1185,7 +1185,12 @@ internal void
 mplayer_queue_pause()
 {
 	mplayer_ctx->queue.playing = 0;
-	mplayer_animate_next_frame();
+}
+
+internal void
+mplayer_queue_resume()
+{
+	mplayer_ctx->queue.playing = 1;
 }
 
 internal void
@@ -1210,13 +1215,6 @@ mplayer_update_queue()
 	{
 		mplayer_queue_pause();
 	}
-}
-
-internal void
-mplayer_queue_resume()
-{
-	mplayer_ctx->queue.playing = 1;
-	mplayer_animate_next_frame();
 }
 
 internal void
