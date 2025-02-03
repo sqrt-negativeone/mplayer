@@ -943,6 +943,7 @@ mplayer_unload_track(Mplayer_Track *track)
 		// NOTE(fakhri): help worker threads instead of just waiting
 		platform->do_next_work();
 	}
+	
 	uninit_flac_stream(track->flac_stream);
 	m_arena_free_all(&mplayer_ctx->library.track_transient_arena);
 	track->file_loaded = false;
@@ -1085,31 +1086,6 @@ mplayer_save_queue()
 	#endif
 }
 
-internal void
-mplayer_queue_shuffle()
-{
-	Mplayer_Queue *queue = &mplayer_ctx->queue;
-	Mplayer_Queue_Index current_new_index = queue->current_index;
-	for (Mplayer_Queue_Index i = 1; i < queue->count; i += 1)
-	{
-		u16 swap_index = (u16)rng_next_minmax(&mplayer_ctx->entropy, i, queue->count);
-		SWAP(Mplayer_Track_ID, queue->tracks[i], queue->tracks[swap_index]);
-		
-		// TODO(fakhri): can we afford to just do another loop to look for
-		// the new index of the current track playing track?
-		if (swap_index == current_new_index)
-		{
-			current_new_index = i;
-		}
-		else if (i == current_new_index)
-		{
-			current_new_index = swap_index;
-		}
-	}
-	queue->current_index = current_new_index;
-	mplayer_save_queue();
-}
-
 internal Mplayer_Track *
 mplayer_queue_get_track_from_queue_index(Mplayer_Queue_Index index)
 {
@@ -1167,6 +1143,24 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		}
 	}
 }
+
+internal void
+mplayer_queue_shuffle()
+{
+	Mplayer_Queue *queue = &mplayer_ctx->queue;
+	if (queue->count)
+	{
+		mplayer_unload_track(mplayer_queue_get_current_track());
+		for (Mplayer_Queue_Index i = 0; i < queue->count; i += 1)
+		{
+			u16 swap_index = (u16)rng_next_minmax(&mplayer_ctx->entropy, i, queue->count);
+			SWAP(Mplayer_Track_ID, queue->tracks[i], queue->tracks[swap_index]);
+		}
+		mplayer_set_current(0);
+		mplayer_save_queue();
+	}
+}
+
 
 internal void
 mplayer_queue_reset_current()
@@ -4353,7 +4347,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (mplayer_ui_underlined_button(str8_lit("Shuffle Queue")).clicked_left)
 									{
 										mplayer_queue_shuffle();
-										mplayer_set_current(1);
 									}
 									ui_spacer_pixels(30, 1);
 									
