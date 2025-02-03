@@ -4650,7 +4650,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							if (ui_button(str8_lit("<<")).clicked_left && is_queue_index_valid(mplayer_ctx->queue.current_index))
 							{
 								if (g_input->time - mplayer_ctx->time_since_last_play <= 1.f)
+								{
 									mplayer_play_prev_in_queue();
+									mplayer_save_queue();
+								}
 								else
 								{
 									mplayer_queue_reset_current();
@@ -4675,6 +4678,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							if (ui_button(str8_lit(">>")).clicked_left)
 							{
 								mplayer_play_next_in_queue();
+								mplayer_save_queue();
 							}
 							
 							ui_spacer(ui_size_parent_remaining());
