@@ -1172,7 +1172,7 @@ w32_audio_thread(void *unused)
 {
 	for(;;)
 	{
-		Sleep(6);
+		Sleep(50);
 		DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
 		if (wait_result == WAIT_OBJECT_0)
 		{
