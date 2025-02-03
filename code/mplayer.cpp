@@ -1246,6 +1246,7 @@ mplayer_update_queue()
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	if (!is_queue_index_valid(queue->current_index))
 	{
+		// TODO(fakhri): better control over wrap behaavior
 		mplayer_set_current(0);
 	}
 	
@@ -1255,6 +1256,7 @@ mplayer_update_queue()
 		if (current_track && !is_track_still_playing(current_track))
 		{
 			mplayer_play_next_in_queue();
+			mplayer_save_queue();
 		}
 	}
 	
