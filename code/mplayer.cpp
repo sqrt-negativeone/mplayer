@@ -1066,7 +1066,7 @@ is_queue_index_valid(Mplayer_Queue_Index index)
 
 #define MPLAYER_QUEUE_FILENAME str8_lit("queue.mplayer")
 internal void
-_mplayer_save_queue()
+mplayer_save_queue()
 {
 	#if 1
 		File_Handle *file = platform->open_file(MPLAYER_QUEUE_FILENAME, File_Open_Write | File_Create_Always);
@@ -1107,7 +1107,7 @@ mplayer_queue_shuffle()
 		}
 	}
 	queue->current_index = current_new_index;
-	_mplayer_save_queue();
+	mplayer_save_queue();
 }
 
 internal Mplayer_Track *
@@ -1187,6 +1187,7 @@ mplayer_clear_queue()
 	queue->playing = 0;
 	queue->current_index = 0;
 	queue->count = 0;
+	mplayer_save_queue();
 }
 
 internal void
@@ -1242,7 +1243,7 @@ internal void
 mplayer_queue_resume()
 {
 	mplayer_ctx->queue.playing = 1;
-	_mplayer_save_queue();
+	mplayer_save_queue();
 }
 
 internal void
@@ -1356,6 +1357,7 @@ mplayer_queue_next(Mplayer_Track_ID track_id)
 	else
 	{
 		mplayer_queue_insert_at(0, track_id);
+		mplayer_set_current(0);
 	}
 }
 
@@ -1364,6 +1366,10 @@ mplayer_queue_last(Mplayer_Track_ID track_id)
 {
 	if (!is_valid(track_id)) return;
 	mplayer_queue_insert_at(mplayer_ctx->queue.count, track_id);
+	if (mplayer_ctx->queue.count == 1)
+	{
+		mplayer_set_current(0);
+	}
 }
 
 internal void
@@ -1400,12 +1406,9 @@ internal void
 mplayer_reset_library()
 {
 	Mplayer_Library *library = &mplayer_ctx->library;
-	#if 0
-		mplayer_clear_queue();
-	#endif
-		
-		// NOTE(fakhri): wait for worker threads to end
-		for (;platform->do_next_work();) {}
+	
+	// NOTE(fakhri): wait for worker threads to end
+	for (;platform->do_next_work();) {}
 	m_arena_free_all(&library->arena);
 	
 	library->artists_count = 0;
