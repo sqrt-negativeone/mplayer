@@ -4669,6 +4669,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							if (ui_button(mplayer_is_queue_playing()? str8_lit("II") : str8_lit("I>")).clicked_left)
 							{
 								mplayer_queue_toggle_play();
+								mplayer_save_queue();
 							}
 							ui_spacer_pixels(10, 1);
 							
