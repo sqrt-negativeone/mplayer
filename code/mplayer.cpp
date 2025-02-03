@@ -1055,13 +1055,34 @@ draw_outline(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color, f32 thic
 #include "mplayer_ui.cpp"
 
 //~ NOTE(fakhri): Queue stuff
-#define NULL_QUEUE_INDEX {}
+#define _NULL_QUEUE_INDEX {}
+
 internal b32
-is_valid(Mplayer_Queue_Index index)
+is_queue_index_valid(Mplayer_Queue_Index index)
 {
-	b32 result = (index && (index < mplayer_ctx->queue.count) && 
-		is_valid(mplayer_ctx->queue.tracks[index]));
+	b32 result = (index < mplayer_ctx->queue.count);
 	return result;
+}
+
+#define MPLAYER_QUEUE_FILENAME str8_lit("queue.mplayer")
+internal void
+_mplayer_save_queue()
+{
+	#if 1
+		File_Handle *file = platform->open_file(MPLAYER_QUEUE_FILENAME, File_Open_Write | File_Create_Always);
+	if (file)
+	{
+		Mplayer_Queue *queue = &mplayer_ctx->queue;
+		
+		platform->write_block(file, queue, sizeof(Mplayer_Queue));
+		// TODO(fakhri): save progress of the currently playing track
+		
+		// TODO(fakhri): this is just temporary, avoid always writing the whole
+		//               queue struct, usually the queue is much emptier
+		
+		platform->close_file(file);
+	}
+	#endif
 }
 
 internal void
@@ -1086,6 +1107,7 @@ mplayer_queue_shuffle()
 		}
 	}
 	queue->current_index = current_new_index;
+	_mplayer_save_queue();
 }
 
 internal Mplayer_Track *
@@ -1103,7 +1125,7 @@ mplayer_queue_get_current_track()
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	
 	Mplayer_Track *result = 0;
-	if (is_valid(queue->current_index))
+	if (is_queue_index_valid(queue->current_index))
 	{
 		result = mplayer_queue_get_track_from_queue_index(queue->current_index);
 	}
@@ -1117,9 +1139,6 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	
-	if (index >= queue->count) 
-		index = 0;
-	
 	// TODO(fakhri): Since now we have tracks that point to 
 	// parts of a file, when we play these track we seek
 	// to wherever the start offset of the track is, if the file
@@ -1128,16 +1147,24 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	// can be slow, which cause some files to have noticeable
 	// delay when played...
 	
-	if (is_valid(queue->current_index))
+	if (is_queue_index_valid(queue->current_index) && is_queue_index_valid(index) && is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
 	{
-		mplayer_unload_track(mplayer_queue_get_current_track());
-	}
-	
-	queue->current_index = index;
-	
-	if (is_valid(queue->current_index))
-	{
+		queue->current_index = index;
 		mplayer_load_track(mplayer_queue_get_current_track());
+	}
+	else
+	{
+		if (is_queue_index_valid(queue->current_index))
+		{
+			mplayer_unload_track(mplayer_queue_get_current_track());
+		}
+		
+		queue->current_index = index;
+		
+		if (is_queue_index_valid(queue->current_index))
+		{
+			mplayer_load_track(mplayer_queue_get_current_track());
+		}
 	}
 }
 
@@ -1152,17 +1179,41 @@ mplayer_clear_queue()
 {
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	
-	mplayer_set_current(NULL_QUEUE_INDEX);
-	queue->tracks[0] = NULL_TRACK_ID;
+	if (is_queue_index_valid(queue->current_index))
+	{
+		mplayer_unload_track(mplayer_queue_get_current_track());
+	}
+	
 	queue->playing = 0;
-	queue->count = 1;
+	queue->current_index = 0;
+	queue->count = 0;
+}
+
+internal void
+mplayer_load_queue()
+{
+	Mplayer_Queue *queue = &mplayer_ctx->queue;
+	Buffer queue_content = platform->load_entire_file(MPLAYER_QUEUE_FILENAME, mplayer_ctx->frame_arena);
+	if (queue_content.size)
+	{
+		assert(queue_content.size == sizeof(Mplayer_Queue));
+		memory_copy(queue, queue_content.data, queue_content.size);
+		
+		if (is_queue_index_valid(queue->current_index))
+		{
+			mplayer_load_track(mplayer_queue_get_current_track());
+		}
+	}
+	else
+	{
+		mplayer_clear_queue();
+	}
 }
 
 internal void
 mplayer_init_queue()
 {
-	memory_zero_struct(&mplayer_ctx->queue);
-	mplayer_clear_queue();
+	mplayer_load_queue();
 }
 
 internal void
@@ -1191,15 +1242,16 @@ internal void
 mplayer_queue_resume()
 {
 	mplayer_ctx->queue.playing = 1;
+	_mplayer_save_queue();
 }
 
 internal void
 mplayer_update_queue()
 {
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
-	if (!is_valid(queue->current_index))
+	if (!is_queue_index_valid(queue->current_index))
 	{
-		mplayer_set_current(1);
+		mplayer_set_current(0);
 	}
 	
 	if (queue->playing)
@@ -1244,7 +1296,7 @@ mplayer_queue_remove_at(Mplayer_Queue_Index index)
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	if (!queue->count || index >= queue->count) return;
 	
-	if (index == queue->current_index && is_valid(index))
+	if (index == queue->current_index && is_queue_index_valid(index))
 	{
 		Mplayer_Track *track = mplayer_queue_get_track_from_queue_index(index);
 		mplayer_unload_track(track);
@@ -1259,8 +1311,9 @@ mplayer_queue_remove_at(Mplayer_Queue_Index index)
 	}
 	
 	queue->count -= 1;
+	// TODO(fakhri): correctly update current_index
 	
-	if (index == queue->current_index && is_valid(index))
+	if (index == queue->current_index && is_queue_index_valid(index))
 	{
 		Mplayer_Track *track = mplayer_queue_get_track_from_queue_index(index);
 		mplayer_load_track(track);
@@ -1296,7 +1349,14 @@ internal void
 mplayer_queue_next(Mplayer_Track_ID track_id)
 {
 	if (!is_valid(track_id)) return;
-	mplayer_queue_insert_at(mplayer_ctx->queue.current_index + 1, track_id);
+	if (is_queue_index_valid(mplayer_ctx->queue.current_index))
+	{
+		mplayer_queue_insert_at(mplayer_ctx->queue.current_index + 1, track_id);
+	}
+	else
+	{
+		mplayer_queue_insert_at(0, track_id);
+	}
 }
 
 internal void
@@ -1307,33 +1367,32 @@ mplayer_queue_last(Mplayer_Track_ID track_id)
 }
 
 internal void
-mplayer_empty_queue_after_current()
-{
-	Mplayer_Queue *queue = &mplayer_ctx->queue;
-	
-	if (queue->count > queue->current_index)
-	{
-		queue->count = queue->current_index + 1;
-	}
-}
-
-internal void
 mplayer_queue_play_track(Mplayer_Track_ID track_id)
 {
-	mplayer_queue_next(track_id);
-	mplayer_play_next_in_queue();
+	if (!is_valid(track_id)) return;
+	if (is_queue_index_valid(mplayer_ctx->queue.current_index))
+	{
+		mplayer_queue_insert_at(mplayer_ctx->queue.current_index + 1, track_id);
+		mplayer_play_next_in_queue();
+	}
+	else
+	{
+		mplayer_queue_insert_at(0, track_id);
+		mplayer_set_current(0);
+	}
 }
 
 internal Mplayer_Track_ID
 mplayer_queue_current_track_id()
 {
 	Mplayer_Track_ID result = NULL_TRACK_ID;
-	if (is_valid(mplayer_ctx->queue.current_index))
+	if (is_queue_index_valid(mplayer_ctx->queue.current_index))
 	{
 		result = mplayer_ctx->queue.tracks[mplayer_ctx->queue.current_index];
 	}
 	return result;
 }
+
 
 //~ NOTE(fakhri): Library Indexing, Serializing and stuff
 
@@ -1341,10 +1400,12 @@ internal void
 mplayer_reset_library()
 {
 	Mplayer_Library *library = &mplayer_ctx->library;
-	mplayer_clear_queue();
-	
-	// NOTE(fakhri): wait for worker threads to end
-	for (;platform->do_next_work();) {}
+	#if 0
+		mplayer_clear_queue();
+	#endif
+		
+		// NOTE(fakhri): wait for worker threads to end
+		for (;platform->do_next_work();) {}
 	m_arena_free_all(&library->arena);
 	
 	library->artists_count = 0;
@@ -1673,6 +1734,7 @@ mplayer_load_indexed_library()
 				track->album_id = album->hash;
 			}
 		}
+		
 	}
 	return success;
 }
@@ -3012,11 +3074,11 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 		mplayer_ctx->new_playlist_name = str8(mplayer_ctx->new_playlist_name_buffer, 0);
 	}
 	
-	mplayer_init_queue();
 	mplayer_load_settings();
 	mplayer_load_library();
 	mplayer_load_playlists(&mplayer_ctx->playlists);
 	mplayer_change_mode(MODE_Track_Library);
+	mplayer_init_queue();
 	
 	return mplayer_ctx;
 }
@@ -4274,7 +4336,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
-								String8 title = str8_f(mplayer_ctx->frame_arena, "Queue(%d)", mplayer_ctx->queue.count - 1);
+								String8 title = str8_f(mplayer_ctx->frame_arena, "Queue(%d)", mplayer_ctx->queue.count);
 								ui_label(title);
 								
 								ui_spacer(ui_size_parent_remaining());
@@ -4306,9 +4368,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						ui_next_height(ui_size_parent_remaining());
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 0))
 						{
-							ui_for_each_list_item(str8_lit("queue-tracks-list"), mplayer_ctx->queue.count-1, 50.0f, 1.0f, index)
+							ui_for_each_list_item(str8_lit("queue-tracks-list"), mplayer_ctx->queue.count, 50.0f, 1.0f, index)
 							{
-								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index + 1;
+								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index;
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, mplayer_ctx->queue.tracks[queue_index]);
 								
 								V4_F32 bg_color = vec4(0.02f, 0.02f,0.02f, 1);
@@ -4328,6 +4390,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								if (interaction.clicked_left)
 								{
 									mplayer_set_current(Mplayer_Queue_Index(queue_index));
+									mplayer_queue_resume();
 								}
 								if (interaction.clicked_right)
 								{
@@ -4586,7 +4649,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							ui_next_roundness(20);
 							ui_next_width(ui_size_pixel(40, 1));
 							ui_next_height(ui_size_pixel(40, 1));
-							if (ui_button(str8_lit("<<")).clicked_left && is_valid(mplayer_ctx->queue.current_index))
+							if (ui_button(str8_lit("<<")).clicked_left && is_queue_index_valid(mplayer_ctx->queue.current_index))
 							{
 								if (g_input->time - mplayer_ctx->time_since_last_play <= 1.f)
 									mplayer_play_prev_in_queue();
