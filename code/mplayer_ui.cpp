@@ -1121,7 +1121,7 @@ ui_interaction_from_element(UI_Element *element)
 	UI_ID id = element->id;
 	for (UI_Element *p = element->parent; p; p = p->parent)
 	{
-		if (!ui_id_is_null(p->id) || has_flag(p->flags, UI_FLAG_Clip))
+		if (!ui_id_is_null(p->id) && has_flag(p->flags, UI_FLAG_Clip))
 		{
 			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
 		}

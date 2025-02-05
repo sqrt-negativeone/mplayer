@@ -4212,20 +4212,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_parent(add_location_el) ui_padding(ui_size_parent_remaining()) ui_pref_height(ui_size_by_childs(1))
 										ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
 									{
-										Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
-										if (add_loc_interaction.hover)
-										{
-											add_location_el->background_color = vec4(0.069f,0.069f,0.069f,1);
-										}
-										if (add_loc_interaction.pressed_left)
-										{
-											add_location_el->background_color = vec4(0.12f,0.12f,0.12f,1);
-										}
-										if (add_loc_interaction.clicked_left)
-										{
-											mplayer_ctx->show_library_locations = !mplayer_ctx->show_library_locations;
-										}
-										
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
 										ui_label(str8_lit("Track Library Locations"));
@@ -4262,7 +4248,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										ui_pref_height(ui_size_by_childs(1))
 										ui_pref_roundness(10)
 										ui_for_each_list_item(str8_lit("settings-location-list"), mplayer_ctx->settings.locations_count, 40.0f, 1.0f, location_index)
-										
 										ui_pref_height(ui_size_parent_remaining()) ui_pref_flags(0) ui_pref_roundness(100)
 									{
 										Mplayer_Library_Location *location = mplayer_ctx->settings.locations + location_index;
@@ -4301,6 +4286,20 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										}
 										
 										mplayer_ctx->settings.locations_count -= 1;
+									}
+									
+									Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
+									if (add_loc_interaction.hover)
+									{
+										add_location_el->background_color = vec4(0.069f,0.069f,0.069f,1);
+									}
+									if (add_loc_interaction.pressed_left)
+									{
+										add_location_el->background_color = vec4(0.12f,0.12f,0.12f,1);
+									}
+									if (add_loc_interaction.clicked_left)
+									{
+										mplayer_ctx->show_library_locations = !mplayer_ctx->show_library_locations;
 									}
 								}
 								
