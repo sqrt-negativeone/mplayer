@@ -517,7 +517,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
     new_wf.cbSize = 0;
 	}
 	
-	REFERENCE_TIME requested_duration = 5 * REFTIMES_PER_SEC;
+	REFERENCE_TIME requested_duration = 1 * REFTIMES_PER_SEC;
 	res = audio_client->Initialize(
 		AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -1136,21 +1136,21 @@ w32_process_pending_messages(Memory_Arena *frame_arena, Mplayer_Input *input,  V
 internal void
 w32_update_audio()
 {
-	u32 max_ms_lag = 50;
+	u32 max_ms_lag = 100;
+	u32 max_lag_sample_count = max_ms_lag * g_w32_sound_output.config.sample_rate / 1000;
+	
 	f32 audio_dt = w32_get_seconds_elapsed(&g_w32_audio_timer);
 	w32_update_timer(&g_w32_audio_timer);
 	
-	u32 max_lag_sample_count = max_ms_lag * g_w32_sound_output.config.sample_rate / 1000;
-	
-	f32 needed_audio_duration = audio_dt;
-	u32 needed_audio_samples = (u32)round_f32_i32(needed_audio_duration * g_w32_sound_output.config.sample_rate);
+	f32 request_duration = 1.5f * audio_dt;
+	u32 needed_audio_samples = (u32)round_f32_i32(request_duration * g_w32_sound_output.config.sample_rate);
 	
 	// See how much buffer space is available.
-	u32 frame_padding_count = 0;
-	g_w32_sound_output.audio_client->GetCurrentPadding(&frame_padding_count);
-	if (frame_padding_count < max_lag_sample_count)
+	u32 pending_frame_count = 0;
+	g_w32_sound_output.audio_client->GetCurrentPadding(&pending_frame_count);
+	if (pending_frame_count < max_lag_sample_count)
 	{
-		u32 available_frames_count = g_w32_sound_output.buffer_frame_count - frame_padding_count;
+		u32 available_frames_count = g_w32_sound_output.buffer_frame_count - pending_frame_count;
 		u32 frames_to_write = MIN(needed_audio_samples, available_frames_count);
 		
 		if (frames_to_write)
@@ -1170,6 +1170,7 @@ w32_update_audio()
 internal DWORD WINAPI
 w32_audio_thread(void *unused)
 {
+	w32_update_timer(&g_w32_audio_timer);
 	for(;;)
 	{
 		Sleep(50);
@@ -1234,9 +1235,16 @@ w32_update()
 	
 	w32_gl_render_begin(g_w32_renderer, window_dim, draw_dim, draw_region);
 	
-	WaitForSingleObject(g_audio_mutex, INFINITE);
-	w32_app_code.vtable.mplayer_update_and_render();
-	ReleaseMutex(g_audio_mutex);
+	for (;;)
+	{
+		DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
+		if (wait_result == WAIT_OBJECT_0)
+		{
+			w32_app_code.vtable.mplayer_update_and_render();
+			ReleaseMutex(g_audio_mutex);
+			break;
+		}
+	}
 	
 	w32_gl_render_end(g_w32_renderer);
 }
