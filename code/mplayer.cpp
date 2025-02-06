@@ -1151,6 +1151,7 @@ mplayer_queue_shuffle()
 	if (queue->count)
 	{
 		mplayer_unload_track(mplayer_queue_get_current_track());
+		queue->current_index = 0;
 		for (Mplayer_Queue_Index i = 0; i < queue->count; i += 1)
 		{
 			u16 swap_index = (u16)rng_next_minmax(&mplayer_ctx->entropy, i, queue->count);
