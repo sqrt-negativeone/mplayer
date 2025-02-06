@@ -1140,10 +1140,12 @@ w32_update_audio()
 	u32 max_lag_sample_count = max_ms_lag * g_w32_sound_output.config.sample_rate / 1000;
 	
 	f32 audio_dt = w32_get_seconds_elapsed(&g_w32_audio_timer);
+	Log("Audio Elasped time: %.2f ms", audio_dt * 1000);
 	w32_update_timer(&g_w32_audio_timer);
 	
-	f32 request_duration = 1.5f * audio_dt;
+	f32 request_duration = audio_dt;
 	u32 needed_audio_samples = (u32)round_f32_i32(request_duration * g_w32_sound_output.config.sample_rate);
+	needed_audio_samples = MAX(needed_audio_samples, max_lag_sample_count);
 	
 	// See how much buffer space is available.
 	u32 pending_frame_count = 0;
@@ -1173,7 +1175,7 @@ w32_audio_thread(void *unused)
 	w32_update_timer(&g_w32_audio_timer);
 	for(;;)
 	{
-		Sleep(50);
+		Sleep(6);
 		DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
 		if (wait_result == WAIT_OBJECT_0)
 		{
