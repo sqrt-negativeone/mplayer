@@ -1258,6 +1258,7 @@ ui_interaction_from_element(UI_Element *element)
 		if (consumed)
 		{
 			DLLRemove(g_input->first_event, g_input->last_event, e);
+			mplayer_animate_next_frame();
 		}
 	}
 	
@@ -1412,6 +1413,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 	
 	if (interaction.selected)
 	{
+		mplayer_animate_next_frame();
 		text_input->background_color = vec4(0.1f, 0.1f, 0.1f, 1);
 		
 		Font *font = ui_stack_top(g_ui->fonts);
@@ -1440,8 +1442,9 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 			}
 		}
 		
-		for (Mplayer_Input_Event *event = g_input->first_event; event; event = event->next)
+		for (Mplayer_Input_Event *event = g_input->first_event, *next = 0; event; event = next)
 		{
+			next = event->next;
 			b32 consumed = 0;
 			switch(event->kind)
 			{
@@ -1464,7 +1467,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 						buffer->len += 1;
 						g_ui->input_cursor += 1;
 					}
-				};
+				} break;
 				case Event_Kind_Keyboard_Key:
 				{
 					if (event->is_down)

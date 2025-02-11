@@ -4254,7 +4254,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										Mplayer_Library_Location *location = mplayer_ctx->settings.locations + location_index;
 										ui_next_border_thickness(2);
 										u32 flags = UI_FLAG_Animate_Dim | UI_FLAG_Clip | UI_FLAG_Draw_Background;
-										UI_Element *location_el = ui_element({}, flags);
+										UI_Element *location_el = ui_element_f(flags, "location-item-%p", location);
 										location_el->child_layout_axis = Axis2_X;
 										
 										ui_parent(location_el) ui_padding(ui_size_pixel(10, 1))
@@ -4301,6 +4301,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (add_loc_interaction.clicked_left)
 									{
 										mplayer_ctx->show_library_locations = !mplayer_ctx->show_library_locations;
+										mplayer_animate_next_frame();
 									}
 								}
 								

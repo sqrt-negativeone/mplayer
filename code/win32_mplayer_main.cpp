@@ -276,7 +276,6 @@ global W32_GL_Renderer *g_w32_renderer;
 #define W32_WINDOW_H 720
 
 b32 global_request_quit = 0;
-internal void w32_update();
 
 internal LRESULT
 Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -1185,71 +1184,6 @@ w32_audio_thread(void *unused)
 	}
 }
 
-internal void
-w32_update()
-{
-	m_arena_free_all(&g_w32_frame_arena);
-	
-	g_w32_input.frame_dt = w32_get_seconds_elapsed(&g_w32_update_timer);
-	g_w32_input.time += g_w32_input.frame_dt;
-	
-	// NOTE(fakhri): wait until we get user message or timer run-out 
-	if (g_w32_input.next_animation_timer_request > 0)
-	{
-		f32 wait_request_time = g_w32_input.next_animation_timer_request;
-		DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
-		MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, wait_requst_time_ms, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
-	}
-	else if (g_w32_input.next_animation_timer_request < 0)
-	{
-		MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, INFINITE, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
-	}
-	
-	w32_update_timer(&g_w32_update_timer);
-	
-	w32_update_code(g_w32_mplayer, &g_w32_input, &w32_app_code);
-	
-	for (u32 i = 0; i < array_count(g_w32_input.keyboard_buttons); i += 1)
-	{
-		g_w32_input.keyboard_buttons[i].was_down = g_w32_input.keyboard_buttons[i].is_down;
-	}
-	for (u32 i = 0; i < array_count(g_w32_input.mouse_buttons); i += 1)
-	{
-		g_w32_input.mouse_buttons[i].was_down = g_w32_input.mouse_buttons[i].is_down;
-		
-	}
-	
-	V2_I32 window_dim;
-	{
-		RECT client_rect;
-		GetClientRect(g_w32_window, &client_rect);
-		window_dim.x = client_rect.right - client_rect.left;
-		window_dim.y = client_rect.bottom - client_rect.top;
-	}
-	
-	V2_I32 draw_dim = window_dim;
-	Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
-	
-	g_w32_input.first_event = 0;
-	g_w32_input.last_event = 0;
-	
-	w32_process_pending_messages(&g_w32_frame_arena, &g_w32_input, window_dim, draw_region, g_w32_window);
-	
-	w32_gl_render_begin(g_w32_renderer, window_dim, draw_dim, draw_region);
-	
-	for (;;)
-	{
-		DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
-		if (wait_result == WAIT_OBJECT_0)
-		{
-			w32_app_code.vtable.mplayer_update_and_render();
-			ReleaseMutex(g_audio_mutex);
-			break;
-		}
-	}
-	
-	w32_gl_render_end(g_w32_renderer);
-}
 
 internal DWORD WINAPI 
 w32_main_thread(void *unused)
@@ -1300,7 +1234,68 @@ w32_main_thread(void *unused)
 		b32 running = true;
 		for (;running;)
 		{
-			w32_update();
+			m_arena_free_all(&g_w32_frame_arena);
+			
+			g_w32_input.frame_dt = w32_get_seconds_elapsed(&g_w32_update_timer);
+			g_w32_input.time += g_w32_input.frame_dt;
+			
+			// NOTE(fakhri): wait until we get user message or timer run-out 
+			if (g_w32_input.next_animation_timer_request > 0)
+			{
+				f32 wait_request_time = g_w32_input.next_animation_timer_request;
+				DWORD wait_requst_time_ms = (DWORD)(wait_request_time * 1000);
+				MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, wait_requst_time_ms, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
+			}
+			else if (g_w32_input.next_animation_timer_request < 0)
+			{
+				MsgWaitForMultipleObjects(1, &g_shit_event, FALSE, INFINITE, QS_ALLINPUT|QS_ALLPOSTMESSAGE|QS_POSTMESSAGE);
+			}
+			
+			w32_update_timer(&g_w32_update_timer);
+			
+			w32_update_code(g_w32_mplayer, &g_w32_input, &w32_app_code);
+			
+			for (u32 i = 0; i < array_count(g_w32_input.keyboard_buttons); i += 1)
+			{
+				g_w32_input.keyboard_buttons[i].was_down = g_w32_input.keyboard_buttons[i].is_down;
+			}
+			for (u32 i = 0; i < array_count(g_w32_input.mouse_buttons); i += 1)
+			{
+				g_w32_input.mouse_buttons[i].was_down = g_w32_input.mouse_buttons[i].is_down;
+				
+			}
+			
+			V2_I32 window_dim;
+			{
+				RECT client_rect;
+				GetClientRect(g_w32_window, &client_rect);
+				window_dim.x = client_rect.right - client_rect.left;
+				window_dim.y = client_rect.bottom - client_rect.top;
+			}
+			
+			V2_I32 draw_dim = window_dim;
+			Range2_I32 draw_region = compute_draw_region_aspect_ratio_fit(draw_dim, window_dim);
+			
+			g_w32_input.first_event = 0;
+			g_w32_input.last_event = 0;
+			
+			w32_process_pending_messages(&g_w32_frame_arena, &g_w32_input, window_dim, draw_region, g_w32_window);
+			
+			w32_gl_render_begin(g_w32_renderer, window_dim, draw_dim, draw_region);
+			
+			for (;;)
+			{
+				DWORD wait_result = WaitForSingleObject(g_audio_mutex, INFINITE);
+				if (wait_result == WAIT_OBJECT_0)
+				{
+					w32_app_code.vtable.mplayer_update_and_render();
+					ReleaseMutex(g_audio_mutex);
+					break;
+				}
+			}
+			
+			w32_gl_render_end(g_w32_renderer);
+			
 			running = !(global_request_quit);
 		}
 	}
@@ -1419,36 +1414,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 				GetMessageW(&msg, 0, 0, 0);
 				TranslateMessage(&msg);
 				PostThreadMessageW(g_w32_main_thread_id, msg.message, msg.wParam, msg.lParam);
-				
-				switch(msg.message)
-				{
-					case WM_QUIT:       // fallthrough;
-					case WM_CLOSE:       // fallthrough;
-					case WM_SYSKEYDOWN:  // fallthrough;
-					case WM_SYSKEYUP:    // fallthrough;
-					case WM_KEYDOWN:     // fallthrough;
-					case WM_KEYUP:       // fallthrough;
-					case WM_CHAR:        // fallthrough;
-					case WM_SYSCHAR:     // fallthrough;
-					case WM_MBUTTONDOWN: // fallthrough;
-					case WM_MBUTTONUP:   // fallthrough;
-					case WM_LBUTTONDOWN: // fallthrough;
-					case WM_LBUTTONUP:   // fallthrough;
-					case WM_RBUTTONDOWN: // fallthrough;
-					case WM_RBUTTONUP:   // fallthrough;
-					case WM_MOUSEWHEEL:  // fallthrough;
-					case WM_MOUSEMOVE:   // fallthrough;
-					case WM_XBUTTONDOWN: // fallthrough;
-					case WM_XBUTTONUP:
-					{
-						PostThreadMessageW(g_w32_main_thread_id, msg.message, msg.wParam, msg.lParam);
-					} break;
-					
-					default:
-					{
-						DispatchMessage(&msg);
-					} break;
-				}
+				DispatchMessage(&msg);
 			}
 		}
 	}
