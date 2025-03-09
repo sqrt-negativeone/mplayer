@@ -99,6 +99,8 @@ struct Mplayer_Track
 	// NOTE(fakhri): tracks can be parts of a file
 	u64 start_sample_offset;
 	u64 end_sample_offset;
+	
+	u32 play_count;
 };
 
 struct Mplayer_Track_List
@@ -4601,7 +4603,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						// NOTE(fakhri): track info
 						ui_next_width(ui_size_parent_remaining());
 						ui_pref_flags(UI_FLAG_Clip)
-							ui_vertical_layout()
+							ui_parent(ui_element(str8_lit("##track-info")))
 						{
 							ui_spacer_pixels(25, 0);
 							
