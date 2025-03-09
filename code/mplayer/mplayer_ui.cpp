@@ -889,14 +889,9 @@ ui_element_set_text(UI_Element *element, String8 string)
 }
 
 internal UI_Element *
-ui_element(String8 string, UI_Element_Flags flags = 0)
+ui_element(UI_ID id, String8 string, UI_Element_Flags flags = 0)
 {
 	UI_Element *result = 0;
-	
-	//- NOTE(fakhri): check hash table
-	UI_ID seed = ui_stack_top(g_ui->seeds);
-	String8 key = ui_key_from_string(string);
-	UI_ID id = ui_id_from_string(seed, key);
 	u32 bucket_index = id.value % array_count(g_ui->elements_table);
 	if (!ui_id_is_null(id))
 	{
@@ -1004,6 +999,20 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 	// ui_element_push(result);
 	
 	ui_auto_pop_style();
+	return result;
+}
+
+internal UI_Element *
+ui_element(String8 string, UI_Element_Flags flags = 0)
+{
+	UI_Element *result = 0;
+	
+	//- NOTE(fakhri): check hash table
+	UI_ID seed = ui_stack_top(g_ui->seeds);
+	String8 key = ui_key_from_string(string);
+	UI_ID id = ui_id_from_string(seed, key);
+	
+	result = ui_element(id, string, flags);
 	return result;
 }
 

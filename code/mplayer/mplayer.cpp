@@ -882,6 +882,12 @@ mplayer_get_image_by_id(Mplayer_Image_ID image_id, b32 load)
 //~ NOTE(fakhri): track control stuff
 
 internal void
+mplayer_track_update_report(Mplayer_Track *track)
+{
+	track->play_count += 1;
+}
+
+internal void
 mplayer_track_reset(Mplayer_Track *track)
 {
 	if (track && track->flac_stream)
@@ -933,6 +939,7 @@ mplayer_load_track(Mplayer_Track *track)
 	}
 	
 	mplayer_track_reset(track);
+	mplayer_track_update_report(track);
 }
 
 internal void
@@ -1126,7 +1133,9 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	// can be slow, which cause some files to have noticeable
 	// delay when played...
 	
-	if (is_queue_index_valid(queue->current_index) && is_queue_index_valid(index) && is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
+	if (is_queue_index_valid(queue->current_index) && 
+		is_queue_index_valid(index) && 
+		is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
 	{
 		queue->current_index = index;
 		mplayer_load_track(mplayer_queue_get_current_track());
@@ -1530,6 +1539,7 @@ mplayer_serialize_track(File_Handle *file, Mplayer_Track *track)
 	mplayer_serialize(file, track->track_number);
 	mplayer_serialize(file, track->start_sample_offset);
 	mplayer_serialize(file, track->end_sample_offset);
+	mplayer_serialize(file, track->play_count);
 }
 
 internal void
@@ -1570,6 +1580,7 @@ mplayer_deserialize_track(Byte_Stream *bs, Mplayer_Track *track)
 	byte_stream_read(bs, &track->track_number);
 	byte_stream_read(bs, &track->start_sample_offset);
 	byte_stream_read(bs, &track->end_sample_offset);
+	byte_stream_read(bs, &track->play_count);
 }
 
 internal void
@@ -2659,35 +2670,23 @@ mplayer_ui_underlined_button_f(const char *fmt, ...)
 }
 
 internal Mplayer_UI_Interaction 
-mplayer_ui_track_item(Mplayer_Track_ID track_id)
+mplayer_ui_track_item(Mplayer_Track *track, String8 string, b32 is_active)
 {
-	Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 	
 	V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
-	if (is_equal(track_id, mplayer_queue_current_track_id()))
+	if (is_active)
 	{
 		bg_color = v4(0, 0, 0, 1);
 	}
 	
 	ui_next_background_color(bg_color);
 	ui_next_hover_cursor(Cursor_Hand);
-	UI_Element *track_el = ui_element_f(flags, "library_track_%p", track);
+	
+	UI_Element *track_el = ui_element(string, flags);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
-	#if 0
-		if (interaction.clicked_left)
-	{
-		mplayer_queue_play_track(track_id);
-		mplayer_queue_resume();
-	}
-	if (interaction.clicked_right)
-	{
-		ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Track_Context_Menu]);
-		mplayer_ctx->ctx_menu_item_id = to_item_id(track_id);
-	}
-	#endif
-		
-		ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+	
+	ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 		ui_horizontal_layout()
 	{
 		ui_spacer_pixels(10, 1);
@@ -2701,6 +2700,17 @@ mplayer_ui_track_item(Mplayer_Track_ID track_id)
 	return interaction;
 }
 
+internal Mplayer_UI_Interaction 
+mplayer_ui_track_item_f(Mplayer_Track *track, b32 is_active, const char *fmt, ...)
+{
+	va_list args;
+  va_start(args, fmt);
+	String8 string = str8_fv(mplayer_ctx->frame_arena, fmt, args);
+	va_end(args);
+	
+	Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track, string, is_active);
+	return interaction;
+}
 
 internal void
 mplayer_ui_album_item(Mplayer_Album_ID album_id)
@@ -3788,7 +3798,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							ui_for_each_list_item(str8_lit("library-tracks-list"), mplayer_ctx->library.tracks_count, 50.0f, 1.0f, track_index)
 							{
 								Mplayer_Track_ID track_id = mplayer_ctx->library.track_ids[track_index];
-								Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
+								Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
+									is_equal(track_id, mplayer_queue_current_track_id()),
+									"library_track_%p", track
+								);
 								if (interaction.clicked_left)
 								{
 									mplayer_queue_play_track(track_id);
@@ -3993,7 +4007,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								for(Mplayer_Track *track = first_track; ui_list_item_begin(); (track = track->next_album, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = track->hash;
-									Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+									Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
+										is_equal(track_id, mplayer_queue_current_track_id()),
+										"library_track_%p", track
+									);
 									if (interaction.clicked_left)
 									{
 										mplayer_queue_play_track(track_id);
@@ -4373,20 +4390,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index;
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, mplayer_ctx->queue.tracks[queue_index]);
 								
-								V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
-								if (queue_index == mplayer_ctx->queue.current_index)
-								{
-									bg_color = v4(0, 0, 0, 1);
-								}
-								
-								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
-								
-								ui_next_background_color(bg_color);
-								ui_next_border_color(v4(0, 0, 0, 1));
-								ui_next_border_thickness(1);
-								ui_next_hover_cursor(Cursor_Hand);
-								UI_Element *track_el = ui_element_f(flags, "queue_track_%p%d", track, queue_index);
-								Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
+								Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
+									queue_index == mplayer_ctx->queue.current_index,
+									"library_track_%p%d", track, queue_index
+								);
 								if (interaction.clicked_left)
 								{
 									mplayer_set_current(Mplayer_Queue_Index(queue_index));
@@ -4396,16 +4403,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								{
 									ui_open_ctx_menu(g_ui->mouse_pos, mplayer_ctx->ctx_menu_ids[Queue_Track_Context_Menu]);
 									mplayer_ctx->ctx_menu_data.queue_index = queue_index;
-								}
-								ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
-									ui_horizontal_layout()
-								{
-									ui_spacer_pixels(10, 1);
-									
-									ui_next_width(ui_size_text_dim(1));
-									ui_next_height(ui_size_text_dim(1));
-									ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
-										STR8_EXPAND(track->title), track);
 								}
 							}
 						}
@@ -4471,7 +4468,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = entry->track_id;
-									Mplayer_UI_Interaction interaction = mplayer_ui_track_item(track_id);
+									Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
+									Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
+										is_equal(track_id, mplayer_queue_current_track_id()),
+										"library_track_%p", track 
+									);
 									if (interaction.clicked_left)
 									{
 										mplayer_queue_play_track(track_id);
