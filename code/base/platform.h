@@ -1,9 +1,9 @@
-/* date = January 19th 2025 4:27 pm */
+/* date = December 26th 2024 2:00 pm */
 
-#ifndef MPLAYER_OS_VTABLE_H
-#define MPLAYER_OS_VTABLE_H
+#ifndef PLATFORM_H
+#define PLATFORM_H
 
-enum Cursor_Shape
+typedef enum
 {
 	Cursor_Arrow,
 	Cursor_Hand,
@@ -14,7 +14,7 @@ enum Cursor_Shape
 	Cursor_Unavailable,
 	
 	Cursor_COUNT,
-};
+} Cursor_Shape;
 
 typedef void Work_Proc(void *data);
 struct Work_Entry
@@ -28,6 +28,7 @@ struct Work_Entry
 typedef b32 Push_Work_Proc(Work_Proc *work, void *input);
 typedef b32 Do_Next_Work_Proc();
 
+typedef struct File_Iterator_Handle File_Iterator_Handle;
 struct File_Iterator_Handle
 {
 	u8 opaque[kilobytes(1)];
@@ -40,6 +41,7 @@ enum File_Flag
 };
 typedef u32 File_Flags;
 
+typedef struct File_Info File_Info;
 struct File_Info
 {
 	File_Flags flags;
@@ -60,12 +62,14 @@ enum
 
 typedef void File_Handle;
 
+typedef struct Directory Directory;
 struct Directory
 {
 	File_Info *files;
 	u32 count;
 };
 
+typedef b32 Is_Path_Slash_Proc(u8 c);
 typedef void Fix_Path_Slashes_Proc(String8 path);
 typedef void Make_Folder_If_Missing_Proc(String8 dir);
 typedef void Set_Cursor_Proc(Cursor_Shape cursor);
@@ -84,11 +88,13 @@ typedef void   Close_File_Proc(File_Handle *file);
 typedef Buffer File_Read_block_Proc(File_Handle *file, void *data, u64 size);
 typedef b32 File_Write_block_Proc(File_Handle *file, void *buf, u64 size);
 
-typedef Buffer Load_Entire_File(String8 file_path, Memory_Arena *arena);
+typedef Buffer Load_Entire_File(Memory_Arena *arena, String8 file_path);
 
-struct Mplayer_OS_Vtable
+typedef struct OS_Vtable OS_Vtable;
+struct OS_Vtable
 {
 	Fix_Path_Slashes_Proc                   *fix_path_slashes;
+	Is_Path_Slash_Proc                      *is_path_slash;
 	Make_Folder_If_Missing_Proc             *make_folder_if_missing;
 	Set_Cursor_Proc                         *set_cursor;
 	
@@ -112,6 +118,6 @@ struct Mplayer_OS_Vtable
 	Atomic_Compare_And_Exchange_Pointer_Proc *atomic_compare_and_exchange_pointer;
 };
 
-global Mplayer_OS_Vtable *platform = 0;
+global OS_Vtable *platform = 0;
 
-#endif //MPLAYER_OS_VTABLE_H
+#endif //PLATFORM_H

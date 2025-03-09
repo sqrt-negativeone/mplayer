@@ -3,19 +3,6 @@
 #ifndef MPLAYER_H
 #define MPLAYER_H
 
-#include "mplayer_base.h"
-#include "mplayer_math.h"
-#include "mplayer_random.h"
-#include "mplayer_memory.h"
-#include "mplayer_string.h"
-#include "mplayer_buffer.h"
-
-#include "mplayer_os_vtable.h"
-
-#include "mplayer_thread_context.cpp"
-#include "mplayer_base.cpp"
-#include "mplayer_string.cpp"
-#include "mplayer_memory.cpp"
 
 #include "mplayer_input.h"
 struct Mplayer_Context;
@@ -28,8 +15,8 @@ struct Sound_Config
 };
 
 
-#define MPLAYER_INITIALIZE(name) Mplayer_Context *name(Memory_Arena *frame_arena, Render_Context *render_ctx, Mplayer_Input *input, Mplayer_OS_Vtable *vtable)
-#define MPLAYER_HOTLOAD(name) void name(Mplayer_Context *_mplayer, Mplayer_Input *input, Mplayer_OS_Vtable *vtable)
+#define MPLAYER_INITIALIZE(name) Mplayer_Context *name(Memory_Arena *frame_arena, Render_Context *render_ctx, Mplayer_Input *input, OS_Vtable *vtable)
+#define MPLAYER_HOTLOAD(name) void name(Mplayer_Context *_mplayer, Mplayer_Input *input, OS_Vtable *vtable)
 #define MPLAYER_UPDATE_AND_RENDER(name) void name()
 #define MPLAYER_GET_AUDIO_SAMPLES(name) void name(Sound_Config device_config, void *output_buf, u32 frame_count)
 

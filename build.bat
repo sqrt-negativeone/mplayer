@@ -59,10 +59,10 @@ del *.pdb > NUL 2> NUL
 set time_stamp=%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 
 echo building application layer
-call cl %compiler_settings% "%code_dir%\code\mplayer.cpp" /LD /link %app_linker_settings% /OUT:%exe_name%.dll  -PDB:%exe_name%_%time_stamp: =%.pdb
+call cl %compiler_settings% "%code_dir%\code\mplayer\mplayer.cpp" /LD /link %app_linker_settings% /OUT:%exe_name%.dll  -PDB:%exe_name%_%time_stamp: =%.pdb
 
 echo building platform layer
-call cl %compiler_settings% "%code_dir%\code\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
+call cl %compiler_settings% "%code_dir%\code\win32\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
 
 xcopy "%code_dir%\lib\win32\*.dll" . /Y
 

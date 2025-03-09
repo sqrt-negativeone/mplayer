@@ -1,22 +1,5 @@
 
-#define GL_VERSION_MAJOR 3
-#define GL_VERSION_MINOR 3
-
-struct Rect_Shader_Uniforms
-{
-	i32 clip, rect_dim, rect_cent, roundness;
-};
-
-struct GL_Textured_Rect_Shader
-{
-	GLuint prog_id;
-	GLuint vao;
-	GLuint vbo;
-	GLuint ebo;
-	
-	Rect_Shader_Uniforms uniforms;
-};
-
+#include "mplayer/mplayer_renderer.cpp"
 
 #define SET_VERTEX_ATTRIBUTE(T, m, index) \
 glEnableVertexAttribArray(index); \
@@ -25,19 +8,6 @@ glVertexAttribPointer(index, sizeof(member(T, m)) / sizeof(f32), GL_FLOAT, GL_FA
 #define SET_VERTEX_ATTRIBUTE_INSTANCED(T, m, index) \
 SET_VERTEX_ATTRIBUTE(T, m, index); \
 glVertexAttribDivisor(index, 1);
-
-struct OpenGL
-{
-	Render_Context render_ctx;
-	Range2_I32 draw_region;
-	V2_I32 window_dim;
-	
-	u32 *textures2d_array;
-	Load_Entire_File *load_entire_file;
-	
-	GL_Textured_Rect_Shader rect_shader;
-};
-
 
 internal u32
 gl_compile_shader_program(OpenGL *opengl, const char *source_code)
@@ -134,7 +104,7 @@ gl_compile_textured_rect_shader(OpenGL *opengl, GL_Textured_Rect_Shader *rect_sh
 {
 	Memory_Checkpoint_Scoped scratch(begin_scratch(0, 0));
 	// TODO(fakhri): bake the shader into the executable
-	const char *rect_shader_source = (char *)opengl->load_entire_file(str8_lit("data/shaders/rectangle_shader_instanced.glsl"), scratch.arena).data;
+	const char *rect_shader_source = (char *)platform->load_entire_file(scratch.arena, str8_lit("data/shaders/rectangle_shader_instanced.glsl")).data;
 	
 	b32 result = true;
   
@@ -278,7 +248,7 @@ gl_begin_frame(OpenGL *opengl, V2_I32 window_dim, V2_I32 draw_dim, Range2_I32 dr
 	opengl->render_ctx.rects_count = 0;
 	
 	opengl->render_ctx.command_offset = 0;
-	opengl->render_ctx.draw_dim       = vec2(draw_dim);
+	opengl->render_ctx.draw_dim       = v2vi(draw_dim);
 	opengl->window_dim  = window_dim;
 	opengl->draw_region = draw_region;
 }
@@ -305,7 +275,7 @@ gl_end_frame(OpenGL *opengl)
 	glClearDepth(1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   
-	V2_I32 draw_region_dim = range_dim(opengl->draw_region);
+	V2_I32 draw_region_dim = range2i32_dim(opengl->draw_region);
 	glViewport(opengl->draw_region.min_x, 
 		opengl->draw_region.min_y,
 		draw_region_dim.width,
@@ -414,8 +384,8 @@ gl_end_frame(OpenGL *opengl)
 				Render_Config config = cmd->config;
 				
 				Range2_F32 cull_range = config.cull_range;
-				cull_range.minp = (config.proj.mat * vec4(cull_range.min_x, cull_range.min_y, 0, 1)).xy;
-				cull_range.maxp = (config.proj.mat * vec4(cull_range.max_x, cull_range.max_y, 0, 1)).xy;
+				cull_range.minp = (config.proj.mat * v4(cull_range.min_x, cull_range.min_y, 0, 1)).xy;
+				cull_range.maxp = (config.proj.mat * v4(cull_range.max_x, cull_range.max_y, 0, 1)).xy;
 				
 				i32 min_x = round_f32_i32(map_into_range(cull_range.min_x, -1, 1, 0, f32(opengl->window_dim.width)));
 				i32 min_y = round_f32_i32(map_into_range(cull_range.min_y, -1, 1, 0, f32(opengl->window_dim.height)));

@@ -1,14 +1,5 @@
 
-struct Thread_Context
-{
-	b32 initialized;
-	Memory_Arena arenas[2];
-};
-
 global thread_local Thread_Context tl_thread_ctx = ZERO_STRUCT;
-
-#define begin_scratch(conflicts, count) get_scratch(conflicts, count)
-#define end_scratch(scratch) m_checkpoint_end(scratch)
 
 internal void
 init_thread_context()
@@ -19,10 +10,10 @@ init_thread_context()
 	}
 }
 
-internal _Memory_Checkpoint
+internal Memory_Checkpoint
 get_scratch(Memory_Arena **conflicts, u64 count)
 {
-	_Memory_Checkpoint result = ZERO_STRUCT;
+	Memory_Checkpoint result = ZERO_STRUCT;
 	
 	for (u32 i = 0; i < array_count(tl_thread_ctx.arenas); i += 1)
 	{
@@ -43,5 +34,12 @@ get_scratch(Memory_Arena **conflicts, u64 count)
 		}
 	}
 	
+	return result;
+}
+
+internal Memory_Checkpoint
+get_scratch0()
+{
+	Memory_Checkpoint result = get_scratch(0, 0);
 	return result;
 }

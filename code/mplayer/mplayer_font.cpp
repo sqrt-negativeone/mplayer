@@ -141,7 +141,7 @@ fnt_open_font_from_memory(Buffer font_content)
 internal Font *
 fnt_open_font(String8 path)
 {
-	Buffer font_content = platform->load_entire_file(path, &g_fonts_ctx->arena);
+	Buffer font_content = platform->load_entire_file(&g_fonts_ctx->arena, path);
 	Font *font = fnt_open_font_from_memory(font_content);
 	return font;
 }
@@ -202,7 +202,7 @@ fnt_get_or_create_glyph(Font_Face *face, u32 codepoint)
 internal void
 fnt_raster_init(Font_Raster *raster)
 {
-	V2_I32 atlas_dim = vec2i(1024, 1024);
+	V2_I32 atlas_dim = v2i(1024, 1024);
 	raster->atlas.dim = atlas_dim;
 	if (!raster->atlas.buf.size)
 	{
@@ -250,10 +250,10 @@ fnt_raster_range(stbtt_fontinfo *info, Font_Face *face, Font_Raster *raster, stb
 		stbtt_GetPackedQuad(rng->chardata_for_range, raster->atlas.dim.x, raster->atlas.dim.y, ch_index, &x_offset, &y_offset, &quad, true);
 		
 		glyph->handle    = raster->atlas.handle;
-		glyph->uv_offset = vec2(quad.s0, quad.t0);
-		glyph->uv_scale  = vec2(ABS(quad.s1 - quad.s0), ABS(quad.t1 - quad.t0));
-		glyph->dim       = glyph->uv_scale * vec2(face->raster.atlas.dim);
-		glyph->offset    = vec2(quad.x0 + 0.5f * glyph->dim.width, -(quad.y0 + 0.5f * glyph->dim.height));
+		glyph->uv_offset = v2(quad.s0, quad.t0);
+		glyph->uv_scale  = v2(ABS(quad.s1 - quad.s0), ABS(quad.t1 - quad.t0));
+		glyph->dim       = glyph->uv_scale * v2vi(face->raster.atlas.dim);
+		glyph->offset    = v2(quad.x0 + 0.5f * glyph->dim.width, -(quad.y0 + 0.5f * glyph->dim.height));
 		glyph->advance   = x_offset;
 	}
 	
@@ -398,7 +398,7 @@ fnt_draw_text(Render_Group *group, Font *font, f32 size, String8 text, V3_F32 po
 	{
 		Glyph_Metrics *glyph = fnt_get_glyph(font, size, it.utf8.codepoint);
 		
-		V3_F32 glyph_p = vec3(text_pt.xy + (glyph->offset), text_pt.z);
+		V3_F32 glyph_p = v3v(text_pt.xy + (glyph->offset), text_pt.z);
 		push_image(group, glyph_p, 
 			glyph->dim,
 			glyph->handle,

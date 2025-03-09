@@ -34,7 +34,7 @@ bitstream_read_bits_unsafe(Bit_Stream *bitstream, u8 bits)
 	for (;bits >= 8;)
 	{
 		result <<= 8;
-		result |= u64(bitstream->buffer.data[bitstream->pos.byte_index]);
+		result |= (u64)(bitstream->buffer.data[bitstream->pos.byte_index]);
 		bitstream->pos.byte_index += 1;
 		bits -= 8;
 	}
@@ -42,7 +42,7 @@ bitstream_read_bits_unsafe(Bit_Stream *bitstream, u8 bits)
 	if (bits != 0 && bits <= bitstream->pos.bits_left)
 	{
 		result <<= bits;
-		result |= u64((bitstream->buffer.data[bitstream->pos.byte_index] >> (bitstream->pos.bits_left - bits)) & ((1 << bits) - 1));
+		result |= (u64)((bitstream->buffer.data[bitstream->pos.byte_index] >> (bitstream->pos.bits_left - bits)) & ((1 << bits) - 1));
 		bitstream->pos.bits_left -= bits;
 		if (bitstream->pos.bits_left == 0)
 		{
@@ -57,8 +57,8 @@ bitstream_read_bits_unsafe(Bit_Stream *bitstream, u8 bits)
 internal i64
 sign_extend(i64 value, u8 bits_width)
 {
-	i64 value_sign_bit = i64(value & (1ull << (bits_width - 1)));
-	i64 mask_bits = i64(value_sign_bit << (64 - bits_width)) >> (64 - bits_width);
+	i64 value_sign_bit = (i64)(value & (1ull << (bits_width - 1)));
+	i64 mask_bits = (i64)(value_sign_bit << (64 - bits_width)) >> (64 - bits_width);
 	i64 result = value | mask_bits;
 	return result;
 }
@@ -66,7 +66,7 @@ sign_extend(i64 value, u8 bits_width)
 internal i64
 bitstream_read_sample_unencoded(Bit_Stream *bitstream, u8 sample_bit_depth, u8 shift_bits = 0)
 {
-	i64 sample_value = i64(bitstream_read_bits_unsafe(bitstream, sample_bit_depth) << shift_bits);
+	i64 sample_value = (i64)(bitstream_read_bits_unsafe(bitstream, sample_bit_depth) << shift_bits);
 	u8 bits_width = sample_bit_depth + shift_bits;
 	sample_value = sign_extend(sample_value, bits_width);
 	return sample_value;
@@ -87,7 +87,7 @@ bitstream_read_u16be(Bit_Stream *bitstream)
 {
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
-	u16 result = (u16(bitstream->buffer.data[bitstream->pos.byte_index]) << 8) | u16(bitstream->buffer.data[bitstream->pos.byte_index + 1]);
+	u16 result = ((u16)(bitstream->buffer.data[bitstream->pos.byte_index]) << 8) | (u16)(bitstream->buffer.data[bitstream->pos.byte_index + 1]);
 	bitstream->pos.byte_index += 2;
 	return result;
 }
@@ -97,7 +97,7 @@ bitstream_read_u16le(Bit_Stream *bitstream)
 {
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
-	u16 result = (u16(bitstream->buffer.data[bitstream->pos.byte_index + 1]) << 8) | u16(bitstream->buffer.data[bitstream->pos.byte_index]);
+	u16 result = ((u16)(bitstream->buffer.data[bitstream->pos.byte_index + 1]) << 8) | (u16)(bitstream->buffer.data[bitstream->pos.byte_index]);
 	bitstream->pos.byte_index += 2;
 	return result;
 }
@@ -110,7 +110,7 @@ bitstream_read_u24be(Bit_Stream *bitstream)
 	
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
-	u32 result = (u32(buffer->data[byte_index]) << 16) | (u32(buffer->data[byte_index + 1]) << 8) | u32(buffer->data[byte_index + 2]);
+	u32 result = ((u32)(buffer->data[byte_index]) << 16) | ((u32)(buffer->data[byte_index + 1]) << 8) | (u32)(buffer->data[byte_index + 2]);
 	bitstream->pos.byte_index += 3;
 	return result;
 }
@@ -123,10 +123,10 @@ bitstream_read_u32be(Bit_Stream *bitstream)
 	
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
-	u32 result = ((u32(buffer->data[byte_index]) << 24)    | 
-		(u32(buffer->data[byte_index + 1]) << 16)|
-		(u32(buffer->data[byte_index + 2]) << 8) |
-		u32(buffer->data[byte_index + 3]));
+	u32 result = (((u32)(buffer->data[byte_index]) << 24)    | 
+		((u32)(buffer->data[byte_index + 1]) << 16)|
+		((u32)(buffer->data[byte_index + 2]) << 8) |
+		(u32)(buffer->data[byte_index + 3]));
 	bitstream->pos.byte_index += 4;
 	return result;
 }
@@ -139,10 +139,10 @@ bitstream_read_u32le(Bit_Stream *bitstream)
 	
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
-	u32 result = ((u32(buffer->data[byte_index + 3]) << 24) | 
-		(u32(buffer->data[byte_index + 2]) << 16) |
-		(u32(buffer->data[byte_index + 1]) << 8)  |
-		(u32(buffer->data[byte_index + 0]) << 0));
+	u32 result = (((u32)(buffer->data[byte_index + 3]) << 24) | 
+		((u32)(buffer->data[byte_index + 2]) << 16) |
+		((u32)(buffer->data[byte_index + 1]) << 8)  |
+		((u32)(buffer->data[byte_index + 0]) << 0));
 	bitstream->pos.byte_index += 4;
 	
 	return result;
@@ -151,8 +151,6 @@ bitstream_read_u32le(Bit_Stream *bitstream)
 internal u64
 bitstream_read_u64be(Bit_Stream *bitstream)
 {
-	Buffer *buffer = &bitstream->buffer;
-	
 	// NOTE(fakhri): make sure we are at byte boundary
 	assert(bitstream->pos.bits_left == 8);
 	u64 result = (((u64)bitstream_read_u32be(bitstream) << 32) | (u64)bitstream_read_u32be(bitstream));
@@ -181,7 +179,7 @@ bitstream_skip_bits(Bit_Stream *bitstream, u64 bits)
 		bitstream->pos.bits_left = 8;
 	}
 	
-	bitstream->pos.bits_left -= u8(bits);
+	bitstream->pos.bits_left -= (u8)(bits);
 }
 
 internal Buffer

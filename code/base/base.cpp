@@ -12,7 +12,7 @@ _debug_log(i32 flags, const char *file, int line, const char *format, ...)
     name = "Warning";
   }
   
-  Memory_Checkpoint_Scoped scratch(begin_scratch(0, 0));
+	Memory_Checkpoint scratch = begin_scratch(0, 0);
   va_list args;
   va_start(args, format);
   String8 formated_log = str8_fv(scratch.arena, format, args);
@@ -31,4 +31,5 @@ _debug_log(i32 flags, const char *file, int line, const char *format, ...)
     OutputDebugStringA("\n");
   }
 	#endif
+		end_scratch(scratch);
 }

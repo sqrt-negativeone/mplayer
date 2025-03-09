@@ -135,4 +135,23 @@ struct Render_Group
 	Render_Entry_Textured_Rects *textured_rects;
 };
 
+
+enum Render_Entry_Kind
+{
+	Render_Entry_Kind_Render_Entry_Clear_Color,
+	Render_Entry_Kind_Render_Entry_Textured_Rects,
+};
+
+struct Render_Entry_Header
+{
+	Render_Entry_Kind kind;
+};
+
+struct Render_Entry_Clear_Color
+{
+	V4_F32 color;
+};
+
+
+
 #endif //MPLAYER_RENDERER_H

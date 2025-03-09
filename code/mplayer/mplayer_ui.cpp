@@ -986,9 +986,9 @@ ui_element(String8 string, UI_Element_Flags flags = 0)
 			UI_Element *p = g_ui->parents.stack[i];
 			if (p->computed_rect.min_x && p->computed_rect.min_y && p->computed_rect.max_x && p->computed_rect.max_y)
 			{
-				V2_F32 p_pos = range_center(p->computed_rect);
+				V2_F32 p_pos = range2f32_center(p->computed_rect);
 				// NOTE(fakhri): start from the center of the parent
-				result->rect = range_center_dim(p_pos, vec2(0, 0));
+				result->rect = range2f32_center_dim(p_pos, v2(0, 0));
 				break;
 			}
 		}
@@ -1025,14 +1025,14 @@ ui_push_default_style()
 	ui_push_font(g_ui->def_font);
 	ui_push_font_sizes(20.0f);
 	ui_push_texture(NULL_TEXTURE);
-	ui_push_text_color(vec4(1));
-	ui_push_texture_tint_color(vec4(1));
-	ui_push_background_color(vec4(0));
-	ui_push_border_color(vec4(0,0,0,1));
+	ui_push_text_color(v4d(1));
+	ui_push_texture_tint_color(v4d(1));
+	ui_push_background_color(v4d(0));
+	ui_push_border_color(v4(0,0,0,1));
 	ui_push_border_thickness(0);
 	ui_push_roundness(0);
 	ui_push_flags(0);
-	ui_push_scroll_step(vec2(0, -50));
+	ui_push_scroll_step(v2(0, -50));
 	ui_push_hover_cursor(Cursor_Arrow);
 	ui_push_childs_axis(Axis2_Y);
 	ui_push_layer(UI_Layer_Default);
@@ -1123,7 +1123,7 @@ ui_interaction_from_element(UI_Element *element)
 	{
 		if (!ui_id_is_null(p->id) && has_flag(p->flags, UI_FLAG_Clip))
 		{
-			interaction_rect = range_intersection(interaction_rect, p->computed_rect);
+			interaction_rect = range2f32_intersection(interaction_rect, p->computed_rect);
 		}
 	}
 	
@@ -1167,7 +1167,7 @@ ui_interaction_from_element(UI_Element *element)
 	}
 	
 	V2_F32 mouse_p = g_ui->mouse_pos;
-	b32 mouse_over = !is_in_range(ignored_rect, mouse_p) && is_in_range(interaction_rect, mouse_p) && !ignore;
+	b32 mouse_over = !range2f32_is_inside(ignored_rect, mouse_p) && range2f32_is_inside(interaction_rect, mouse_p) && !ignore;
 	
 	// TODO(fakhri): Bug: 
 	// - click an element
@@ -1182,7 +1182,7 @@ ui_interaction_from_element(UI_Element *element)
 		next = e->next;
 		b32 consumed = 0;
 		// NOTE(fakhri): handle ctx menu close events
-		if (g_ui->ctx_menu_open && !is_in_range(g_ui->ctx_menu_root->computed_rect, mouse_p))
+		if (g_ui->ctx_menu_open && !range2f32_is_inside(g_ui->ctx_menu_root->computed_rect, mouse_p))
 		{
 			if (e->kind == Event_Kind_Mouse_Key)
 			{
@@ -1378,7 +1378,7 @@ UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
 	// NOTE(fakhri): draw cursor
 	if (ui_id_is_equal(g_ui->selected_id, element->id))
 	{
-		V2_F32 pos = range_center(element->rect);
+		V2_F32 pos = range2f32_center(element->rect);
 		f32 blink_t = (sin_f(2 * PI32 * (g_input->time - g_ui->recent_click_time)) + 1) / 2;
 		if (g_input->time - g_ui->recent_click_time > 5)
 		{
@@ -1387,9 +1387,9 @@ UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
 		
 		V4_F32 cursor_color = lerp(element->background_color,
 			blink_t,
-			vec4(0, 0, 0, 1));
+			v4(0, 0, 0, 1));
 		
-		V3_F32 cursor_pos = vec3(pos.x + data->cursor_offset_x,
+		V3_F32 cursor_pos = v3(pos.x + data->cursor_offset_x,
 			pos.y,
 			(f32)element->layer);
 		
@@ -1408,13 +1408,13 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(text_input);
 	if (interaction.hover)
 	{
-		text_input->background_color = vec4(0.1f, 0.1f, 0.1f, 1);
+		text_input->background_color = v4(0.1f, 0.1f, 0.1f, 1);
 	}
 	
 	if (interaction.selected)
 	{
 		mplayer_animate_next_frame();
-		text_input->background_color = vec4(0.1f, 0.1f, 0.1f, 1);
+		text_input->background_color = v4(0.1f, 0.1f, 0.1f, 1);
 		
 		Font *font = ui_stack_top(g_ui->fonts);
 		f32 font_size = ui_stack_top(g_ui->font_sizes);
@@ -1422,7 +1422,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 		V2_F32 text_dim = fnt_compute_text_dim(font, font_size, *buffer);
 		if (interaction.clicked_left || interaction.pressed_left)
 		{
-			V2_F32 pos = range_center(text_input->rect);
+			V2_F32 pos = range2f32_center(text_input->rect);
 			f32 test_x = pos.x - 0.5f * text_dim.width;
 			g_ui->input_cursor = 0;
 			
@@ -1520,7 +1520,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 		
 		UI_Input_Field_Draw_Data *draw_data = m_arena_push_struct_z(g_ui->frame_arena, UI_Input_Field_Draw_Data);
 		draw_data->cursor_offset_x = fnt_compute_text_dim(font, font_size, str8(buffer->str, MIN(buffer->len, g_ui->input_cursor))).width - 0.5f * text_dim.width;
-		draw_data->cursor_dim = vec2(2.1f, 1.25f * text_dim.height);
+		draw_data->cursor_dim = v2(2.1f, 1.25f * text_dim.height);
 		ui_element_set_draw_proc(text_input, ui_input_field_default_draw, draw_data);
 	}
 	
@@ -1546,14 +1546,14 @@ UI_CUSTOM_DRAW_PROC(ui_slider_default_draw_proc)
 	UI_Slider_Draw_Data *slider_data = (UI_Slider_Draw_Data *)element->custom_draw_data;
 	
 	V2_F32 slider_dim = element->dim;
-	slider_dim.height = lerp(element->dim.height, element->hot_t, 1.3f * element->dim.height);
-	slider_dim.height = lerp(slider_dim.height, element->active_t, 0.9f * element->dim.height);
+	slider_dim.height = lerpf(element->dim.height, element->hot_t, 1.3f * element->dim.height);
+	slider_dim.height = lerpf(slider_dim.height, element->active_t, 0.9f * element->dim.height);
 	
-	V2_F32 slider_pos = range_center(element->rect);
+	V2_F32 slider_pos = range2f32_center(element->rect);
 	
 	push_rect(group, element->rect, element->background_color, element->roundness);
 	
-	V4_F32 progress_bg_color = vec4(0.5f, 0.5f, 0.5f, 1);
+	V4_F32 progress_bg_color = v4(0.5f, 0.5f, 0.5f, 1);
 	
 	V2_F32 full_progress_dim = slider_dim;
 	full_progress_dim.width  *= 0.99f;
@@ -1561,9 +1561,9 @@ UI_CUSTOM_DRAW_PROC(ui_slider_default_draw_proc)
 	
 	push_rect(group, slider_pos, full_progress_dim, progress_bg_color, 5);
 	
-	Range2_F32 filled_progress_rect = range_center_dim(slider_pos, full_progress_dim);
+	Range2_F32 filled_progress_rect = range2f32_center_dim(slider_pos, full_progress_dim);
 	filled_progress_rect.max_x -= full_progress_dim.width * (1 - slider_data->percent);
-	V4_F32 filled_progress_color = vec4(1, 1, 1, 1);
+	V4_F32 filled_progress_color = v4(1, 1, 1, 1);
 	push_rect(group, filled_progress_rect, filled_progress_color, 5);
 	
 }
@@ -1573,12 +1573,12 @@ ui_slider_f32(String8 string, f32 *val, f32 min, f32 max)
 {
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *slider = ui_element(string, UI_FLAG_Draw_Background | UI_FLAG_Clickable);
-	f32 percent = map_into_range_zo(min, *val, max);
+	f32 percent = map_into_range01(min, *val, max);
 	
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(slider);
 	if (interaction.pressed_left)
 	{
-		percent = map_into_range_zo(slider->computed_rect.min_x, 
+		percent = map_into_range01(slider->computed_rect.min_x, 
 			g_ui->mouse_pos.x,
 			slider->computed_rect.max_x);
 	}
@@ -1596,12 +1596,12 @@ ui_slider_u64(String8 string, u64 *val, u64 min, u64 max)
 {
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *slider = ui_element(string, UI_FLAG_Draw_Background | UI_FLAG_Clickable);
-	f32 percent = (f32)map_into_range_zo((f64)min, (f64)*val, (f64)max);
+	f32 percent = (f32)map_into_range01_f64((f64)min, (f64)*val, (f64)max);
 	
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(slider);
 	if (interaction.pressed_left)
 	{
-		percent = map_into_range_zo(slider->computed_rect.min_x, 
+		percent = map_into_range01(slider->computed_rect.min_x, 
 			g_ui->mouse_pos.x,
 			slider->computed_rect.max_x);
 	}
@@ -1625,12 +1625,12 @@ ui_layout_compute_preorder_sizes(UI_Element *node, Axis2 axis)
 	{
 		case UI_Size_Kind_Pixel:
 		{
-			node->computed_dim.v[axis] = node->size[axis].value;
+			node->computed_dim.e[axis] = node->size[axis].value;
 		} break;
 		
 		case UI_Size_Kind_Text_Dim:
 		{
-			node->computed_dim.v[axis] = fnt_compute_text_dim(node->font, node->font_size, node->text).v[axis];
+			node->computed_dim.e[axis] = fnt_compute_text_dim(node->font, node->font_size, node->text).e[axis];
 		} break;
 		case UI_Size_Kind_Percent:
 		{
@@ -1645,7 +1645,7 @@ ui_layout_compute_preorder_sizes(UI_Element *node, Axis2 axis)
 			}
 			
 			assert(p);
-			node->computed_dim.v[axis] = node->size[axis].value * p->computed_dim.v[axis];
+			node->computed_dim.e[axis] = node->size[axis].value * p->computed_dim.e[axis];
 		} break;
 		case UI_Size_Kind_By_Childs: break;
 	}
@@ -1674,18 +1674,18 @@ ui_layout_compute_postorder_sizes(UI_Element *node, Axis2 axis)
 			{
 				for (UI_Element *child = node->first; child; child = child->next)
 				{
-					value += child->computed_dim.v[axis];
+					value += child->computed_dim.e[axis];
 				}
 			}
 			else
 			{
 				for (UI_Element *child = node->first; child; child = child->next)
 				{
-					value = MAX(value, child->computed_dim.v[axis]);
+					value = MAX(value, child->computed_dim.e[axis]);
 				}
 			}
 			
-			node->computed_dim.v[axis] = value;
+			node->computed_dim.e[axis] = value;
 		} break;
 		
 		case UI_Size_Kind_Pixel:
@@ -1701,7 +1701,7 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 	if (!node->first) return;
 	
 	UI_Element_Persistent_State *persistent_state = ui_get_persistent_state_for_element(node->id);
-	f32 parent_size = node->computed_dim.v[axis];
+	f32 parent_size = node->computed_dim.e[axis];
 	if (!has_flag(node->flags, UI_FLAG_OverflowX << axis))
 	{
 		if (axis == node->child_layout_axis)
@@ -1712,8 +1712,8 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			{
 				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 				
-				total_fixup += child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
-				childs_sum_size += child->computed_dim.v[axis];
+				total_fixup += child->computed_dim.e[axis] * (1 - child->size[axis].strictness);
+				childs_sum_size += child->computed_dim.e[axis];
 			}
 			
 			if (childs_sum_size > parent_size && total_fixup > 0)
@@ -1724,10 +1724,10 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 				{
 					if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 					
-					f32 child_fixup = child->computed_dim.v[axis] * (1 - child->size[axis].strictness);
+					f32 child_fixup = child->computed_dim.e[axis] * (1 - child->size[axis].strictness);
 					f32 balanced_child_fixup = child_fixup * extra_size / total_fixup;
 					child_fixup = CLAMP(0, balanced_child_fixup, child_fixup);
-					child->computed_dim.v[axis] -= child_fixup;
+					child->computed_dim.e[axis] -= child_fixup;
 				}
 			}
 		}
@@ -1737,9 +1737,9 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			{
 				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
 				
-				if (child->computed_dim.v[axis] > parent_size)
+				if (child->computed_dim.e[axis] > parent_size)
 				{
-					child->computed_dim.v[axis] = MAX(child->size[axis].strictness * child->computed_dim.v[axis], parent_size);
+					child->computed_dim.e[axis] = MAX(child->size[axis].strictness * child->computed_dim.e[axis], parent_size);
 				}
 			}
 		}
@@ -1750,13 +1750,13 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 		if (axis == node->child_layout_axis)
 		{
 			f32 p = 0;
-			node->child_bounds.v[axis] = 0;
+			node->child_bounds.e[axis] = 0;
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
 				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
-				child->rel_top_left_pos.v[axis] = p;
-				p += (axis==Axis2_Y? -1:1)*child->computed_dim.v[axis];
-				node->child_bounds.v[axis] += child->computed_dim.v[axis];
+				child->rel_top_left_pos.e[axis] = p;
+				p += (axis==Axis2_Y? -1:1)*child->computed_dim.e[axis];
+				node->child_bounds.e[axis] += child->computed_dim.e[axis];
 			}
 		}
 		else
@@ -1764,15 +1764,15 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			for (UI_Element *child = node->first; child; child = child->next)
 			{
 				if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
-				child->rel_top_left_pos.v[axis] = 0;
-				node->child_bounds.v[axis] = MAX(child->computed_dim.v[axis], child->computed_dim.v[axis]);
+				child->rel_top_left_pos.e[axis] = 0;
+				node->child_bounds.e[axis] = MAX(child->computed_dim.e[axis], child->computed_dim.e[axis]);
 			}
 		}
 		
 		// NOTE(fakhri): compute on screen position from relative positions
-		f32 parent_origin = node->computed_top_left.v[axis];
+		f32 parent_origin = node->computed_top_left.e[axis];
 		if (persistent_state)
-			parent_origin += ((axis == Axis2_Y)? 1:-1) * persistent_state->view_scroll.v[axis];
+			parent_origin += ((axis == Axis2_Y)? 1:-1) * persistent_state->view_scroll.e[axis];
 		for (UI_Element *child = node->first; child; child = child->next)
 		{
 			if (has_flag(child->flags, UI_FLAG_FloatX<<axis)) continue;
@@ -1780,10 +1780,10 @@ ui_layout_fix_sizes_violations(UI_Element *node, Axis2 axis)
 			if (axis == Axis2_Y)
 				start_offset -= child->computed_dim.height;
 			
-			child->computed_rect.minp.v[axis] = start_offset + child->rel_top_left_pos.v[axis];
-			child->computed_rect.maxp.v[axis]= child->computed_rect.minp.v[axis] + child->computed_dim.v[axis];
+			child->computed_rect.minp.e[axis] = start_offset + child->rel_top_left_pos.e[axis];
+			child->computed_rect.maxp.e[axis]= child->computed_rect.minp.e[axis] + child->computed_dim.e[axis];
 			
-			child->computed_top_left.v[axis] = (axis == Axis2_X)? child->computed_rect.min_x:child->computed_rect.max_y;
+			child->computed_top_left.e[axis] = (axis == Axis2_X)? child->computed_rect.min_x:child->computed_rect.max_y;
 		}
 	}
 	
@@ -1815,7 +1815,7 @@ ui_draw_elements(Render_Group *group, UI_Element *node)
 		render_group_add_cull_range(group, node->rect);
 	}
 	
-	V3_F32 pos = vec3(range_center(node->rect), (f32)node->layer);
+	V3_F32 pos = v3v(range2f32_center(node->rect), (f32)node->layer);
 	// NOTE(fakhri): only render the leaf nodes
 	if (has_flag(node->flags, UI_FLAG_Draw_Background))
 	{
@@ -1882,8 +1882,8 @@ ui_animate_elements(UI_Element *node)
 		//- NOTE(fakhri): animate position
 		if (has_flag(node->flags, UI_FLAG_Animate_Pos))
 		{
-			V2_F32 pos = range_center(node->rect);
-			V2_F32 target_pos = range_center(node->computed_rect);
+			V2_F32 pos = range2f32_center(node->rect);
+			V2_F32 target_pos = range2f32_center(node->computed_rect);
 			
 			pos += (target_pos - pos) * step42;
 			
@@ -1899,11 +1899,11 @@ ui_animate_elements(UI_Element *node)
 			}
 			else mplayer_animate_next_frame();
 			
-			node->rect = range_center_dim(pos, node->dim);
+			node->rect = range2f32_center_dim(pos, node->dim);
 		}
 		else
 		{
-			node->rect = range_center_dim(range_center(node->computed_rect), node->dim);
+			node->rect = range2f32_center_dim(range2f32_center(node->computed_rect), node->dim);
 		}
 		
 		//- NOTE(fakhri): animate dim
@@ -1962,7 +1962,7 @@ ui_animate_elements(UI_Element *node)
 	node->active_t += (!!is_active - node->active_t) * step69;
 	node->hot_t    += (!!is_hot - node->hot_t) * step69;
 	
-	node->rect = range_center_dim(range_center(node->rect), node->dim);
+	node->rect = range2f32_center_dim(range2f32_center(node->rect), node->dim);
 	
 	for (UI_Element *child = node->first; child; child = child->next)
 	{
@@ -2094,10 +2094,9 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 		ui_next_height(ui_size_by_childs(1));
 		g_ui->ctx_menu_root = ui_element(str8_lit("ui-ctx-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating|UI_FLAG_Animate_Dim);
 		g_ui->ctx_menu_root->computed_top_left = g_ui->ctx_menu_origin;
-		g_ui->ctx_menu_root->computed_rect = range_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
+		g_ui->ctx_menu_root->computed_rect = range2f32_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
 			g_ui->ctx_menu_root->computed_dim);
 	}
-	
 }
 
 
@@ -2121,17 +2120,17 @@ ui_end()
 		g_ui->root->size[Axis2_X] = ui_size_pixel(g_ui->group->render_ctx->draw_dim.x, 1);
 		g_ui->root->size[Axis2_Y] = ui_size_pixel(g_ui->group->render_ctx->draw_dim.y, 1);
 		
-		g_ui->root->computed_top_left = vec2(-0.5f * g_ui->group->render_ctx->draw_dim.x, 
+		g_ui->root->computed_top_left = v2(-0.5f * g_ui->group->render_ctx->draw_dim.x, 
 			+0.5f * g_ui->group->render_ctx->draw_dim.y);
 		
-		g_ui->root->computed_rect = range_topleft_dim(g_ui->root->computed_top_left, g_ui->root->computed_dim);
+		g_ui->root->computed_rect = range2f32_topleft_dim(g_ui->root->computed_top_left, g_ui->root->computed_dim);
 		
 	}
 	
 	if (g_ui->modal_menu_root)
 	{
-		g_ui->modal_menu_root->computed_rect = range_center_dim(vec2(0, 0), g_ui->root->computed_dim);
-		g_ui->modal_menu_root->computed_top_left = vec2(g_ui->modal_menu_root->computed_rect.min_x, g_ui->modal_menu_root->computed_rect.max_y);
+		g_ui->modal_menu_root->computed_rect = range2f32_center_dim(v2(0, 0), g_ui->root->computed_dim);
+		g_ui->modal_menu_root->computed_top_left = v2(g_ui->modal_menu_root->computed_rect.min_x, g_ui->modal_menu_root->computed_rect.max_y);
 	}
 	
 	ui_update_layout(g_ui->root);

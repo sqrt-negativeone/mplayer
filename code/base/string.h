@@ -1,7 +1,9 @@
-/* date = January 19th 2025 4:21 pm */
+/* date = December 26th 2024 1:52 pm */
 
 #ifndef STRING_H
 #define STRING_H
+
+typedef struct String8 String8;
 
 struct String8
 {
@@ -13,23 +15,28 @@ struct String8
 	u64 len;
 };
 
+typedef struct String16 String16;
 struct String16
 {
 	u16 *str;
 	u64 len;
 };
 
+typedef struct Decoded_Codepoint Decoded_Codepoint;
 struct Decoded_Codepoint
 {
   u32 codepoint;
   u32 advance;
 };
 
+typedef struct String8_Node String8_Node;
 struct String8_Node
 {
 	String8_Node *next;
 	String8 str;
 };
+
+typedef struct String8_List String8_List;
 struct String8_List
 {
 	String8_Node *first;
@@ -37,6 +44,8 @@ struct String8_List
 	u64 count;
 	u64 total_len;
 };
+
+typedef struct String_Join String_Join;
 struct String_Join
 {
   String8 pre;
@@ -44,7 +53,7 @@ struct String_Join
   String8 post;
 };
 
-typedef u32 Match_Flags;
+typedef u32 Mch_Flags;
 enum
 {
   MatchFlag_CaseInsensitive  = (1<<0),
@@ -54,6 +63,7 @@ enum
   MatchFlag_SkipFirst        = (1<<4),
 };
 
+typedef  struct String8_UTF8_Iterator String8_UTF8_Iterator;
 struct String8_UTF8_Iterator
 {
 	u8 *str;
@@ -107,17 +117,18 @@ internal String8 str8_skip_first(String8 str, u64 min);
 internal String8 str8_chop_last(String8 str, u64 nmax);
 internal String8 prefix8(String8 str, u64 size);
 internal String8 suffix8(String8 str, u64 size);
+internal String8 str8_skip_leading_spaces(String8 str);
 
 
-//- NOTE(fakhri): Matching
-internal b32 str8_match(String8 a, String8 b, Match_Flags flags);
-internal b32 str8_is_subsequence(String8 a, String8 b, Match_Flags flags);
-internal u64 find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_Flags flags);
-internal b32 str8_starts_with(String8 a, String8 prefix, Match_Flags flags);
-internal b32 str8_ends_with(String8 a, String8 b, Match_Flags flags);
+//- NOTE(fakhri): Mching
+internal b32 str8_match(String8 a, String8 b, Mch_Flags flags);
+internal b32 str8_is_subsequence(String8 a, String8 b, Mch_Flags flags);
+internal u64 find_substr8(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags);
+internal b32 str8_starts_with(String8 a, String8 prefix, Mch_Flags flags);
+internal b32 str8_ends_with(String8 a, String8 b, Mch_Flags flags);
 internal u64 string_find_first_non_whitespace(String8 str);
-internal u64 string_find_first_whitespace(String8 str);
 internal u64 string_find_first_characer(String8 str, u8 ch);
+internal u64 string_find_first_whitespace(String8 str);
 internal void str8_list_push_node(String8_List *list, String8_Node *node);
 internal void str8_list_push(Memory_Arena *arena, String8_List *list, String8 str);
 internal void str8_list_push_fv(Memory_Arena *arena, String8_List *list, const char *fmt, va_list args);
@@ -125,12 +136,12 @@ internal void str8_list_push_f(Memory_Arena *arena, String8_List *list, const ch
 internal void str8_list_concat(String8_List *list, String8_List *to_push);
 internal String8_List str8_split(Memory_Arena *arena, String8 string, int split_count, String8 *splits);
 internal String8 str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_params);
-
 internal String8 str8_chop_last_slash(String8 string);
-internal String8 str8_chop_last_dot(String8 string);
 
 internal b32 str8_utf8_it_valid(String8_UTF8_Iterator *it);
 internal void str8_utf8_advance(String8_UTF8_Iterator *it);
 internal String8_UTF8_Iterator str8_utf8_iterator(String8 string);
+
+internal u64 u64_from_str8_base10(String8 str);
 
 #endif //STRING_H

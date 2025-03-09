@@ -2,13 +2,15 @@
 #include <time.h>
 
 
+#include "base/base_inc.h"
+#include "base/base_inc.cpp"
+
 #include "mplayer.h"
 #include "mplayer_ui.h"
 
 #include "mplayer_input.cpp"
 
 #include "mplayer_renderer.h"
-#include "mplayer_bitstream.h"
 #include "mplayer_flac.h"
 
 #include "mplayer_font.h"
@@ -386,15 +388,14 @@ struct Mplayer_Context
 #include "third_party/stb_image.h"
 
 #include "mplayer_renderer.cpp"
-#include "mplayer_bitstream.cpp"
 #include "mplayer_flac.cpp"
-
-#include "mplayer_byte_stream.h"
 
 #include "third_party/meow_hash_x64_aesni.h"
 
 global Mplayer_Input *g_input;
 global Mplayer_Context *mplayer_ctx;
+
+#include "byte_stream.h"
 
 //~ NOTE(fakhri): Animation timer stuff
 internal void
@@ -799,7 +800,7 @@ WORK_SIG(decode_texture_data_work)
 	{
 		Buffer texture_data = image->texture_data;
 		if (image->in_disk)
-			texture_data = platform->load_entire_file(image->path, &upload_data->work_arena);
+			texture_data = platform->load_entire_file(&upload_data->work_arena, image->path);
 		
 		if (is_valid(texture_data))
 		{
@@ -894,7 +895,7 @@ mplayer_load_track(Mplayer_Track *track)
 	
 	if (!track->file_loaded)
 	{
-		track->flac_file_buffer = platform->load_entire_file(track->path, &mplayer_ctx->library.track_transient_arena);
+		track->flac_file_buffer = platform->load_entire_file(&mplayer_ctx->library.track_transient_arena, track->path);
 		track->file_loaded = true;
 	}
 	
@@ -998,7 +999,7 @@ fancy_str8(u8 *str, u64 len, f32 max_width = 0, f32 underline_thickness = 0)
 internal void
 draw_circle(Render_Group *group, V2_F32 pos, f32 radius, V4_F32 color)
 {
-	push_rect(group, pos, vec2(2 * radius), color, radius);
+	push_rect(group, pos, v2d(2 * radius), color, radius);
 }
 
 internal void
@@ -1006,51 +1007,51 @@ draw_outline(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color, f32 thic
 {
 	// left
 	push_rect(group,
-		vec3(pos.x - 0.5f * (dim.width - thickness), pos.y, pos.z),
-		vec2(thickness, dim.height),
+		v3(pos.x - 0.5f * (dim.width - thickness), pos.y, pos.z),
+		v2(thickness, dim.height),
 		color);
 	
 	// right
 	push_rect(group,
-		vec3(pos.x + 0.5f * (dim.width - thickness), pos.y, pos.z),
-		vec2(thickness, dim.height),
+		v3(pos.x + 0.5f * (dim.width - thickness), pos.y, pos.z),
+		v2(thickness, dim.height),
 		color);
 	
 	// top
 	push_rect(group,
-		vec3(pos.x, pos.y + 0.5f * (dim.height - thickness), pos.z),
-		vec2(dim.width, thickness),
+		v3(pos.x, pos.y + 0.5f * (dim.height - thickness), pos.z),
+		v2(dim.width, thickness),
 		color);
 	
 	// bottom
 	push_rect(group,
-		vec3(pos.x, pos.y - 0.5f * (dim.height - thickness), pos.z),
-		vec2(dim.width, thickness),
+		v3(pos.x, pos.y - 0.5f * (dim.height - thickness), pos.z),
+		v2(dim.width, thickness),
 		color);
 }
 
 internal void
 draw_outline(Render_Group *group, V2_F32 pos, V2_F32 dim, V4_F32 color, f32 thickness)
 {
-	draw_outline(group, vec3(pos, 0), dim, color, thickness);
+	draw_outline(group, v3v(pos, 0), dim, color, thickness);
 }
 
 internal void
 draw_outline(Render_Group *group, Range2_F32 rect, V4_F32 color, f32 thickness)
 {
-	draw_outline(group, range_center(rect), range_dim(rect), color, thickness);
+	draw_outline(group, range2f32_center(rect), range2f32_dim(rect), color, thickness);
 }
 
 internal void
 draw_outline(Render_Group *group, V2_F32 pos, f32 z, V2_F32 dim, V4_F32 color, f32 thickness)
 {
-	draw_outline(group, vec3(pos, z), dim, color, thickness);
+	draw_outline(group, v3v(pos, z), dim, color, thickness);
 }
 
 internal void
 draw_outline(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color, f32 thickness)
 {
-	draw_outline(group, range_center(rect), z, range_dim(rect), color, thickness);
+	draw_outline(group, range2f32_center(rect), z, range2f32_dim(rect), color, thickness);
 }
 
 #include "mplayer_ui.cpp"
@@ -1189,7 +1190,7 @@ internal void
 mplayer_load_queue()
 {
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
-	Buffer queue_content = platform->load_entire_file(MPLAYER_QUEUE_FILENAME, mplayer_ctx->frame_arena);
+	Buffer queue_content = platform->load_entire_file(mplayer_ctx->frame_arena, MPLAYER_QUEUE_FILENAME);
 	if (queue_content.size)
 	{
 		assert(queue_content.size == sizeof(Mplayer_Queue));
@@ -1674,7 +1675,7 @@ mplayer_load_indexed_library()
 	mplayer_reset_library();
 	
 	Mplayer_Library *library = &mplayer_ctx->library;
-	Buffer index_content = platform->load_entire_file(MPLAYER_INDEX_FILENAME, &library->arena);
+	Buffer index_content = platform->load_entire_file(&library->arena, MPLAYER_INDEX_FILENAME);
 	if (is_valid(index_content))
 	{
 		Byte_Stream bs = make_byte_stream(index_content);
@@ -2042,7 +2043,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 			Cuesheet_Track *current_cuesheet_track = 0;
 			
 			// TODO(fakhri): parse cue file
-			String8 content = to_string(platform->load_entire_file(info.path, temp_mem.arena));
+			String8 content = to_string(platform->load_entire_file(temp_mem.arena, info.path));
 			
 			for (u32 line_start_offset = 0; line_start_offset < content.len;)
 			{
@@ -2328,7 +2329,7 @@ mplayer_load_settings()
 {
 	// TODO(fakhri): save the config in user directory
 	String8 config_path = SETTINGS_FILE_NAME;
-	Buffer config_content = platform->load_entire_file(config_path, mplayer_ctx->frame_arena);
+	Buffer config_content = platform->load_entire_file(mplayer_ctx->frame_arena, config_path);
 	
 	if (config_content.size)
 	{
@@ -2661,10 +2662,10 @@ mplayer_ui_track_item(Mplayer_Track_ID track_id)
 	Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 	
-	V4_F32 bg_color = vec4(0.02f, 0.02f,0.02f, 1);
+	V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
 	if (is_equal(track_id, mplayer_queue_current_track_id()))
 	{
-		bg_color = vec4(0, 0, 0, 1);
+		bg_color = v4(0, 0, 0, 1);
 	}
 	
 	ui_next_background_color(bg_color);
@@ -2711,14 +2712,14 @@ mplayer_ui_album_item(Mplayer_Album_ID album_id)
 	if (image_ready)
 	{
 		flags |= UI_FLAG_Draw_Image;
-		ui_next_texture_tint_color(vec4(1, 1, 1, 0.35f));
+		ui_next_texture_tint_color(v4(1, 1, 1, 0.35f));
 		ui_next_texture(image->texture);
 	}
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
 		//ui_next_background_color(vec4(1, 1, 1, 0.35f));
-		ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
+		ui_next_background_color(v4(0.25f, 0.25f, 0.25f, 0.35f));
 	}
 	
 	ui_next_hover_cursor(Cursor_Hand);
@@ -2733,14 +2734,14 @@ mplayer_ui_album_item(Mplayer_Album_ID album_id)
 	
 	if (interaction.hover && image_ready)
 	{
-		album_el->texture_tint_color = vec4(1, 1, 1, 0.9f);
+		album_el->texture_tint_color = v4(1, 1, 1, 0.9f);
 	}
 	
 	ui_parent(album_el)
 	{
 		ui_next_width(ui_size_percent(1, 1));
 		ui_next_height(ui_size_pixel(50, 1));
-		ui_next_background_color(vec4(0.3f, 0.3f, 0.3f, 0.3f));
+		ui_next_background_color(v4(0.3f, 0.3f, 0.3f, 0.3f));
 		ui_next_roundness(5);
 		ui_element_f(UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
 			STR8_EXPAND(album->name), album);
@@ -2753,7 +2754,7 @@ mplayer_ui_playlist_item(Mplayer_Playlist_ID playlist_id)
 	Mplayer_Playlist *playlist = mplayer_playlist_by_id(&mplayer_ctx->playlists, playlist_id);
 	
 	UI_Element_Flags flags = UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim | UI_FLAG_Clickable | UI_FLAG_Clip | UI_FLAG_Draw_Background;
-	ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
+	ui_next_background_color(v4(0.25f, 0.25f, 0.25f, 0.35f));
 	
 	ui_next_width(ui_size_percent(1,1));
 	ui_next_height(ui_size_percent(1,1));
@@ -2767,7 +2768,7 @@ mplayer_ui_playlist_item(Mplayer_Playlist_ID playlist_id)
 	{
 		ui_next_width(ui_size_percent(1, 1));
 		ui_next_height(ui_size_pixel(50, 1));
-		ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 0.5f));
+		ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 0.5f));
 		ui_next_roundness(5);
 		ui_element_f(UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_playlist_name_%p", 
 			STR8_EXPAND(playlist->name), playlist);
@@ -2787,13 +2788,13 @@ mplayer_ui_aritst_item(Mplayer_Artist_ID artist_id)
 	if (image_ready)
 	{
 		flags |= UI_FLAG_Draw_Image;
-		ui_next_texture_tint_color(vec4(1.f, 1.f, 1.f, 0.35f));
+		ui_next_texture_tint_color(v4(1.f, 1.f, 1.f, 0.35f));
 		ui_next_texture(image->texture);
 	}
 	else
 	{
 		flags |= UI_FLAG_Draw_Background;
-		ui_next_background_color(vec4(0.25f, 0.25f, 0.25f, 0.35f));
+		ui_next_background_color(v4(0.25f, 0.25f, 0.25f, 0.35f));
 	}
 	
 	ui_next_hover_cursor(Cursor_Hand);
@@ -2810,7 +2811,7 @@ mplayer_ui_aritst_item(Mplayer_Artist_ID artist_id)
 	}
 	if (interaction.hover && image_ready)
 	{
-		artist_el->texture_tint_color = vec4(1, 1, 1, 1);
+		artist_el->texture_tint_color = v4(1, 1, 1, 1);
 	}
 	
 	ui_parent(artist_el)
@@ -2842,7 +2843,7 @@ mplayer_ui_side_bar_button(String8 string, Mplayer_Mode target_mode)
 		{
 			ui_next_width(ui_size_pixel(5, 1));
 			ui_next_height(ui_size_percent(0.9f, 1));
-			ui_next_background_color(vec4(1, 0, 0, 1));
+			ui_next_background_color(v4(1, 0, 0, 1));
 			ui_next_roundness(2.5);
 			ui_next_layer(UI_Layer_Indicators);
 			ui_element(str8_lit("mode-indicator"), UI_FLAG_Draw_Background | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim);
@@ -2916,7 +2917,7 @@ mplayer_load_playlists(Mplayer_Playlists *playlists)
 {
 	mplayer_reset_playlists(playlists);
 	
-	Buffer playlists_content = platform->load_entire_file(MPLAYER_PLAYLISTS_PATH, &playlists->arena);
+	Buffer playlists_content = platform->load_entire_file(&playlists->arena, MPLAYER_PLAYLISTS_PATH);
 	if (is_valid(playlists_content))
 	{
 		Byte_Stream bs = make_byte_stream(playlists_content);
@@ -3095,12 +3096,12 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 	
 	Render_Context *render_ctx = mplayer_ctx->render_ctx;
 	
-	Range2_F32 screen_rect = range_center_dim(vec2(0, 0), render_ctx->draw_dim);
-	Render_Group group = begin_render_group(render_ctx, vec2(0, 0), render_ctx->draw_dim, screen_rect);
+	Range2_F32 screen_rect = range2f32_center_dim(v2(0, 0), render_ctx->draw_dim);
+	Render_Group group = begin_render_group(render_ctx, v2(0, 0), render_ctx->draw_dim, screen_rect);
 	
 	M4_Inv proj = group.config.proj;
-	V2_F32 world_mouse_p = (proj.inv * vec4(g_input->mouse_clip_pos)).xy;
-	push_clear_color(render_ctx, vec4(0.005f, 0.005f, 0.005f, 1));
+	V2_F32 world_mouse_p = (proj.inv * v4(g_input->mouse_clip_pos)).xy;
+	push_clear_color(render_ctx, v4(0.005f, 0.005f, 0.005f, 1));
 	
 	if (mplayer_mouse_button_clicked(g_input, Mouse_M4))
 	{
@@ -3121,7 +3122,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		ui_pref_seed({2109487})
 		{
 			ui_ctx_menu(mplayer_ctx->ctx_menu_ids[Track_Context_Menu]) 
-				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.02f, 1.0f))
+				ui_pref_roundness(10) ui_pref_background_color(v4(0.01f, 0.01f, 0.02f, 1.0f))
 				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
 				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
 			{
@@ -3209,10 +3210,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				}
 			}
 			
-			
-			
 			ui_ctx_menu(mplayer_ctx->ctx_menu_ids[Queue_Track_Context_Menu]) 
-				ui_pref_roundness(10) ui_pref_background_color(vec4(0.01f, 0.01f, 0.02f, 1.0f))
+				ui_pref_roundness(10) ui_pref_background_color(v4(0.01f, 0.01f, 0.02f, 1.0f))
 				ui_pref_width(ui_size_by_childs(1)) ui_pref_height(ui_size_by_childs(1))
 				ui_horizontal_layout() ui_padding(ui_size_pixel(10,1))
 			{
@@ -3322,9 +3321,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 			ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 			ui_pref_height(ui_size_by_childs(1)) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 		{
-			ui_next_border_color(vec4(0,0,0,1));
+			ui_next_border_color(v4(0,0,0,1));
 			ui_next_border_thickness(2);
-			ui_next_background_color(vec4(0.01f, 0.01f, 0.01f, 1.0f));
+			ui_next_background_color(v4(0.01f, 0.01f, 0.01f, 1.0f));
 			ui_next_width(ui_size_percent(0.9f, 1));
 			ui_next_height(ui_size_percent(0.9f, 1));
 			ui_next_flags(UI_FLAG_Clip);
@@ -3339,9 +3338,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					
 					ui_spacer_pixels(10, 1);
 					
-					ui_next_border_color(vec4(0,0,0,1));
+					ui_next_border_color(v4(0,0,0,1));
 					ui_next_border_thickness(2);
-					ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1.0f));
+					ui_next_background_color(v4(0.05f, 0.05f, 0.05f, 1.0f));
 					if (ui_input_field(str8_lit("path-input-field"), &mplayer_ctx->path_lister.user_path, sizeof(mplayer_ctx->path_lister.user_path_buffer)))
 					{
 						mplayer_refresh_path_lister_dir(&mplayer_ctx->path_lister);
@@ -3364,20 +3363,20 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 						
 						ui_next_roundness(5);
-						ui_next_background_color(vec4(0.05f, 0.05f,0.05f, 1));
+						ui_next_background_color(v4(0.05f, 0.05f,0.05f, 1));
 						ui_next_hover_cursor(Cursor_Hand);
 						UI_Element *option_el = ui_element_f(flags, "path-option-%.*s", STR8_EXPAND(option_path));
 						Mplayer_UI_Interaction interaction = ui_interaction_from_element(option_el);
 						if (interaction.hover)
 						{
-							option_el->background_color = vec4(0.15f, 0.15f,0.15f, 1);
+							option_el->background_color = v4(0.15f, 0.15f,0.15f, 1);
 						}
 						if (interaction.pressed_left)
 						{
-							option_el->background_color = vec4(0.12f, 0.12f,0.12f, 1);
+							option_el->background_color = v4(0.12f, 0.12f,0.12f, 1);
 							if (interaction.hover)
 							{
-								option_el->background_color = vec4(0.1f, 0.1f,0.1f, 1);
+								option_el->background_color = v4(0.1f, 0.1f,0.1f, 1);
 							}
 						}
 						if (interaction.clicked_left)
@@ -3435,9 +3434,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 			ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 			ui_pref_height(ui_size_by_childs(1)) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 		{
-			ui_next_border_color(vec4(0,0,0,1));
+			ui_next_border_color(v4(0,0,0,1));
 			ui_next_border_thickness(2);
-			ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1.0f));
+			ui_next_background_color(v4(0.05f, 0.05f, 0.05f, 1.0f));
 			ui_next_width(ui_size_percent(0.7f, 1));
 			ui_next_height(ui_size_percent(0.7f, 1));
 			ui_next_flags(UI_FLAG_Clip);
@@ -3457,11 +3456,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				
 				ui_next_height(ui_size_parent_remaining());
 				ui_next_flags(UI_FLAG_Clip);
-				ui_next_background_color(vec4(0.01f, 0.01f, 0.01f, 1));
+				ui_next_background_color(v4(0.01f, 0.01f, 0.01f, 1));
 				ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 					ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 				{
-					ui_for_each_grid_item(str8_lit("library-playlists-select-playlist-grid"), mplayer_ctx->playlists.playlists_count, vec2(200.0f, 200.0f), 10, playlist_index)
+					ui_for_each_grid_item(str8_lit("library-playlists-select-playlist-grid"), mplayer_ctx->playlists.playlists_count, v2(200.0f, 200.0f), 10, playlist_index)
 					{
 						Mplayer_Playlist_ID playlist_id = mplayer_ctx->playlists.playlist_ids[playlist_index];
 						Mplayer_UI_Interaction interaction = mplayer_ui_playlist_item(playlist_id);
@@ -3503,9 +3502,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 			ui_vertical_layout() ui_padding(ui_size_parent_remaining())
 			ui_pref_height(ui_size_by_childs(1)) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
 		{
-			ui_next_border_color(vec4(0,0,0,1));
+			ui_next_border_color(v4(0,0,0,1));
 			ui_next_border_thickness(2);
-			ui_next_background_color(vec4(0.02f, 0.02f, 0.02f, 1.0f));
+			ui_next_background_color(v4(0.02f, 0.02f, 0.02f, 1.0f));
 			ui_next_width(ui_size_percent(0.6f, 1));
 			ui_next_height(ui_size_by_childs(1));
 			ui_next_flags(UI_FLAG_Clip);
@@ -3526,7 +3525,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				{
 					ui_next_height(ui_size_pixel(30, 1));
 					ui_next_roundness(5);
-					ui_next_background_color(vec4(0.05f, 0.05f, 0.05f, 1.0f));
+					ui_next_background_color(v4(0.05f, 0.05f, 0.05f, 1.0f));
 					ui_input_field(str8_lit("new-playlist-name-input-field"), &mplayer_ctx->new_playlist_name, sizeof(mplayer_ctx->new_playlist_name_buffer));
 				}
 				
@@ -3583,13 +3582,13 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		ui_pref_height(ui_size_parent_remaining())
 			ui_horizontal_layout()
 		{
-			ui_next_background_color(vec4(0.015f, 0.015f, 0.015f, 1.0f));
+			ui_next_background_color(v4(0.015f, 0.015f, 0.015f, 1.0f));
 			ui_next_width(ui_size_pixel(150, 1));
-			ui_next_border_color(vec4(0.f, 0.f, 0.f, 1.0f));
+			ui_next_border_color(v4(0.f, 0.f, 0.f, 1.0f));
 			ui_next_border_thickness(2);
 			ui_vertical_layout()
 			{
-				ui_pref_background_color(vec4(0.04f, 0.04f, 0.04f, 1)) ui_pref_text_color(vec4(1, 1, 1, 1))
+				ui_pref_background_color(v4(0.04f, 0.04f, 0.04f, 1)) ui_pref_text_color(v4(1, 1, 1, 1))
 					ui_pref_width(ui_size_percent(1, 1)) ui_pref_height(ui_size_pixel(30, 1)) ui_pref_roundness(15)
 				{
 					ui_spacer_pixels(20, 1);
@@ -3620,7 +3619,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				}
 			}
 			
-			V4_F32 header_bg_color = vec4(0.009f, 0.009f, 0.009f, 1);
+			V4_F32 header_bg_color = v4(0.009f, 0.009f, 0.009f, 1);
 			ui_next_width(ui_size_parent_remaining());
 			ui_vertical_layout()
 			{
@@ -3638,8 +3637,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_font_size(50);
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
@@ -3651,7 +3650,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							u32 selected_artist_id = 0;
-							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer_ctx->library.artists_count, vec2(250.0f, 220.0f), 10, artist_index)
+							ui_for_each_grid_item(str8_lit("library-artists-grid"), mplayer_ctx->library.artists_count, v2(250.0f, 220.0f), 10, artist_index)
 							{
 								Mplayer_Artist_ID artist_id = mplayer_ctx->library.artist_ids[artist_index];
 								mplayer_ui_aritst_item(artist_id);
@@ -3669,8 +3668,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						{
 							ui_spacer_pixels(50, 1);
 							
-							ui_next_background_color(vec4(1, 1, 1, 0));
-							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_background_color(v4(1, 1, 1, 0));
+							ui_next_text_color(v4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
 							ui_next_font_size(50);
 							ui_label(str8_lit("Albums"));
@@ -3679,7 +3678,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
 							
-							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer_ctx->library.albums_count, vec2(300.0f, 300.0f), 10, album_index)
+							ui_for_each_grid_item(str8_lit("library-albums-grid"), mplayer_ctx->library.albums_count, v2(300.0f, 300.0f), 10, album_index)
 							{
 								Mplayer_Album_ID album_id = mplayer_ctx->library.album_ids[album_index];
 								mplayer_ui_album_item(album_id);
@@ -3699,8 +3698,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
@@ -3726,7 +3725,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							ui_for_each_grid_item(str8_lit("library-playlists-grid"), mplayer_ctx->playlists.playlists_count, vec2(300.0f, 300.0f), 10, playlist_index)
+							ui_for_each_grid_item(str8_lit("library-playlists-grid"), mplayer_ctx->playlists.playlists_count, v2(300.0f, 300.0f), 10, playlist_index)
 							{
 								Mplayer_Playlist_ID playlist_id = mplayer_ctx->playlists.playlist_ids[playlist_index];
 								Mplayer_UI_Interaction interaction = mplayer_ui_playlist_item(playlist_id);
@@ -3752,8 +3751,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							ui_next_width(ui_size_parent_remaining());
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
@@ -3815,8 +3814,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
@@ -3848,7 +3847,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						
 						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
 						{
-							u32 item_index = ui_grid_begin(str8_lit("artist-albums-grid"), artist->albums.count, vec2(300.0f, 300.0f), 10);
+							u32 item_index = ui_grid_begin(str8_lit("artist-albums-grid"), artist->albums.count, v2(300.0f, 300.0f), 10);
 							defer(ui_grid_end())
 							{
 								Mplayer_Album *first_album = 0;
@@ -3890,13 +3889,13 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										if (mplayer_item_image_ready(*image))
 										{
 											flags |= UI_FLAG_Draw_Image;
-											ui_next_texture_tint_color(vec4(1, 1, 1, 1));
+											ui_next_texture_tint_color(v4(1, 1, 1, 1));
 											ui_next_texture(image->texture);
 										}
 										else
 										{
 											flags |= UI_FLAG_Draw_Background;
-											ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+											ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1.0f));
 										}
 										
 										ui_next_roundness(10);
@@ -3926,15 +3925,15 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
 											ui_next_font_size(20);
-											ui_next_text_color(vec4(0.4f, 0.4f, 0.4f, 1));
+											ui_next_text_color(v4(0.4f, 0.4f, 0.4f, 1));
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("%.*s###_album_artist_button", STR8_EXPAND(album->artist));
 											if (interaction.hover)
 											{
-												interaction.element->text_color = vec4(0.6f, 0.6f, 0.6f, 1);
+												interaction.element->text_color = v4(0.6f, 0.6f, 0.6f, 1);
 											}
 											if (interaction.pressed_left)
 											{
-												interaction.element->text_color = vec4(1, 1, 1, 1);
+												interaction.element->text_color = v4(1, 1, 1, 1);
 											}
 											
 											if (interaction.clicked_left)
@@ -3949,12 +3948,12 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										{
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
-											ui_next_text_color(vec4(0.6f, 0.6f, 0.6f, 1));
+											ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
 											ui_next_font_size(18);
 											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Album");
 											if (interaction.pressed_left)
 											{
-												interaction.element->text_color = vec4(1, 1, 1, 1);
+												interaction.element->text_color = v4(1, 1, 1, 1);
 											}
 											
 											if (interaction.clicked_left)
@@ -4034,7 +4033,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									{
 										UI_Element_Flags flags = 0;
 										flags |= UI_FLAG_Draw_Background;
-										ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+										ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1.0f));
 										
 										ui_next_roundness(10);
 										ui_next_width(ui_size_pixel(180, 1));
@@ -4064,12 +4063,12 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											{
 												ui_next_width(ui_size_text_dim(1));
 												ui_next_height(ui_size_text_dim(1));
-												ui_next_text_color(vec4(0.6f, 0.6f, 0.6f, 1));
+												ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
 												ui_next_font_size(18);
 												Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Playlist");
 												if (interaction.pressed_left)
 												{
-													interaction.element->text_color = vec4(1, 1, 1, 1);
+													interaction.element->text_color = v4(1, 1, 1, 1);
 												}
 												
 												if (interaction.clicked_left)
@@ -4109,11 +4108,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 									UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 									
-									V4_F32 bg_color = vec4(0.02f, 0.02f,0.02f, 1);
+									V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
 									#if 1
 										if (is_equal(track_id, mplayer_queue_current_track_id()))
 									{
-										bg_color = vec4(0, 0, 0, 1);
+										bg_color = v4(0, 0, 0, 1);
 									}
 									#endif
 										
@@ -4159,8 +4158,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						{
 							ui_spacer_pixels(50, 0);
 							
-							ui_next_background_color(vec4(1, 1, 1, 0));
-							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_background_color(v4(1, 1, 1, 0));
+							ui_next_text_color(v4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
 							ui_next_font_size(50);
 							ui_label(str8_lit("Lyrics"));
@@ -4177,8 +4176,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						{
 							ui_spacer_pixels(50, 0);
 							
-							ui_next_background_color(vec4(1, 1, 1, 0));
-							ui_next_text_color(vec4(1, 1, 1, 1));
+							ui_next_background_color(v4(1, 1, 1, 0));
+							ui_next_text_color(v4(1, 1, 1, 1));
 							ui_next_width(ui_size_text_dim(1));
 							ui_next_font_size(50);
 							ui_label(str8_lit("Settings"));
@@ -4206,7 +4205,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								ui_next_height(ui_size_by_childs(1));
 								ui_parent(ui_element({}, 0))
 								{
-									ui_next_background_color(vec4(0.02f,0.02f,0.02f,1));
+									ui_next_background_color(v4(0.02f,0.02f,0.02f,1));
 									ui_next_height(ui_size_pixel(60, 1));
 									ui_next_roundness(5);
 									UI_Element *add_location_el = ui_element(str8_lit("setting-track-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
@@ -4220,7 +4219,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										ui_spacer(ui_size_parent_remaining());
 										
 										ui_next_roundness(5);
-										ui_next_background_color(vec4(0.05f,0.05f,0.05f,1));
+										ui_next_background_color(v4(0.05f,0.05f,0.05f,1));
 										ui_next_width(ui_size_by_childs(1));
 										ui_next_height(ui_size_by_childs(1));
 										ui_next_childs_axis(Axis2_Y);
@@ -4244,7 +4243,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									u32 location_to_delete = mplayer_ctx->settings.locations_count;
 									
 									if (mplayer_ctx->show_library_locations) 
-										ui_pref_background_color(vec4(0.05f,0.05f,0.05f,1))
+										ui_pref_background_color(v4(0.05f,0.05f,0.05f,1))
 										ui_pref_flags(UI_FLAG_Animate_Dim)
 										ui_pref_height(ui_size_by_childs(1))
 										ui_pref_roundness(10)
@@ -4269,7 +4268,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											{
 												ui_next_height(ui_size_pixel(20, 1));
 												ui_next_roundness(10);
-												ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1));
+												ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1));
 												if (ui_button_f("X###delete-location-%p", location).clicked_left)
 												{
 													location_to_delete = location_index;
@@ -4292,11 +4291,11 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
 									if (add_loc_interaction.hover)
 									{
-										add_location_el->background_color = vec4(0.069f,0.069f,0.069f,1);
+										add_location_el->background_color = v4(0.069f,0.069f,0.069f,1);
 									}
 									if (add_loc_interaction.pressed_left)
 									{
-										add_location_el->background_color = vec4(0.12f,0.12f,0.12f,1);
+										add_location_el->background_color = v4(0.12f,0.12f,0.12f,1);
 									}
 									if (add_loc_interaction.clicked_left)
 									{
@@ -4331,8 +4330,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
@@ -4372,16 +4371,16 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Queue_Index queue_index = (Mplayer_Queue_Index)index;
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, mplayer_ctx->queue.tracks[queue_index]);
 								
-								V4_F32 bg_color = vec4(0.02f, 0.02f,0.02f, 1);
+								V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
 								if (queue_index == mplayer_ctx->queue.current_index)
 								{
-									bg_color = vec4(0, 0, 0, 1);
+									bg_color = v4(0, 0, 0, 1);
 								}
 								
 								UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 								
 								ui_next_background_color(bg_color);
-								ui_next_border_color(vec4(0, 0, 0, 1));
+								ui_next_border_color(v4(0, 0, 0, 1));
 								ui_next_border_thickness(1);
 								ui_next_hover_cursor(Cursor_Hand);
 								UI_Element *track_el = ui_element_f(flags, "queue_track_%p%d", track, queue_index);
@@ -4424,8 +4423,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							
 							ui_vertical_layout() ui_padding(ui_size_pixel(10, 1))
 							{
-								ui_next_background_color(vec4(1, 1, 1, 0));
-								ui_next_text_color(vec4(1, 1, 1, 1));
+								ui_next_background_color(v4(1, 1, 1, 0));
+								ui_next_text_color(v4(1, 1, 1, 1));
 								ui_next_width(ui_size_text_dim(1));
 								ui_next_height(ui_size_text_dim(1));
 								ui_next_font_size(50);
@@ -4492,14 +4491,14 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		}
 		
 		// NOTE(fakhri): track control
-		ui_next_background_color(vec4(0.f, 0.f, 0.f, 1));
+		ui_next_background_color(v4(0.f, 0.f, 0.f, 1));
 		ui_pref_height(ui_size_pixel(125, 1))
 			ui_vertical_layout()
 		{
 			ui_spacer_pixels(10, 1);
 			
 			//- NOTE(fakhri): track 
-			//ui_next_background_color(vec4(1, 0, 1, 1));
+			//ui_next_background_color(v4(1, 0, 1, 1));
 			ui_pref_height(ui_size_pixel(20, 1))
 				ui_horizontal_layout()
 			{
@@ -4525,7 +4524,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 				
 				// NOTE(fakhri): track progres slider
 				ui_next_width(ui_size_percent(1.0f, 0.25f));
-				ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+				ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1.0f));
 				ui_next_roundness(5);
 				if (current_track && current_track->flac_stream)
 				{
@@ -4588,7 +4587,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							if (mplayer_item_image_ready(*cover_image))
 							{
 								flags |= UI_FLAG_Draw_Image;
-								ui_next_texture_tint_color(vec4(1, 1, 1, 1));
+								ui_next_texture_tint_color(v4(1, 1, 1, 1));
 								ui_next_texture(cover_image->texture);
 							}
 							
@@ -4641,7 +4640,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						
 						ui_pref_width(ui_size_text_dim(1))
 							ui_pref_height(ui_size_text_dim(1))
-							ui_pref_background_color(vec4(0.15f, 0.15f, 0.15f, 1))
+							ui_pref_background_color(v4(0.15f, 0.15f, 0.15f, 1))
 						{
 							ui_spacer(ui_size_parent_remaining());
 							
@@ -4706,7 +4705,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						// NOTE(fakhri): volume slider
 						{
 							ui_next_height(ui_size_pixel(12, 1));
-							ui_next_background_color(vec4(0.2f, 0.2f, 0.2f, 1.0f));
+							ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1.0f));
 							ui_next_roundness(5);
 							ui_slider_f32(str8_lit("volume-control-slider"), &mplayer_ctx->volume, 0, 1);
 						}
@@ -4730,7 +4729,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		fps_pos.x -= 20;
 		fps_pos.y -= 15;
 		Memory_Checkpoint scratch = get_scratch(0, 0);
-		draw_text(&group, &mplayer->debug_font, fps_pos, vec4(0.5f, 0.6f, 0.6f, 1), 
+		draw_text(&group, &mplayer->debug_font, fps_pos, v4(0.5f, 0.6f, 0.6f, 1), 
 			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
 			Text_Render_Flag_Centered);
 	}

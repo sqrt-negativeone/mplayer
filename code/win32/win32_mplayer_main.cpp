@@ -14,8 +14,10 @@
 #undef near
 #undef far
 
-#include "mplayer.h"
+#include "base/base_inc.h"
+#include "mplayer/mplayer.h"
 
+#include "base/base_inc.cpp"
 
 struct W32_Timer
 {
@@ -23,7 +25,7 @@ struct W32_Timer
 };
 
 
-global Mplayer_OS_Vtable w32_vtable;
+global OS_Vtable w32_vtable;
 
 global HANDLE g_shit_event;
 global HWND g_w32_window;
@@ -229,7 +231,7 @@ w32_write_whole_block(File_Handle *file, void *buf, u64 size)
 
 
 internal Buffer
-w32_load_entire_file(String8 file_path, Memory_Arena *arena)
+w32_load_entire_file(Memory_Arena *arena, String8 file_path)
 {
 	Buffer result = ZERO_STRUCT;
 	
@@ -336,8 +338,8 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			{
 				ScreenToClient(hwnd, &point);
 			}
-			if (is_in_range(range((f32)client_rect.left, (f32)client_rect.right, (f32)client_rect.top, (f32)client_rect.bottom),
-					vec2((f32)point.x, (f32)point.y)))
+			if (range2f32_is_inside(range2f32((f32)client_rect.left, (f32)client_rect.right, (f32)client_rect.top, (f32)client_rect.bottom),
+					v2((f32)point.x, (f32)point.y)))
 			{
 				SetCursor(cursors[g_w32_cursor]);
 				return 0;

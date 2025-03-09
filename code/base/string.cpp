@@ -357,6 +357,7 @@ suffix8(String8 str, u64 size)
   return substr8(str, str.len-size, str.len);
 }
 
+
 internal String8
 str8_skip_leading_spaces(String8 str)
 {
@@ -364,9 +365,9 @@ str8_skip_leading_spaces(String8 str)
 	return result;
 }
 
-//- NOTE(fakhri): Matching
+//- NOTE(fakhri): Mching
 internal b32
-str8_match(String8 a, String8 b, Match_Flags flags)
+str8_match(String8 a, String8 b, Mch_Flags flags)
 {
   b32 result = 0;
   
@@ -400,7 +401,7 @@ str8_match(String8 a, String8 b, Match_Flags flags)
 }
 
 internal b32
-str8_is_subsequence(String8 a, String8 b, Match_Flags flags)
+str8_is_subsequence(String8 a, String8 b, Mch_Flags flags)
 {
 	b32 result = 0;
 	
@@ -436,7 +437,7 @@ str8_is_subsequence(String8 a, String8 b, Match_Flags flags)
 }
 
 internal u64
-find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_Flags flags)
+find_substr8(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags)
 {
   u64 found_idx = haystack.len;
   b32 is_first = true;
@@ -464,14 +465,14 @@ find_substr8(String8 haystack, String8 needle, u64 start_pt, Match_Flags flags)
 }
 
 internal b32
-str8_starts_with(String8 a, String8 prefix, Match_Flags flags)
+str8_starts_with(String8 a, String8 prefix, Mch_Flags flags)
 {
   b32 result = str8_match(prefix, a, flags | MatchFlag_RightSideSloppy);
   return result;
 }
 
 internal b32
-str8_ends_with(String8 a, String8 b, Match_Flags flags)
+str8_ends_with(String8 a, String8 b, Mch_Flags flags)
 {
   b32 result = 1;
   if (a.len >= b.len)
@@ -505,6 +506,7 @@ string_find_first_non_whitespace(String8 str){
   for (;i < str.len && char_is_space(str.str[i]); i += 1);
   return(i);
 }
+
 
 internal u64
 string_find_first_characer(String8 str, u8 ch){
@@ -673,18 +675,6 @@ str8_chop_last_slash(String8 string)
 	if(slash_pos < string.len)
 	{
 		string.len = slash_pos+1;
-	}
-	return string;
-}
-
-internal String8
-str8_chop_last_dot(String8 string)
-{
-	u64 dot_pos = find_substr8(string, str8_lit("."), 0,
-		MatchFlag_FindLast);
-	if(dot_pos < string.len)
-	{
-		string.len = dot_pos;
 	}
 	return string;
 }

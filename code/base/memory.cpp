@@ -1,7 +1,6 @@
 
 #define M_ARENA_DEFAULT_CAPACITY megabytes(8)
 
-
 internal Memory_Arena_Chunk *
 m_arena_make_chunk(u64 capacity)
 {
@@ -100,10 +99,10 @@ _m_arena_bootstrap_push(u64 struct_size, u64 offset_to_arena)
 
 
 
-internal _Memory_Checkpoint
+internal Memory_Checkpoint
 m_checkpoint_begin(Memory_Arena *arena)
 {
-	_Memory_Checkpoint result;
+	Memory_Checkpoint result;
 	result.arena = arena;
 	result.chunk = arena->current_chunk;
 	result.old_used_memory = arena->current_chunk? arena->current_chunk->used_memory:0;
@@ -111,7 +110,7 @@ m_checkpoint_begin(Memory_Arena *arena)
 }
 
 internal void
-m_checkpoint_end(_Memory_Checkpoint checkpoint)
+m_checkpoint_end(Memory_Checkpoint checkpoint)
 {
 	assert(checkpoint.arena);
 	for (;checkpoint.chunk != checkpoint.arena->current_chunk;)
@@ -126,6 +125,7 @@ m_checkpoint_end(_Memory_Checkpoint checkpoint)
 }
 
 
+#if LANG_CPP
 Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(Memory_Arena *arena)
 {
 	this->checkpoint = m_checkpoint_begin(arena);
@@ -133,7 +133,7 @@ Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(Memory_Arena *arena)
 }
 
 
-Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(_Memory_Checkpoint checkpoint)
+Memory_Checkpoint_Scoped::Memory_Checkpoint_Scoped(Memory_Checkpoint checkpoint)
 {
 	this->checkpoint = checkpoint;
 	this->arena = checkpoint.arena;
@@ -143,3 +143,4 @@ Memory_Checkpoint_Scoped::~Memory_Checkpoint_Scoped()
 {
 	m_checkpoint_end(checkpoint);
 }
+#endif
