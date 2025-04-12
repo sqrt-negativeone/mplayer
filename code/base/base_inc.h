@@ -15,4 +15,7 @@
 #include "thread_context.h"
 #include "platform.h"
 
+#include "http_core.h"
+#include "network.h"
+
 #endif //BASE_INC_H

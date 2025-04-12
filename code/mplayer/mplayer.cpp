@@ -202,6 +202,30 @@ struct Mplayer_Playlists
 	Mplayer_Track_ID_Entry *track_id_entries_free_list;
 };
 
+struct Mplayer_Track_Insight
+{
+	Mplayer_Track_Insight *hash_next;
+	
+	Mplayer_Track_ID track_id;
+	u32 play_count;
+};
+
+struct Mplayer_Track_Insight_List
+{
+	Mplayer_Track_Insight *first;
+	Mplayer_Track_Insight *last;
+};
+
+
+struct Mplayer_Insight
+{
+	u64 total_duration_played_seconds;
+	u64 total_tracks_played;
+	
+	// TODO(fakhri): compute duration played for only one month
+	Mplayer_Track_Insight_List track_insights_tbl[1024];
+};
+
 struct Mplayer_Library
 {
 	Memory_Arena arena;
@@ -327,7 +351,7 @@ struct Mplayer_Context
 	struct Mplayer_UI *ui;
 	Fonts_Context *fonts_ctx;
 	Random_Generator entropy;
-	
+	SSL_CTX *ssl_ctx;
 	Font *font;
 	
 	f32 time_since_last_play;
@@ -397,6 +421,7 @@ struct Mplayer_Context
 global Mplayer_Input *g_input;
 global Mplayer_Context *mplayer_ctx;
 
+#include "mplayer_lastfm.cpp"
 #include "byte_stream.h"
 
 //~ NOTE(fakhri): Animation timer stuff
@@ -673,17 +698,17 @@ mplayer_insert_track(Mplayer_Library *library, Mplayer_Track *track)
 	
 	// NOTE(fakhri): sanity check that we don't have another track
 	// with the same id
-	#if DEBUG_BUILD
+#if DEBUG_BUILD
 	{
 		Mplayer_Track *test_track = mplayer_track_by_id(library, id);
 		assert(test_track == 0);
 	}
-	#endif
-		
-		u32 slot_index = id.v[1] % array_count(library->tracks_table);
+#endif
+	
+	u32 slot_index = id.v[1] % array_count(library->tracks_table);
 	DLLPushBack_NP(library->tracks_table[slot_index].first, library->tracks_table[slot_index].last, 
-		track, 
-		next_hash, prev_hash);
+								 track, 
+								 next_hash, prev_hash);
 	
 	library->tracks_table[slot_index].count += 1;
 	
@@ -699,17 +724,17 @@ mplayer_insert_album(Mplayer_Library *library, Mplayer_Album *album)
 	
 	// NOTE(fakhri): sanity check that we don't have another album
 	// with the same id
-	#if DEBUG_BUILD
+#if DEBUG_BUILD
 	{
 		Mplayer_Album *test_album = mplayer_album_by_id(library, id);
 		assert(test_album == 0);
 	}
-	#endif
-		
-		u32 slot_index = id.v[1] % array_count(library->albums_table);
+#endif
+	
+	u32 slot_index = id.v[1] % array_count(library->albums_table);
 	DLLPushBack_NP(library->albums_table[slot_index].first, library->albums_table[slot_index].last,
-		album, 
-		next_hash, prev_hash);
+								 album, 
+								 next_hash, prev_hash);
 	
 	library->albums_table[slot_index].count += 1;
 	
@@ -725,17 +750,17 @@ mplayer_insert_artist(Mplayer_Library *library, Mplayer_Artist *artist)
 	
 	// NOTE(fakhri): sanity check that we don't have another album
 	// with the same id
-	#if DEBUG_BUILD
+#if DEBUG_BUILD
 	{
 		Mplayer_Artist *test_artist = mplayer_artist_by_id(library, id);
 		assert(test_artist == 0);
 	}
-	#endif
-		
-		u32 slot_index = id.v[1] % array_count(library->artists_table);
+#endif
+	
+	u32 slot_index = id.v[1] % array_count(library->artists_table);
 	DLLPushBack_NP(library->artists_table[slot_index].first, library->artists_table[slot_index].last,
-		artist, 
-		next_hash, prev_hash);
+								 artist, 
+								 next_hash, prev_hash);
 	
 	library->artists_table[slot_index].count += 1;
 	
@@ -752,17 +777,17 @@ mplayer_add_playlist(Mplayer_Playlists *playlists, Mplayer_Playlist *playlist)
 	
 	// NOTE(fakhri): sanity check that we don't have another playlist
 	// with the same id
-	#if DEBUG_BUILD
+#if DEBUG_BUILD
 	{
 		Mplayer_Playlist *test_playlist = mplayer_playlist_by_id(playlists, id);
 		assert(test_playlist == 0);
 	}
-	#endif
-		
-		u32 slot_index = id.v[1] % array_count(playlists->playlists_table);
+#endif
+	
+	u32 slot_index = id.v[1] % array_count(playlists->playlists_table);
 	DLLPushBack_NP(playlists->playlists_table[slot_index].first, playlists->playlists_table[slot_index].last, 
-		playlist, 
-		next_hash, prev_hash);
+								 playlist, 
+								 next_hash, prev_hash);
 	
 	playlists->playlists_table[slot_index].count += 1;
 	
@@ -860,7 +885,7 @@ mplayer_load_item_image(Mplayer_Item_Image *image)
 		image->state = Image_State_Loading;
 		
 		platform->push_work(decode_texture_data_work, 
-			mplayer_make_texure_upload_data(image));
+												mplayer_make_texure_upload_data(image));
 	}
 }
 
@@ -881,10 +906,13 @@ mplayer_get_image_by_id(Mplayer_Image_ID image_id, b32 load)
 
 //~ NOTE(fakhri): track control stuff
 
+internal void mplayer_save_indexed_library();
+
 internal void
 mplayer_track_update_report(Mplayer_Track *track)
 {
-	track->play_count += 1;
+	
+	
 }
 
 internal void
@@ -965,8 +993,8 @@ internal b32
 is_track_still_playing(Mplayer_Track *track)
 {
 	b32 result = (track->flac_stream && 
-		!bitstream_is_empty(&track->flac_stream->bitstream) && 
-		track->flac_stream->next_sample_number < track->end_sample_offset);
+								!bitstream_is_empty(&track->flac_stream->bitstream) && 
+								track->flac_stream->next_sample_number < track->end_sample_offset);
 	
 	return result;
 }
@@ -1016,27 +1044,27 @@ draw_outline(Render_Group *group, V3_F32 pos, V2_F32 dim, V4_F32 color, f32 thic
 {
 	// left
 	push_rect(group,
-		v3(pos.x - 0.5f * (dim.width - thickness), pos.y, pos.z),
-		v2(thickness, dim.height),
-		color);
+						v3(pos.x - 0.5f * (dim.width - thickness), pos.y, pos.z),
+						v2(thickness, dim.height),
+						color);
 	
 	// right
 	push_rect(group,
-		v3(pos.x + 0.5f * (dim.width - thickness), pos.y, pos.z),
-		v2(thickness, dim.height),
-		color);
+						v3(pos.x + 0.5f * (dim.width - thickness), pos.y, pos.z),
+						v2(thickness, dim.height),
+						color);
 	
 	// top
 	push_rect(group,
-		v3(pos.x, pos.y + 0.5f * (dim.height - thickness), pos.z),
-		v2(dim.width, thickness),
-		color);
+						v3(pos.x, pos.y + 0.5f * (dim.height - thickness), pos.z),
+						v2(dim.width, thickness),
+						color);
 	
 	// bottom
 	push_rect(group,
-		v3(pos.x, pos.y - 0.5f * (dim.height - thickness), pos.z),
-		v2(dim.width, thickness),
-		color);
+						v3(pos.x, pos.y - 0.5f * (dim.height - thickness), pos.z),
+						v2(dim.width, thickness),
+						color);
 }
 
 internal void
@@ -1079,8 +1107,8 @@ is_queue_index_valid(Mplayer_Queue_Index index)
 internal void
 mplayer_save_queue()
 {
-	#if 1
-		File_Handle *file = platform->open_file(MPLAYER_QUEUE_FILENAME, File_Open_Write | File_Create_Always);
+#if 1
+	File_Handle *file = platform->open_file(MPLAYER_QUEUE_FILENAME, File_Open_Write | File_Create_Always);
 	if (file)
 	{
 		Mplayer_Queue *queue = &mplayer_ctx->queue;
@@ -1093,7 +1121,7 @@ mplayer_save_queue()
 		
 		platform->close_file(file);
 	}
-	#endif
+#endif
 }
 
 internal Mplayer_Track *
@@ -1134,8 +1162,8 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	// delay when played...
 	
 	if (is_queue_index_valid(queue->current_index) && 
-		is_queue_index_valid(index) && 
-		is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
+			is_queue_index_valid(index) && 
+			is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
 	{
 		queue->current_index = index;
 		mplayer_load_track(mplayer_queue_get_current_track());
@@ -1151,7 +1179,9 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		
 		if (is_queue_index_valid(queue->current_index))
 		{
-			mplayer_load_track(mplayer_queue_get_current_track());
+			Mplayer_Track *track = mplayer_queue_get_current_track();
+			mplayer_load_track(track);
+			mplayer_lastfm_update_now_playing(track);
 		}
 	}
 }
@@ -1315,8 +1345,8 @@ mplayer_queue_remove_at(Mplayer_Queue_Index index)
 	if (index < queue->count - 1)
 	{
 		memory_move(queue->tracks + index, 
-			queue->tracks + index + 1,
-			sizeof(queue->tracks[0]) * (queue->count - index - 1));
+								queue->tracks + index + 1,
+								sizeof(queue->tracks[0]) * (queue->count - index - 1));
 		
 	}
 	
@@ -1346,8 +1376,8 @@ mplayer_queue_insert_at(Mplayer_Queue_Index index, Mplayer_Track_ID track_id)
 		if (index + 1 < queue->count)
 		{
 			memory_move(queue->tracks + index + 1, 
-				queue->tracks + index,
-				sizeof(queue->tracks[0]) * (queue->count - index));
+									queue->tracks + index,
+									sizeof(queue->tracks[0]) * (queue->count - index));
 		}
 		
 		queue->tracks[index] = track_id;
@@ -1519,8 +1549,8 @@ mplayer_serialize(File_Handle *file, Mplayer_Track_ID_List tracks)
 {
 	mplayer_serialize(file, tracks.count);
 	for(Mplayer_Track_ID_Entry *entry = tracks.first;
-		entry;
-		entry = entry->next)
+			entry;
+			entry = entry->next)
 	{
 		mplayer_serialize(file, entry->track_id);
 	}
@@ -1814,8 +1844,8 @@ mplayer_find_cuesheet_for_file(Cuesheet_List cuesheet_list, String8 file_name)
 
 internal void
 mplayer_make_track(File_Info info, u64 samples_start, u64 samples_end, Mplayer_Album *album,
-	Mplayer_Artist *artist, 
-	String8 track_title, String8 track_date, String8 track_genre, String8 track_track_number)
+									 Mplayer_Artist *artist, 
+									 String8 track_title, String8 track_date, String8 track_genre, String8 track_track_number)
 {
 	Mplayer_Library *library = &mplayer_ctx->library;
 	Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path, samples_start, samples_end);
@@ -1914,8 +1944,8 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 			String8 track_track_number = str8_lit("");
 			
 			for (String8_Node *node = tmp_flac_stream.vorbis_comments.first;
-				node;
-				node = node->next)
+					 node;
+					 node = node->next)
 			{
 				String8 value = ZERO_STRUCT;
 				String8 key = ZERO_STRUCT;
@@ -1985,7 +2015,7 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 					mplayer_setup_album_image(&library->arena, album->image_id, cover_image_path, front_cover);
 					
 					mplayer_make_track(info, samples_start, samples_end, album, artist,
-						cue_track_title, track_date, track_genre, track_track_number);
+														 cue_track_title, track_date, track_genre, track_track_number);
 					
 				}
 			}
@@ -1996,7 +2026,7 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 				mplayer_setup_album_image(&library->arena, album->image_id, cover_image_path, front_cover);
 				
 				mplayer_make_track(info, 0, tmp_flac_stream.streaminfo.samples_count, album, artist,
-					track_title, track_date, track_genre, track_track_number);
+													 track_title, track_date, track_genre, track_track_number);
 			}
 			
 		}
@@ -2034,8 +2064,8 @@ mplayer_load_tracks_in_directory(String8 library_path)
 		if (has_flag(info.flags, FileFlag_Directory)) continue;
 		
 		if (!cover_image_path.len && (str8_ends_with(info.name, str8_lit(".jpg"), MatchFlag_CaseInsensitive)  ||
-				str8_ends_with(info.name, str8_lit(".jpeg"), MatchFlag_CaseInsensitive) ||
-				str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)))
+																	str8_ends_with(info.name, str8_lit(".jpeg"), MatchFlag_CaseInsensitive) ||
+																	str8_ends_with(info.name, str8_lit(".png"), MatchFlag_CaseInsensitive)))
 		{
 			cover_image_path = info.path;
 		}
@@ -2064,7 +2094,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 				for (; line_start_offset + line_len < content.len; line_len += 1)
 				{
 					if (content.str[line_start_offset + line_len] == '\n' || 
-						content.str[line_start_offset + line_len] == '\r' && content.str[line_start_offset + line_len + 1] == '\n')
+							content.str[line_start_offset + line_len] == '\r' && content.str[line_start_offset + line_len + 1] == '\n')
 					{
 						String8 line = str8(content.str + line_start_offset, line_len);
 						line_len += ((content.str[line_start_offset + line_len] == '\r')? 2:1);
@@ -2379,8 +2409,8 @@ mplayer_filter_path_lister(Mplayer_Path_Lister *path_lister)
 	{
 		File_Info info = path_lister->dir.files[i];
 		if (has_flag(info.flags, FileFlag_Directory) && 
-			info.name.str[0] != '.' &&
-			str8_is_subsequence(info.path, path_lister->user_path, MatchFlag_CaseInsensitive | MatchFlag_SlashInsensitive))
+				info.name.str[0] != '.' &&
+				str8_is_subsequence(info.path, path_lister->user_path, MatchFlag_CaseInsensitive | MatchFlag_SlashInsensitive))
 		{
 			path_lister->filtered_paths[path_lister->filtered_paths_count++] = info.path;
 		}
@@ -2458,7 +2488,7 @@ ui_grid_item_begin()
 {
 	b32 good = 0;
 	if (mplayer_ctx->grid_item_index < mplayer_ctx->grid_items_count && 
-		mplayer_ctx->grid_item_index_in_row < mplayer_ctx->grid_item_count_per_row)
+			mplayer_ctx->grid_item_index_in_row < mplayer_ctx->grid_item_count_per_row)
 	{
 		good = 1;
 		
@@ -2544,7 +2574,7 @@ ui_grid_end()
 {
 	// NOTE(fakhri): pop incomplete rows
 	if (mplayer_ctx->grid_items_count && mplayer_ctx->grid_row_index < (i32)mplayer_ctx->grid_visible_rows_count && 
-		mplayer_ctx->grid_item_index_in_row < mplayer_ctx->grid_item_count_per_row)
+			mplayer_ctx->grid_item_index_in_row < mplayer_ctx->grid_item_count_per_row)
 	{
 		ui_pop_parent(); // pop parent row
 	}
@@ -2572,7 +2602,7 @@ ui_list_item_begin()
 {
 	b32 good = 0;
 	if (mplayer_ctx->list_item_index < mplayer_ctx->list_items_count && 
-		mplayer_ctx->list_row_index < mplayer_ctx->list_visible_rows_count)
+			mplayer_ctx->list_row_index < mplayer_ctx->list_visible_rows_count)
 	{
 		good = 1;
 		
@@ -2672,8 +2702,6 @@ mplayer_ui_underlined_button_f(const char *fmt, ...)
 internal Mplayer_UI_Interaction 
 mplayer_ui_track_item(Mplayer_Track *track, String8 string, b32 is_active)
 {
-	UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
-	
 	V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
 	if (is_active)
 	{
@@ -2683,7 +2711,7 @@ mplayer_ui_track_item(Mplayer_Track *track, String8 string, b32 is_active)
 	ui_next_background_color(bg_color);
 	ui_next_hover_cursor(Cursor_Hand);
 	
-	UI_Element *track_el = ui_element(string, flags);
+	UI_Element *track_el = ui_element(string, UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
 	
 	ui_parent(track_el) ui_vertical_layout() ui_padding(ui_size_parent_remaining())
@@ -2693,8 +2721,14 @@ mplayer_ui_track_item(Mplayer_Track *track, String8 string, b32 is_active)
 		
 		ui_next_width(ui_size_text_dim(1));
 		ui_next_height(ui_size_text_dim(1));
-		ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
-			STR8_EXPAND(track->title), track);
+		ui_label(track->title);
+		
+		ui_spacer(ui_size_parent_remaining());
+		ui_next_width(ui_size_pixel(30, 1));
+		ui_next_font_size(12);
+		ui_label(str8_f(mplayer_ctx->frame_arena, "%d", track->play_count));
+		
+		ui_spacer_pixels(10, 1);
 	}
 	
 	return interaction;
@@ -2756,7 +2790,7 @@ mplayer_ui_album_item(Mplayer_Album_ID album_id)
 		ui_next_background_color(v4(0.3f, 0.3f, 0.3f, 0.3f));
 		ui_next_roundness(5);
 		ui_element_f(UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_album_name_%p", 
-			STR8_EXPAND(album->name), album);
+								 STR8_EXPAND(album->name), album);
 	}
 }
 
@@ -2783,7 +2817,7 @@ mplayer_ui_playlist_item(Mplayer_Playlist_ID playlist_id)
 		ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 0.5f));
 		ui_next_roundness(5);
 		ui_element_f(UI_FLAG_Draw_Background|UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_playlist_name_%p", 
-			STR8_EXPAND(playlist->name), playlist);
+								 STR8_EXPAND(playlist->name), playlist);
 	}
 	
 	return interaction;
@@ -2833,7 +2867,7 @@ mplayer_ui_aritst_item(Mplayer_Artist_ID artist_id)
 		ui_next_width(ui_size_percent(1, 1));
 		ui_next_height(ui_size_text_dim(1));
 		ui_element_f(UI_FLAG_Draw_Text | UI_FLAG_Animate_Pos | UI_FLAG_Animate_Dim, "%.*s##library_artist_name_%p", 
-			STR8_EXPAND(artist->name), artist);
+								 STR8_EXPAND(artist->name), artist);
 	}
 }
 
@@ -2961,8 +2995,8 @@ mplayer_track_in_list(Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
 {
 	b32 in_list = 0;
 	for(Mplayer_Track_ID_Entry *entry = list->first;
-		entry;
-		entry = entry->next)
+			entry;
+			entry = entry->next)
 	{
 		if (is_equal(entry->track_id, track_id))
 		{
@@ -2976,12 +3010,12 @@ mplayer_track_in_list(Mplayer_Track_ID_List *list, Mplayer_Track_ID track_id)
 internal void
 mplayer_add_track_to_favorites(Mplayer_Playlists *playlists, Mplayer_Track_ID track_id)
 {
-	#if DEBUG_BUILD
-		// NOTE(fakhri): assume that whoever calls us have checked that the track
-		// was not already in the list
-		assert(!mplayer_track_in_list(&playlists->fav_tracks, track_id));
-	#endif
-		mplayer_add_track_id_to_list(playlists, &playlists->fav_tracks, track_id);
+#if DEBUG_BUILD
+	// NOTE(fakhri): assume that whoever calls us have checked that the track
+	// was not already in the list
+	assert(!mplayer_track_in_list(&playlists->fav_tracks, track_id));
+#endif
+	mplayer_add_track_id_to_list(playlists, &playlists->fav_tracks, track_id);
 	mplayer_save_playlists(playlists);
 }
 
@@ -2990,8 +3024,8 @@ mplayer_remove_track_from_favorites(Mplayer_Playlists *playlists, Mplayer_Track_
 {
 	Mplayer_Track_ID_Entry *track_entry = 0;
 	for(Mplayer_Track_ID_Entry *entry = playlists->fav_tracks.first;
-		entry;
-		entry = entry->next)
+			entry;
+			entry = entry->next)
 	{
 		if (is_equal(entry->track_id, track_id))
 		{
@@ -3038,6 +3072,12 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 					out_f32[c] = volume * samples[c];
 				}
 			}
+			
+			if (streamed_samples.last_samples_in_track)
+			{
+				// NOTE(fakhri): track just finished playing
+				mplayer_lastfm_scrobble_track(track);
+			}
 		}
 	}
 }
@@ -3066,7 +3106,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_ctx->fonts_ctx = fnt_init(render_ctx);
 	mplayer_ctx->font = fnt_open_font(str8_lit("data/fonts/arial.ttf"));
 	mplayer_ctx->volume = 1.0f;
-	
+	mplayer_ctx->ssl_ctx = ssl_context_init();
 	mplayer_ctx->ui = ui_init(mplayer_ctx->font);
 	
 	// NOTE(fakhri): ctx menu ids
@@ -3092,6 +3132,8 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_load_playlists(&mplayer_ctx->playlists);
 	mplayer_change_mode(MODE_Track_Library);
 	mplayer_init_queue();
+	
+	mplayer_lastfm_init();
 	
 	return mplayer_ctx;
 }
@@ -3319,8 +3361,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					}
 				}
 			}
-			
-			
 		}
 	}
 	
@@ -3800,9 +3840,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Track_ID track_id = mplayer_ctx->library.track_ids[track_index];
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 								Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
-									is_equal(track_id, mplayer_queue_current_track_id()),
-									"library_track_%p", track
-								);
+																																						 is_equal(track_id, mplayer_queue_current_track_id()),
+																																						 "library_track_%p", track
+																																						 );
 								if (interaction.clicked_left)
 								{
 									mplayer_queue_play_track(track_id);
@@ -3848,8 +3888,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
 										for (Mplayer_Track *track = artist->tracks.first; 
-											track; 
-											track = track->next_artist)
+												 track; 
+												 track = track->next_artist)
 										{
 											mplayer_queue_last(track->hash);
 										}
@@ -3869,8 +3909,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Album *first_album = 0;
 								{
 									u32 count; for(count = 0, first_album = artist->albums.first; 
-										count < item_index && first_album; 
-										count += 1, first_album = first_album->next_artist);
+																 count < item_index && first_album; 
+																 count += 1, first_album = first_album->next_artist);
 								}
 								for(Mplayer_Album *album = first_album; ui_grid_item_begin(); (album = album->next_artist, ui_grid_item_end()))
 								{
@@ -3975,8 +4015,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											if (interaction.clicked_left)
 											{
 												for (Mplayer_Track *track = album->tracks.first; 
-													track; 
-													track = track->next_album)
+														 track; 
+														 track = track->next_album)
 												{
 													mplayer_queue_last(track->hash);
 												}
@@ -4001,16 +4041,16 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Track *first_track = 0;
 								{
 									u32 count; for(count = 0, first_track = album->tracks.first; 
-										count < item_index && first_track; 
-										count += 1, first_track = first_track->next_album);
+																 count < item_index && first_track; 
+																 count += 1, first_track = first_track->next_album);
 								}
 								for(Mplayer_Track *track = first_track; ui_list_item_begin(); (track = track->next_album, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = track->hash;
 									Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
-										is_equal(track_id, mplayer_queue_current_track_id()),
-										"library_track_%p", track
-									);
+																																							 is_equal(track_id, mplayer_queue_current_track_id()),
+																																							 "library_track_%p", track
+																																							 );
 									if (interaction.clicked_left)
 									{
 										mplayer_queue_play_track(track_id);
@@ -4118,8 +4158,8 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Track_ID_Entry *first_entry = 0;
 								{
 									u32 count; for(count = 0, first_entry = playlist->tracks.first; 
-										count < item_index && first_entry; 
-										count += 1, first_entry = first_entry->next);
+																 count < item_index && first_entry; 
+																 count += 1, first_entry = first_entry->next);
 								}
 								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
 								{
@@ -4128,14 +4168,14 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									UI_Element_Flags flags = UI_FLAG_Draw_Background | UI_FLAG_Clickable | UI_FLAG_Draw_Border | UI_FLAG_Animate_Dim | UI_FLAG_Clip;
 									
 									V4_F32 bg_color = v4(0.02f, 0.02f,0.02f, 1);
-									#if 1
-										if (is_equal(track_id, mplayer_queue_current_track_id()))
+#if 1
+									if (is_equal(track_id, mplayer_queue_current_track_id()))
 									{
 										bg_color = v4(0, 0, 0, 1);
 									}
-									#endif
-										
-										ui_next_background_color(bg_color);
+#endif
+									
+									ui_next_background_color(bg_color);
 									ui_next_hover_cursor(Cursor_Hand);
 									UI_Element *track_el = ui_element_f(flags, "library_track_%p", entry);
 									Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
@@ -4158,7 +4198,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										ui_next_width(ui_size_text_dim(1));
 										ui_next_height(ui_size_text_dim(1));
 										ui_element_f(UI_FLAG_Draw_Text, "%.*s##library_track_name_%p", 
-											STR8_EXPAND(track->title), track);
+																 STR8_EXPAND(track->title), track);
 									}
 								}
 							}
@@ -4391,9 +4431,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, mplayer_ctx->queue.tracks[queue_index]);
 								
 								Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
-									queue_index == mplayer_ctx->queue.current_index,
-									"library_track_%p%d", track, queue_index
-								);
+																																						 queue_index == mplayer_ctx->queue.current_index,
+																																						 "library_track_%p%d", track, queue_index
+																																						 );
 								if (interaction.clicked_left)
 								{
 									mplayer_set_current(Mplayer_Queue_Index(queue_index));
@@ -4462,17 +4502,17 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								Mplayer_Track_ID_Entry *first_entry = 0;
 								{
 									u32 count; for(count = 0, first_entry = playlists->fav_tracks.first; 
-										count < item_index && first_entry; 
-										count += 1, first_entry = first_entry->next);
+																 count < item_index && first_entry; 
+																 count += 1, first_entry = first_entry->next);
 								}
 								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = entry->track_id;
 									Mplayer_Track *track = mplayer_track_by_id(&mplayer_ctx->library, track_id);
 									Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
-										is_equal(track_id, mplayer_queue_current_track_id()),
-										"library_track_%p", track 
-									);
+																																							 is_equal(track_id, mplayer_queue_current_track_id()),
+																																							 "library_track_%p", track 
+																																							 );
 									if (interaction.clicked_left)
 									{
 										mplayer_queue_play_track(track_id);
@@ -4725,7 +4765,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 	ui_end();
 	
 	// NOTE(fakhri): draw fps
-	#if 0
+#if 0
 	{
 		render_group_set_cull_range(&group, screen_rect);
 		V2_F32 fps_pos = 0.5 * render_ctx->draw_dim;
@@ -4733,11 +4773,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		fps_pos.y -= 15;
 		Memory_Checkpoint scratch = get_scratch(0, 0);
 		draw_text(&group, &mplayer->debug_font, fps_pos, v4(0.5f, 0.6f, 0.6f, 1), 
-			fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
-			Text_Render_Flag_Centered);
+							fancy_str8(str8_f(scratch.arena, "%d", u32(1.0f / mplayer->input.frame_dt))),
+							Text_Render_Flag_Centered);
 	}
-	#endif
-		
+#endif
 }
 
 //~ NOTE(fakhri): Mplayer Exported API

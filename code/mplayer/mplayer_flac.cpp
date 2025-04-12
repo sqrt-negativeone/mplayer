@@ -362,8 +362,8 @@ flac_preprocess_block(Bit_Stream *bitstream, u8 nb_channels, u8 bits_per_sample,
 	
 	// NOTE(fakhri): decode subframes
 	for (u32 channel_index = 0;
-		channel_index < block_info.nb_channels;
-		channel_index += 1)
+			 channel_index < block_info.nb_channels;
+			 channel_index += 1)
 	{
 		Flac_Subframe_Info *subframe_info = block_info.subframes_info + channel_index;
 		bitstream_skip_bits(bitstream, 1);
@@ -567,10 +567,10 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			assert((coded_byte3 & 0xC0) == 0x80);
 			assert((coded_byte4 & 0xC0) == 0x80);
 			coded_number = ((u64(coded_byte0 & 0x03) << 24) | 
-				(u64(coded_byte1 & 0x3F) << 18) | 
-				(u64(coded_byte2 & 0x3F) << 12) | 
-				(u64(coded_byte3 & 0x3F) << 6)  |
-				u64(coded_byte4 & 0x3F));
+											(u64(coded_byte1 & 0x3F) << 18) | 
+											(u64(coded_byte2 & 0x3F) << 12) | 
+											(u64(coded_byte3 & 0x3F) << 6)  |
+											u64(coded_byte4 & 0x3F));
 		}
 		else if (0xFC <= coded_byte0 && coded_byte0 <= 0xFD)
 		{ // 1111_110x 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
@@ -587,11 +587,11 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			assert((coded_byte5 & 0xC0) == 0x80);
 			
 			coded_number = ((u64(coded_byte0 & 0x01) << 30) | 
-				(u64(coded_byte1 & 0x3F) << 24) | 
-				(u64(coded_byte2 & 0x3F) << 18) | 
-				(u64(coded_byte3 & 0x3F) << 12) | 
-				(u64(coded_byte4 & 0x3F) << 6)  | 
-				u64(coded_byte5 & 0x3F));
+											(u64(coded_byte1 & 0x3F) << 24) | 
+											(u64(coded_byte2 & 0x3F) << 18) | 
+											(u64(coded_byte3 & 0x3F) << 12) | 
+											(u64(coded_byte4 & 0x3F) << 6)  | 
+											u64(coded_byte5 & 0x3F));
 		}
 		else if (coded_byte0 ==  0xFE)
 		{        // 1111_1110 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 10xx_xxxx 
@@ -611,11 +611,11 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 			assert((coded_byte5 & 0xC0) == 0x80);
 			assert((coded_byte6 & 0xC0) == 0x80);
 			coded_number = ((u64(coded_byte1 & 0x3F) << 30) | 
-				(u64(coded_byte2 & 0x3F) << 24) | 
-				(u64(coded_byte3 & 0x3F) << 18) | 
-				(u64(coded_byte4 & 0x3F) << 12) | 
-				(u64(coded_byte5 & 0x3F) << 6) | 
-				u64(coded_byte6 & 0x3F));
+											(u64(coded_byte2 & 0x3F) << 24) | 
+											(u64(coded_byte3 & 0x3F) << 18) | 
+											(u64(coded_byte4 & 0x3F) << 12) | 
+											(u64(coded_byte5 & 0x3F) << 6) | 
+											u64(coded_byte6 & 0x3F));
 		}
 		
 		if (flac_stream->fixed_blocks)
@@ -685,8 +685,8 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 	
 	// NOTE(fakhri): decode subframes
 	for (u32 channel_index = 0;
-		channel_index < nb_channels;
-		channel_index += 1)
+			 channel_index < nb_channels;
+			 channel_index += 1)
 	{
 		u8 wasted_bits = 0;
 		Flac_Subframe_Type subframe_type = ZERO_STRUCT;
@@ -797,17 +797,17 @@ flac_decode_one_block(Flac_Stream *flac_stream, b32 first_block = 0)
 						for (u32 i = subframe_type.order; i < block_size; i += 1) 
 						{
 							flac_access(decoded_samples, i) += (3 * flac_access(decoded_samples, i - 1) - 
-								3 * flac_access(decoded_samples, i - 2) +
-								flac_access(decoded_samples, i - 3));
+																									3 * flac_access(decoded_samples, i - 2) +
+																									flac_access(decoded_samples, i - 3));
 						}
 					} break;
 					case 4: {
 						for (u32 i = subframe_type.order; i < block_size; i += 1) 
 						{
 							flac_access(decoded_samples, i) += (4 * flac_access(decoded_samples, i - 1) - 
-								6 * flac_access(decoded_samples, i - 2) +
-								4 * flac_access(decoded_samples, i - 3) -
-								flac_access(decoded_samples, i - 4));
+																									6 * flac_access(decoded_samples, i - 2) +
+																									4 * flac_access(decoded_samples, i - 3) -
+																									flac_access(decoded_samples, i - 4));
 						}
 					} break;
 					default: {
@@ -1061,11 +1061,11 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			case 0:
 			{
 				// NOTE(fakhri): streaminfo block
-				#if 0
-					assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
-				#endif
-					
-					streaminfo->min_block_size = bitstream_read_u16be(bitstream);
+#if 0
+				assert(md_blocks_count == 1); // NOTE(fakhri): make sure we only have 1 streaminfo block
+#endif
+				
+				streaminfo->min_block_size = bitstream_read_u16be(bitstream);
 				streaminfo->max_block_size = bitstream_read_u16be(bitstream);
 				
 				streaminfo->min_frame_size = bitstream_read_u24be(bitstream);
@@ -1080,12 +1080,12 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 				bitstream_skip_bytes(bitstream, 16);
 				
 				// NOTE(fakhri): streaminfo checks
-				#if 0
+#if 0
 				{
 					assert(streaminfo->min_block_size >= 16);
 					assert(streaminfo->max_block_size >= streaminfo->min_block_size);
 				}
-				#endif
+#endif
 			} break;
 			case 1:
 			{
@@ -1130,10 +1130,10 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 			case 5:
 			{
 				// NOTE(fakhri): cuesheet
-				#if 1
-					Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
-				#else
-					Buffer media_catalog_number = bitstream_read_buffer(bitstream, 128);
+#if 1
+				Buffer cuesheet_block = bitstream_read_buffer(bitstream, md_size);
+#else
+				Buffer media_catalog_number = bitstream_read_buffer(bitstream, 128);
 				
 				u64 leadin_samples_count = bitstream_read_u64be(bitstream);
 				
@@ -1167,7 +1167,7 @@ flac_process_metadata(Flac_Stream *flac_stream, Memory_Arena *arena)
 					}
 					
 				}
-				#endif
+#endif
 			} break;
 			case 6:
 			{
@@ -1243,7 +1243,8 @@ struct Decoded_Samples
 {
 	f32 *samples;
 	u64 frames_count;
-	u64 channels_count;
+	b32 last_samples_in_track;
+	u32 channels_count;
 };
 
 internal Decoded_Samples
@@ -1298,6 +1299,7 @@ flac_read_samples(Flac_Stream *flac_stream, u64 requested_frames_count, u32 requ
 			
 			if (flac_stream->recent_block.frames_count == 0)
 			{
+				result.last_samples_in_track = true;
 				// TODO(fakhri): should we flush the src_ctx?
 				// NOTE(fakhri): EOF
 				break;

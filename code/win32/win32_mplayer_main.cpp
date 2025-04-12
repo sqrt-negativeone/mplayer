@@ -4,6 +4,9 @@
 #include <windows.h>
 #include <windowsx.h>
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include <timeapi.h>
 #include <Objbase.h>
 #include <audiopolicy.h>
@@ -37,6 +40,186 @@ global W32_Timer g_w32_audio_timer;
 global Cursor_Shape g_w32_cursor = Cursor_Arrow;
 global DWORD g_w32_main_thread_id;
 global HANDLE g_audio_mutex; 
+
+#pragma comment(lib, "Ws2_32.lib")
+
+static_assert(sizeof(SOCKET) <= sizeof(Socket_Handle));
+union Win32_Socket
+{
+	Socket_Handle s;
+	SOCKET ws;
+};
+
+#if 1
+internal b32
+w32_is_valid_socket(Socket_Handle s)
+{
+	Win32_Socket conv = {.s = s};
+	b32 result = conv.ws != INVALID_SOCKET;
+	return result;
+}
+
+internal Socket_Handle 
+w32_accept_socket(Socket_Handle s, void *addr, int *addrlen)
+{
+	Win32_Socket conv = {.s = s};
+	conv.ws = accept(conv.ws, (sockaddr*)addr, addrlen);
+	Socket_Handle result = conv.s;
+	return result;
+}
+
+internal void 
+w32_close_socket(Socket_Handle s)
+{
+	Win32_Socket conv = {.s = s};
+	closesocket(conv.ws);
+}
+
+internal Socket_Handle 
+w32_connect_to_server(const char *server_address, const char *port)
+{
+	SOCKET result = INVALID_SOCKET;
+	struct addrinfo hints, *addrinfo_result, *p;
+	hints = {};
+	
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	
+	getaddrinfo(server_address, port, &hints, &addrinfo_result);
+	for (p = addrinfo_result; p; p = p->ai_next)
+	{
+		result = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+		if (result == INVALID_SOCKET) 
+		{
+			LogError("socket failed with error: %ld", WSAGetLastError());
+			continue;
+		}
+		
+		// NOTE(fakhri): connect to the socket
+		if (connect(result, p->ai_addr, (int)p->ai_addrlen) == SOCKET_ERROR) 
+		{
+			LogError("socket failed with error: %ld", WSAGetLastError());
+			closesocket(result);
+			continue;
+		}
+		break;
+	}
+	freeaddrinfo(addrinfo_result);
+	if (!p) result = INVALID_SOCKET;
+	
+	
+	Win32_Socket conv = {.ws = result};
+	return conv.s;
+}
+
+#define LISTENQ 1024
+
+internal Socket_Handle 
+w32_open_listen_socket(const char *port)
+{
+	SOCKET listenfd = INVALID_SOCKET;
+	const char optionval = 1;
+	struct addrinfo hints = {}, *addrinfo_result, *p;
+	
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	hints.ai_flags = AI_PASSIVE;
+	
+	if (getaddrinfo(0, port, &hints, &addrinfo_result) == 0)
+	{
+		
+		for (p = addrinfo_result; p; p = p->ai_next)
+		{
+			listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+			if (listenfd == INVALID_SOCKET) continue;
+			setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &optionval, sizeof(i32));
+			if (bind(listenfd, p->ai_addr, (i32)p->ai_addrlen) != SOCKET_ERROR) break;
+			closesocket(listenfd);
+		}
+		
+		freeaddrinfo(addrinfo_result);
+		if (!p) {
+			listenfd = INVALID_SOCKET;
+			goto exit;
+		}
+		
+		if (listen(listenfd, LISTENQ) == SOCKET_ERROR )
+		{
+			closesocket(listenfd);
+			listenfd = INVALID_SOCKET;
+		}
+	}
+	
+	exit:;
+	
+	Win32_Socket conv = {.ws = listenfd};
+	return conv.s;
+}
+
+internal b32
+w32_network_send_buffer(Socket_Handle s, Buffer buf)
+{
+	Win32_Socket conv = {.s = s};
+	
+	char *buffer = (char *)buf.data;
+	b32 result = true;
+	i32 bytes_to_send = (i32)buf.size;
+	i32 total_bytes_sent = 0;
+	
+	while(bytes_to_send)
+	{
+		i32 bytes_sent = send(conv.ws, buffer + total_bytes_sent, bytes_to_send, 0);
+		if (bytes_sent == SOCKET_ERROR)
+		{
+			int last_error = WSAGetLastError();
+			LogError("send call failed with error %d", last_error);
+			result = false;
+			break;
+		}
+		total_bytes_sent += bytes_sent;
+		bytes_to_send -= bytes_sent;
+	}
+	
+	return result;
+}
+
+
+internal b32
+w32_network_receive_buffer(Socket_Handle s, Buffer buf)
+{
+	Win32_Socket conv = {.s = s};
+	
+	char *buffer = (char *)buf.data;
+	b32 result = true;
+	i32 bytes_to_receive = (i32)buf.size;
+	i32 total_bytes_received = 0;
+	
+	while(bytes_to_receive)
+	{
+		i32 bytes_received = recv(conv.ws, buffer + total_bytes_received, bytes_to_receive, 0);
+		if (bytes_received == SOCKET_ERROR)
+		{
+			int last_error = WSAGetLastError();
+			LogError("receive call failed with error %d", last_error);
+			result = false;
+			break;
+		}
+		if (bytes_received == 0)
+		{
+			Log("socket closed from other end");
+			result = false;
+			break;
+		}
+		
+		total_bytes_received += bytes_received;
+		bytes_to_receive -= bytes_received;
+	}
+	
+	return result;
+}
+#endif
 
 internal void
 w32_fix_path_slashes(String8 path)
@@ -158,12 +341,12 @@ w32_open_file(String8 path, u32 flags)
 	String16 cpath16 = str16_from_8(scratch.arena, path);
 	
 	result = CreateFileW((LPCWSTR)cpath16.str,
-		desired_access,
-		share_mode,
-		&security_attributes,
-		creation_disposition,
-		flags_and_attributes,
-		template_file);
+											 desired_access,
+											 share_mode,
+											 &security_attributes,
+											 creation_disposition,
+											 flags_and_attributes,
+											 template_file);
 	return result;
 }
 
@@ -339,7 +522,7 @@ Wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				ScreenToClient(hwnd, &point);
 			}
 			if (range2f32_is_inside(range2f32((f32)client_rect.left, (f32)client_rect.right, (f32)client_rect.top, (f32)client_rect.bottom),
-					v2((f32)point.x, (f32)point.y)))
+															v2((f32)point.x, (f32)point.y)))
 			{
 				SetCursor(cursors[g_w32_cursor]);
 				return 0;
@@ -491,8 +674,8 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 	CoInitializeEx(0, COINIT_SPEED_OVER_MEMORY);
 	
 	HRESULT res = CoCreateInstance(CLSID_MMDeviceEnumerator, 0,
-		CLSCTX_ALL, IID_IMMDeviceEnumerator,
-		(void**)&enumerator);
+																 CLSCTX_ALL, IID_IMMDeviceEnumerator,
+																 (void**)&enumerator);
 	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to create Device Enumartor");
 	
 	res = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
@@ -500,7 +683,7 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 	
 	
 	res = device->Activate(IID_IAudioClient, CLSCTX_ALL,
-		0, (void**)&audio_client);
+												 0, (void**)&audio_client);
 	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to activate device");
 	
 	WAVEFORMATEX *wfx = 0;
@@ -520,20 +703,20 @@ w32_init_wasapi(u32 sample_rate, u16 channels_count)
 	
 	REFERENCE_TIME requested_duration = 1 * REFTIMES_PER_SEC;
 	res = audio_client->Initialize(
-		AUDCLNT_SHAREMODE_SHARED,
-		AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-		requested_duration,
-		0,
-		&new_wf,
-		0);
+																 AUDCLNT_SHAREMODE_SHARED,
+																 AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+																 requested_duration,
+																 0,
+																 &new_wf,
+																 0);
 	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to Initialize audio");
 	
 	res = audio_client->GetBufferSize(&buffer_frame_count);
 	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to get buffer size");
 	
 	res = audio_client->GetService(
-		IID_IAudioRenderClient,
-		(void**)&render_client);
+																 IID_IAudioRenderClient,
+																 (void**)&render_client);
 	EXIT_ON_ERROR(res, "WASAPI ERROR", "Failed to Get render client");
 	
 	res = audio_client->Start();
@@ -585,7 +768,7 @@ w32_file_iter_begin(File_Iterator_Handle *it, String8 path)
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	String8 cpath;
 	if (path.str[path.len - 1] == '/' || 
-		path.str[path.len - 1] == '\\' )
+			path.str[path.len - 1] == '\\' )
 	{
 		cpath = str8_f(scratch.arena, "%.*s*", STR8_EXPAND(path));
 	}
@@ -649,7 +832,7 @@ w32_file_iter_next(File_Iterator_Handle *it, Memory_Arena *arena)
     filename16.len = (u64)(ptr - filename_base);
     result.name = str8_from_16(arena, filename16);
     result.size = ((((u64)find_data->nFileSizeHigh) << 32) |
-			((u64)find_data->nFileSizeLow));
+									 ((u64)find_data->nFileSizeLow));
   }
   return result;
 }
@@ -685,7 +868,7 @@ w32_read_directory(Memory_Arena *arena, String8 path)
 	
 	String8 search_path;
 	if (path.str[path.len - 1] == '/' || 
-		path.str[path.len - 1] == '\\' )
+			path.str[path.len - 1] == '\\' )
 	{
 		search_path = str8_f(scratch.arena, "%.*s*", STR8_EXPAND(path));
 	}
@@ -721,7 +904,7 @@ w32_read_directory(Memory_Arena *arena, String8 path)
 			String16 filename16 = str16(filename_base, (u64)(ptr - filename_base));
 			info->name = str8_from_16(arena, filename16);
 			info->size = ((((u64)find_data.nFileSizeHigh) << 32) |
-				((u64)find_data.nFileSizeLow));
+										((u64)find_data.nFileSizeLow));
 			// TODO(fakhri): set the extension
 			info->path = str8_f(arena, "%.*s%.*s", search_path.len - 1, search_path.str, STR8_EXPAND(info->name));
 			if (!FindNextFileW(hFind, &find_data))
@@ -757,7 +940,7 @@ w32_get_current_directory(Memory_Arena *arena)
 		cwd = str8_from_16(scratch.arena, path16);
 		
 		if (cwd.str[cwd.len - 1] == '/' ||
-			cwd.str[cwd.len - 1] == '\\')
+				cwd.str[cwd.len - 1] == '\\')
 		{
 			cwd = str8_clone(arena, cwd);
 		}
@@ -1310,9 +1493,11 @@ internal void
 w32_init_os_vtable()
 {
 	w32_vtable = {
+		.set_cursor                          = w32_set_cursor,
+		
+		// NOTE(fakhri): file system procs
 		.fix_path_slashes                    = w32_fix_path_slashes,
 		.make_folder_if_missing              = w32_make_folder_if_missing,
-		.set_cursor                          = w32_set_cursor,
 		.read_directory                      = w32_read_directory,
 		.get_current_directory               = w32_get_current_directory,
 		.load_entire_file                    = w32_load_entire_file,
@@ -1320,14 +1505,29 @@ w32_init_os_vtable()
 		.close_file                          = w32_close_file,
 		.read_block                          = w32_read_whole_block,
 		.write_block                         = w32_write_whole_block,
+		
+		// NOTE(fakhri): worker threads procs
 		.push_work                           = w32_push_work_sp,
 		.do_next_work                        = w32_do_next_work,
+		
+		// NOTE(fakhri): memory procs
 		.alloc                               = w32_allocate_memory,
 		.dealloc                             = w32_deallocate_memory,
+		
+		// NOTE(fakhri): atomic procs
 		.atomic_increment64                  = w32_atomic_increment64,
 		.atomic_decrement64                  = w32_atomic_decrement64,
 		.atomic_compare_and_exchange64       = w32_atomic_compare_and_exchange64,
 		.atomic_compare_and_exchange_pointer = w32_atomic_compare_and_exchange_pointer,
+		
+		// NOTE(fakhri): network procs
+		.is_valid_socket        = w32_is_valid_socket,
+		.accept_socket          = w32_accept_socket,
+		.close_socket           = w32_close_socket,
+		.connect_to_server      = w32_connect_to_server,
+		.open_listen_socket     = w32_open_listen_socket,
+		.network_send_buffer    = w32_network_send_buffer,
+		.network_receive_buffer = w32_network_receive_buffer,
 	};
 }
 
@@ -1398,11 +1598,11 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	if (RegisterClassA(&wc))
 	{
 		g_w32_window = CreateWindowA(W32_CLASS_NAME,
-			W32_WINDOW_NAME,
-			WS_OVERLAPPEDWINDOW,
-			CW_USEDEFAULT, CW_USEDEFAULT,
-			W32_WINDOW_W, W32_WINDOW_H,
-			0, 0, hInstance, 0);
+																 W32_WINDOW_NAME,
+																 WS_OVERLAPPEDWINDOW,
+																 CW_USEDEFAULT, CW_USEDEFAULT,
+																 W32_WINDOW_W, W32_WINDOW_H,
+																 0, 0, hInstance, 0);
 		if (g_w32_window)
 		{
 			

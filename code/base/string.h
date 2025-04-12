@@ -143,5 +143,9 @@ internal void str8_utf8_advance(String8_UTF8_Iterator *it);
 internal String8_UTF8_Iterator str8_utf8_iterator(String8 string);
 
 internal u64 u64_from_str8_base10(String8 str);
+internal u64 u64_from_str8_base16(String8 str);
+
+internal u32 str8_hash32(String8 string);
+internal u32 str8_hash32_case_insensitive(String8 string);
 
 #endif //STRING_H

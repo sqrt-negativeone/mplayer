@@ -25,7 +25,7 @@ set common_compiler_flags=/FC /Z7 /GR- /EHsc /nologo
 set compiler_flags=%common_compiler_flags% /std:c++20
 
 set compiler_includes= ^
-	/I "%code_dir%/code/"
+	/I "%code_dir%/code/" /I "%code_dir%/code/third_party"
 
 
 if %release_mode% EQU 0 ( rem Debug
@@ -39,10 +39,11 @@ set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
 
 :: add libs to link here
 set platform_libs= ^
-  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib
+  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib^
+  libcrypto.lib libssl.lib
 
 set app_libs= ^
-  samplerate.lib
+  samplerate.lib libcrypto.lib libssl.lib
 
 set common_linker_flags=/incremental:no
 
@@ -65,6 +66,7 @@ echo building platform layer
 call cl %compiler_settings% "%code_dir%\code\win32\win32_mplayer_main.cpp" /link %platform_linker_settings% /OUT:%exe_name%.exe
 
 xcopy "%code_dir%\lib\win32\*.dll" . /Y
+xcopy "%code_dir%\*.pem" . /Y
 
 del *.obj > NUL 2> NUL
 popd

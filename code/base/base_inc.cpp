@@ -7,3 +7,5 @@
 #include "random.cpp"
 #include "string.cpp"
 #include "thread_context.cpp"
+#include "http_core.cpp"
+#include "network.cpp"

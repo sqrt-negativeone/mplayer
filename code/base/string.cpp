@@ -27,11 +27,11 @@ internal b32
 char_is_symbol(u8 c)
 {
   return (c == '~' || c == '!'  || c == '$' || c == '%' || c == '^' ||
-		c == '&' || c == '*'  || c == '-' || c == '=' || c == '+' ||
-		c == '<' || c == '.'  || c == '>' || c == '/' || c == '?' ||
-		c == '|' || c == '\\' || c == '{' || c == '}' || c == '(' ||
-		c == ')' || c == '\\' || c == '[' || c == ']' || c == '#' ||
-		c == ',' || c == ';'  || c == ':' || c == '@');
+					c == '&' || c == '*'  || c == '-' || c == '=' || c == '+' ||
+					c == '<' || c == '.'  || c == '>' || c == '/' || c == '?' ||
+					c == '|' || c == '\\' || c == '{' || c == '}' || c == '(' ||
+					c == ')' || c == '\\' || c == '[' || c == ']' || c == '#' ||
+					c == ',' || c == ';'  || c == ':' || c == '@');
 }
 
 internal b32
@@ -164,7 +164,7 @@ decode_codepoint_from_utf8(u8 *str, u64 max)
       {
         u8 cont_byte[2] = {str[1], str[2]};
         if (utf8_class[cont_byte[0] >> 3] == 0 &&
-					utf8_class[cont_byte[1] >> 3] == 0)
+						utf8_class[cont_byte[1] >> 3] == 0)
         {
           result.codepoint = (byte & bitmask4) << 12;
           result.codepoint |= ((cont_byte[0] & bitmask6) << 6);
@@ -180,8 +180,8 @@ decode_codepoint_from_utf8(u8 *str, u64 max)
       {
         u8 cont_byte[3] = {str[1], str[2], str[3]};
         if (utf8_class[cont_byte[0] >> 3] == 0 &&
-					utf8_class[cont_byte[1] >> 3] == 0 &&
-					utf8_class[cont_byte[2] >> 3] == 0)
+						utf8_class[cont_byte[1] >> 3] == 0 &&
+						utf8_class[cont_byte[2] >> 3] == 0)
         {
           result.codepoint = (byte & bitmask3) << 18;
           result.codepoint |= ((cont_byte[0] & bitmask6) << 12);
@@ -213,8 +213,8 @@ decode_codepoint_from_utf16(u16 *out, u64 max)
 internal u32             
 utf8_from_codepoint(u8 *out, u32 codepoint)
 {
-	#define bit8 0x80
-		u32 advance = 0;
+#define bit8 0x80
+	u32 advance = 0;
   if (codepoint <= 0x7F)
   {
     out[0] = (u8)codepoint;
@@ -343,6 +343,17 @@ internal String8
 str8_chop_last(String8 str, u64 nmax)
 {
   return substr8(str, 0, str.len-nmax);
+}
+
+internal String8
+str8_chop_first_occurence(String8 string, String8 needle)
+{
+	u64 needle_pos = find_substr8(string, needle, 0, 0);
+	if(needle_pos < string.len)
+	{
+		string.len = needle_pos;
+	}
+	return string;
 }
 
 internal String8
@@ -478,8 +489,8 @@ str8_ends_with(String8 a, String8 b, Mch_Flags flags)
   if (a.len >= b.len)
   {
     for(u32 i = 0;
-			i < b.len;
-			i += 1)
+				i < b.len;
+				i += 1)
     {
       b32 match = (a.str[a.len - 1 - i] == b.str[b.len - 1 - i]);
       if(flags & MatchFlag_CaseInsensitive)
@@ -642,7 +653,7 @@ str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_par
   }
   String8 result = ZERO_STRUCT;
   result.len = (list.total_len + join.pre.len +
-    sep_count*join.sep.len + join.post.len);
+								sep_count*join.sep.len + join.post.len);
   result.str = m_arena_push_array(arena, u8, result.len);
   
   // NOTE(fakhri): fill
@@ -670,8 +681,8 @@ internal String8
 str8_chop_last_slash(String8 string)
 {
 	u64 slash_pos = find_substr8(string, str8_lit("/"), 0,
-		MatchFlag_SlashInsensitive|
-		MatchFlag_FindLast);
+															 MatchFlag_SlashInsensitive|
+															 MatchFlag_FindLast);
 	if(slash_pos < string.len)
 	{
 		string.len = slash_pos+1;
@@ -719,3 +730,52 @@ u64_from_str8_base10(String8 str)
 	}
 	return result;
 }
+
+internal u64
+u64_from_str8_base16(String8 str)
+{
+	u64 result = 0;
+  for (u32 i = 0; i < str.len; i += 1)
+  {
+		u64 digit = 0;
+    assert(('0' <= str.cstr[i] && str.cstr[i] <= '9') || ('a' <= str.cstr[i] && str.cstr[i] <= 'f'));
+		
+		if ('0' <= str.cstr[i] && str.cstr[i] <= '9')
+		{
+			digit = (str.cstr[i] - '0');
+		}
+		
+		if ('a' <= str.cstr[i] && str.cstr[i] <= 'f')
+		{
+			digit = 10 + (str.cstr[i] - 'a');
+		}
+		
+    result = digit + 16 * result;
+  }
+  return result;
+}
+
+internal u32
+str8_hash32(String8 string)
+{
+	u32 hash = 0;
+	for (u32 i = 0; i < string.len; i += 1)
+	{
+		hash += (hash * 33) ^ string.str[i];
+	}
+	return hash;
+}
+
+internal u32
+str8_hash32_case_insensitive(String8 string)
+{
+	u32 hash = 0;
+	for (u32 i = 0; i < string.len; i += 1)
+	{
+		u8 c = string.str[i];
+		if (c >= 'A' && c < 'Z') c = c - 'A' + 'a';
+		hash += (hash * 33) ^ c;
+	}
+	return hash;
+}
+
