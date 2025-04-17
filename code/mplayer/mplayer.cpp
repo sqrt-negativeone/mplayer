@@ -1,7 +1,6 @@
 
 #include <time.h>
 
-
 #include "base/base_inc.h"
 #include "base/base_inc.cpp"
 
@@ -3108,6 +3107,28 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_ctx->volume = 1.0f;
 	mplayer_ctx->ssl_ctx = ssl_context_init();
 	mplayer_ctx->ui = ui_init(mplayer_ctx->font);
+	
+#if 0
+	{
+		Socket test_socket = secure_socket_connect(mplayer_ctx->ssl_ctx, "google.com", "443");
+		assert(test_socket.valid);
+		Buffered_Socket buf_socket = ZERO_STRUCT;
+		init_buffered_socket(&buf_socket, test_socket);
+		Http_Request req = ZERO_STRUCT;
+		
+		req.method = HTTP_METHOD_GET;
+		req.uri = str8_lit("/");
+		
+		Memory_Checkpoint scratch = get_scratch(0, 0);
+		http_send_request(test_socket, req);
+		
+		Http_Response response = ZERO_STRUCT;
+		http_receive_response(scratch.arena, &buf_socket, &response);
+		
+		Log("Http response: %.*s", STR8_EXPAND(response.status_line));
+	}
+#endif
+	
 	
 	// NOTE(fakhri): ctx menu ids
 	{

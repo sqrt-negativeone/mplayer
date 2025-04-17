@@ -186,13 +186,12 @@ w32_network_send_buffer(Socket_Handle s, Buffer buf)
 }
 
 
-internal b32
+internal i32
 w32_network_receive_buffer(Socket_Handle s, Buffer buf)
 {
 	Win32_Socket conv = {.s = s};
 	
 	char *buffer = (char *)buf.data;
-	b32 result = true;
 	i32 bytes_to_receive = (i32)buf.size;
 	i32 total_bytes_received = 0;
 	
@@ -203,13 +202,12 @@ w32_network_receive_buffer(Socket_Handle s, Buffer buf)
 		{
 			int last_error = WSAGetLastError();
 			LogError("receive call failed with error %d", last_error);
-			result = false;
+			total_bytes_received = -1;
 			break;
 		}
 		if (bytes_received == 0)
 		{
 			Log("socket closed from other end");
-			result = false;
 			break;
 		}
 		
@@ -217,7 +215,7 @@ w32_network_receive_buffer(Socket_Handle s, Buffer buf)
 		bytes_to_receive -= bytes_received;
 	}
 	
-	return result;
+	return total_bytes_received;
 }
 #endif
 
@@ -1529,6 +1527,16 @@ w32_init_os_vtable()
 		.network_send_buffer    = w32_network_send_buffer,
 		.network_receive_buffer = w32_network_receive_buffer,
 	};
+	
+	// NOTE(fakhri): setup network
+	{
+		WSADATA wsaData;
+		if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) 
+		{
+			LogError("Couldn't init socket");
+			PostQuitMessage(1);
+		}
+	}
 }
 
 global Worker_Thread_Context g_worker_threads[64];
@@ -1583,6 +1591,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 		HANDLE thread_handle = CreateThread(0, 0, w32_worker_thread_main, (void*)worker_thread_ctx, 0, 0);
 		CloseHandle(thread_handle);
 	}
+	
 	
 	g_shit_event = CreateEvent(0, 0, 0, 0);
 	

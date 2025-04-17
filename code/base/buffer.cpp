@@ -6,6 +6,15 @@ arena_push_buffer(Memory_Arena *arena, u64 size)
 	return result;
 }
 
+internal Buffer
+to_buffer(String8 string)
+{
+	Buffer result = ZERO_STRUCT;
+	result.data = string.str;
+	result.size = string.len;
+	return result;
+}
+
 internal String8
 to_string(Buffer buffer)
 {

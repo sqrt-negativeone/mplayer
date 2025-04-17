@@ -1,5 +1,44 @@
 
+internal b32
+network_socket_send(Socket socket, Buffer buf)
+{
+	b32 result = 0;
+	if (socket.secured)
+	{
+		result = ssl_network_send_buffer(socket.ssl, buf.data, buf.size);
+	}
+	else
+	{
+		result = platform->network_send_buffer(socket.handle, buf);
+	}
+	
+	return result;
+}
 
+internal i32 
+network_socket_read(Socket socket, Buffer buf)
+{
+	i32 result = 0;
+	if (socket.secured)
+	{
+		size_t ret = 0;
+		if (!SSL_read_ex(socket.ssl, buf.data, buf.size, &ret))
+		{
+			if (SSL_get_error(socket.ssl, 0) != SSL_ERROR_ZERO_RETURN)
+			{
+				result = -1;
+			}
+		}
+		else
+			result = (i32)ret;
+	}
+	else
+	{
+		result = platform->network_receive_buffer(socket.handle, buf);
+	}
+	
+	return result;
+}
 
 internal SSL_CTX *
 ssl_context_init()
@@ -15,12 +54,12 @@ ssl_context_init()
 	return ssl_ctx;
 }
 
-internal Secured_Socket
-secure_socket_connect(SSL_CTX *ssl_ctx, const char *hostname)
+internal Socket
+secure_socket_connect(SSL_CTX *ssl_ctx, const char *hostname, const char *port)
 {
-	Secured_Socket result = ZERO_STRUCT;
+	Socket result = ZERO_STRUCT;
 	
-	Socket_Handle socket = platform->connect_to_server(hostname, "443");
+	Socket_Handle socket = platform->connect_to_server(hostname, port);
 	if (platform->is_valid_socket(socket))
 	{
 		SSL *ssl = SSL_new(ssl_ctx);
@@ -39,9 +78,10 @@ secure_socket_connect(SSL_CTX *ssl_ctx, const char *hostname)
 		// NOTE(fakhri): tls handshake:
 		if (SSL_connect(ssl) == 1)
 		{
-			result.s   = socket;
-			result.ssl = ssl;
+			result.secured = true;
 			result.valid = 1;
+			result.handle   = socket;
+			result.ssl = ssl;
 		}
 		else
 		{
@@ -86,30 +126,23 @@ ssl_network_send_buffer(SSL *ssl, const void *data, u64 size)
 }
 
 internal void
-init_buffered_socket(Secured_Buffered_Socket *buf_socket, Secured_Socket secured_socket)
+init_buffered_socket(Buffered_Socket *buf_socket, Socket socket)
 {
-	buf_socket->secured_socket = secured_socket;
+	buf_socket->socket = socket;
 	buf_socket->availabe_bytes = 0;
 	buf_socket->offset         = 0;
 }
 
 internal i64
-buffered_socket_read(Secured_Buffered_Socket *buf_socket, u8 *dst, u64 dst_size)
+buffered_socket_read(Buffered_Socket *buf_socket, u8 *dst, u64 dst_size)
 {
 	if (!buf_socket->availabe_bytes)
 	{
 		buf_socket->offset = 0;
-		if (!SSL_read_ex(buf_socket->secured_socket.ssl, buf_socket->buf, BUFFERED_SOCKET_CAPACITY, &buf_socket->availabe_bytes))
-		{
-			if (SSL_get_error(buf_socket->secured_socket.ssl, 0) != SSL_ERROR_ZERO_RETURN)
-			{
-				return -1;
-			}
-			
-			buf_socket->availabe_bytes = 0;
-			// NOTE(fakhri): EOF
-			return 0;
-		}
+		buf_socket->availabe_bytes = network_socket_read(buf_socket->socket, 
+																										 make_buffer(buf_socket->buf, BUFFERED_SOCKET_CAPACITY));
+		if (buf_socket->availabe_bytes < 0)
+			return -1;
 	}
 	
 	u64 bytes_to_copy = MIN(dst_size, (u64)buf_socket->availabe_bytes);
@@ -120,7 +153,7 @@ buffered_socket_read(Secured_Buffered_Socket *buf_socket, u8 *dst, u64 dst_size)
 }
 
 internal void
-buffered_socket_receive_buffer(Secured_Buffered_Socket *buf_socket, u8 *buf, u64 receive_bytes)
+buffered_socket_receive_buffer(Buffered_Socket *buf_socket, u8 *buf, u64 receive_bytes)
 {
 	u8 *buf_ptr = buf;
 	for (;receive_bytes;)
@@ -137,7 +170,7 @@ buffered_socket_receive_buffer(Secured_Buffered_Socket *buf_socket, u8 *buf, u64
 }
 
 internal String8
-buffered_socket_receive_line(Memory_Arena *arena, Secured_Buffered_Socket *buf_socket, u64 max_line_size)
+buffered_socket_receive_line(Memory_Arena *arena, Buffered_Socket *buf_socket, u64 max_line_size)
 {
 	Memory_Checkpoint scratch = begin_scratch(&arena, 1);
 	
@@ -182,7 +215,7 @@ buffered_socket_receive_line(Memory_Arena *arena, Secured_Buffered_Socket *buf_s
 
 
 internal void
-https_send_request(Secured_Socket secured_socket, Http_Request request)
+http_send_request(Socket socket, Http_Request request)
 {
 	Memory_Checkpoint scratch = begin_scratch(0, 0);
 	
@@ -211,13 +244,13 @@ https_send_request(Secured_Socket secured_socket, Http_Request request)
 	
 	Log("Request Message: %.*s", STR8_EXPAND(message));
 	
-	ssl_network_send_buffer(secured_socket.ssl, message.str, (i32)message.len);
+	network_socket_send(socket, to_buffer(message));
 	end_scratch(scratch);
 }
 
 
 internal void
-https_receive_body(Memory_Arena *arena, Secured_Buffered_Socket *buf_socket, Http_Response *response)
+http_receive_body(Memory_Arena *arena, Buffered_Socket *buf_socket, Http_Response *response)
 {
 	Memory_Checkpoint scratch = begin_scratch(&arena, 1);
 	if (http_header_match_field_value_case_insensitive(&response->header_fields, str8_lit("Transfer-Encoding"), str8_lit("chunked")))
@@ -262,7 +295,7 @@ https_receive_body(Memory_Arena *arena, Secured_Buffered_Socket *buf_socket, Htt
 }
 
 internal void
-https_receive_response(Memory_Arena *arena, Secured_Buffered_Socket *buf_socket, Http_Response *response)
+http_receive_response(Memory_Arena *arena, Buffered_Socket *buf_socket, Http_Response *response)
 {
 	Memory_Checkpoint scratch = begin_scratch(&arena, 1);
 	
@@ -310,6 +343,6 @@ https_receive_response(Memory_Arena *arena, Secured_Buffered_Socket *buf_socket,
 	
 	http_parse_header_fields(arena, headers, &response->header_fields);
 	
-	https_receive_body(arena, buf_socket, response);
+	http_receive_body(arena, buf_socket, response);
 	end_scratch(scratch);
 }
