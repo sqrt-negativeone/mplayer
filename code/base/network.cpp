@@ -1,4 +1,15 @@
 
+internal void
+network_socket_close(Socket socket)
+{
+	if (socket.secured)
+	{
+		SSL_shutdown(socket.ssl);
+		SSL_free(socket.ssl);
+	}
+	platform->close_socket(socket.handle);
+}
+
 internal b32
 network_socket_send(Socket socket, Buffer buf)
 {
