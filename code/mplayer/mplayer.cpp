@@ -425,6 +425,20 @@ global Mplayer_Context *mplayer_ctx;
 
 #include "byte_stream.h"
 #include "mplayer_serialization.cpp"
+
+internal u64
+mplayer_get_track_duration(Mplayer_Track *track)
+{
+	u64 duration = 0;
+	if (track && track->flac_stream)
+	{
+		u64 samples_count = track->end_sample_offset - track->start_sample_offset;
+		u64 sample_rate = u64(track->flac_stream->streaminfo.sample_rate);
+		duration = samples_count / sample_rate;
+	}
+	return duration;
+}
+
 #include "mplayer_lastfm.cpp"
 
 //~ NOTE(fakhri): Animation timer stuff
@@ -443,22 +457,29 @@ struct Mplayer_Timestamp
 	u8 seconds;
 };
 
+internal Mplayer_Timestamp
+mplayer_timestamp_from_duration(u64 duration)
+{
+	Mplayer_Timestamp result = ZERO_STRUCT;
+	
+	u64 hours = duration / 3600;
+	duration %= 3600;
+	
+	u64 minutes = duration / 60;
+	duration %= 60;
+	
+	result.hours   = u8(hours);
+	result.minutes = u8(minutes);
+	result.seconds = u8(duration);
+	
+	return result;
+}
 
 internal Mplayer_Timestamp
 flac_get_current_timestap(u64 current_sample, u64 sample_rate)
 {
-	Mplayer_Timestamp result = ZERO_STRUCT;
 	u64 seconds_elapsed = current_sample / sample_rate;
-	u64 hours = seconds_elapsed / 3600;
-	seconds_elapsed %= 3600;
-	
-	u64 minutes = seconds_elapsed / 60;
-	seconds_elapsed %= 60;
-	
-	result.hours   = u8(hours);
-	result.minutes = u8(minutes);
-	result.seconds = u8(seconds_elapsed);
-	
+	Mplayer_Timestamp result = mplayer_timestamp_from_duration(seconds_elapsed);
 	return result;
 }
 
@@ -915,7 +936,6 @@ internal void
 mplayer_track_update_report(Mplayer_Track *track)
 {
 	
-	
 }
 
 internal void
@@ -1157,6 +1177,16 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	
+	// NOTE(fakhri): update scrobbles
+	{
+		Mplayer_Track *current_track = mplayer_queue_get_current_track();
+		if (current_track)
+		{
+			// TODO(fakhri): only scrobble if we met last.fm definition of scrobble
+			mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, current_track);
+		}
+	}
+	
 	// TODO(fakhri): Since now we have tracks that point to 
 	// parts of a file, when we play these track we seek
 	// to wherever the start offset of the track is, if the file
@@ -1185,7 +1215,7 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		{
 			Mplayer_Track *track = mplayer_queue_get_current_track();
 			mplayer_load_track(track);
-			mplayer_lastfm_update_now_playing(track);
+			mplayer_lastfm_update_now_playing(&mplayer_ctx->lastfm, track);
 		}
 	}
 }
@@ -3116,7 +3146,6 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			if (streamed_samples.last_samples_in_track)
 			{
 				// NOTE(fakhri): track just finished playing
-				mplayer_lastfm_scrobble_track(track);
 			}
 		}
 	}
