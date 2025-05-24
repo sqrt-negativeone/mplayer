@@ -39,7 +39,7 @@ set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
 
 :: add libs to link here
 set platform_libs= ^
-  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib^
+  opengl32.lib user32.lib gdi32.lib ole32.lib winmm.lib shell32.lib^
   libcrypto.lib libssl.lib
 
 set app_libs= ^

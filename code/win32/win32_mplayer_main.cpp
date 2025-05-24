@@ -185,6 +185,19 @@ w32_network_send_buffer(Socket_Handle s, Buffer buf)
 	return result;
 }
 
+internal i32
+w32_network_read(Socket_Handle s, Buffer buf)
+{
+	Win32_Socket conv = {.s = s};
+	i32 bytes_received = recv(conv.ws, (char *)buf.data, (int)buf.size, 0);
+	if (bytes_received == SOCKET_ERROR)
+	{
+		int last_error = WSAGetLastError();
+		LogError("receive call failed with error %d", last_error);
+		bytes_received = -1;
+	}
+	return bytes_received;
+}
 
 internal i32
 w32_network_receive_buffer(Socket_Handle s, Buffer buf)
@@ -1322,7 +1335,6 @@ w32_update_audio()
 	u32 max_lag_sample_count = max_ms_lag * g_w32_sound_output.config.sample_rate / 1000;
 	
 	f32 audio_dt = w32_get_seconds_elapsed(&g_w32_audio_timer);
-	Log("Audio Elasped time: %.2f ms", audio_dt * 1000);
 	w32_update_timer(&g_w32_audio_timer);
 	
 	f32 request_duration = audio_dt;
@@ -1486,6 +1498,13 @@ w32_main_thread(void *unused)
 	ExitProcess(0);
 }
 
+#include "shellapi.h"
+internal b32
+w32_open_url_in_default_browser(String8 url)
+{
+	ShellExecuteA(0, "open", url.cstr, 0, 0, SW_SHOWNORMAL);
+	return true;
+}
 
 internal void
 w32_init_os_vtable()
@@ -1526,6 +1545,9 @@ w32_init_os_vtable()
 		.open_listen_socket     = w32_open_listen_socket,
 		.network_send_buffer    = w32_network_send_buffer,
 		.network_receive_buffer = w32_network_receive_buffer,
+		.network_read           = w32_network_read,
+		
+		.open_url_in_default_browser = w32_open_url_in_default_browser,
 	};
 	
 	// NOTE(fakhri): setup network

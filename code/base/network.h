@@ -17,7 +17,7 @@ struct Socket
 struct Buffered_Socket
 {
 	Socket socket;
-	u64 availabe_bytes;
+	i64 availabe_bytes;
 	u64 offset;
 	u8 buf[BUFFERED_SOCKET_CAPACITY];
 };

@@ -70,7 +70,7 @@ http_header_match_field_value_case_insensitive(Http_Header_Fields *header_fields
 	{
 		assert(field->values.first);
 		String8 field_value = field->values.first->str;
-		if (find_substr8(field_value, match_value, 0, MatchFlag_CaseInsensitive) < field_value.len)
+		if (str8_find(field_value, match_value, 0, MatchFlag_CaseInsensitive) < field_value.len)
 		{
 			result = 1;
 		}

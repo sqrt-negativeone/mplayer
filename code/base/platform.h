@@ -69,10 +69,18 @@ struct Directory
 	u32 count;
 };
 
-struct Socket_Handle
+union Socket_Handle
 {
-	u8 opaque[16];
+	u8  opaque[16];
+	u64 opaque64[2];
 };
+
+internal b32
+is_socket_handle_valid(Socket_Handle handle)
+{
+	b32 valid = handle.opaque64[0] || handle.opaque64[1];
+	return valid;
+}
 
 typedef b32 Is_Valid_Socket_Proc(Socket_Handle s);
 typedef Socket_Handle Accept_Socket_Proc(Socket_Handle s, void *addr, int *addrlen);
@@ -81,6 +89,7 @@ typedef Socket_Handle Connect_To_Server_Proc(const char *server_address, const c
 typedef Socket_Handle Open_Listen_Socket_Proc(const char *port);
 typedef b32 Network_Send_Buffer_Proc(Socket_Handle s, Buffer buffer);
 typedef i32 Network_Receive_Buffer_Proc(Socket_Handle s, Buffer buffer);
+typedef i32 Network_Read(Socket_Handle s, Buffer buffer);
 
 typedef b32 Is_Path_Slash_Proc(u8 c);
 typedef void Fix_Path_Slashes_Proc(String8 path);
@@ -102,6 +111,8 @@ typedef Buffer File_Read_block_Proc(File_Handle *file, void *data, u64 size);
 typedef b32 File_Write_block_Proc(File_Handle *file, void *buf, u64 size);
 
 typedef Buffer Load_Entire_File(Memory_Arena *arena, String8 file_path);
+
+typedef b32 Open_URL_In_Default_Browser_Proc(String8 url);
 
 typedef struct OS_Vtable OS_Vtable;
 struct OS_Vtable
@@ -142,7 +153,9 @@ struct OS_Vtable
 	Open_Listen_Socket_Proc     *open_listen_socket;
 	Network_Send_Buffer_Proc    *network_send_buffer;
 	Network_Receive_Buffer_Proc *network_receive_buffer;
+	Network_Receive_Buffer_Proc *network_read;
 	
+	Open_URL_In_Default_Browser_Proc         *open_url_in_default_browser;
 };
 
 global OS_Vtable *platform = 0;

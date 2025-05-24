@@ -13,6 +13,7 @@
 #include "mplayer_flac.h"
 
 #include "mplayer_font.h"
+#include "mplayer_lastfm.h"
 
 enum Image_Data_State
 {
@@ -333,6 +334,7 @@ enum Mplayer_Modal_Menu
 	MODAL_Path_Lister,
 	MODAL_Add_To_Playlist,
 	MODAL_Create_Playlist,
+	MODAL_Lastfm_Wait_User_Confirmation,
 	Modal_Menu_COUNT,
 };
 
@@ -352,6 +354,7 @@ struct Mplayer_Context
 	Random_Generator entropy;
 	SSL_CTX *ssl_ctx;
 	Font *font;
+	Mplayer_Lastfm lastfm;
 	
 	f32 time_since_last_play;
 	f32 volume;
@@ -420,8 +423,9 @@ struct Mplayer_Context
 global Mplayer_Input *g_input;
 global Mplayer_Context *mplayer_ctx;
 
-#include "mplayer_lastfm.cpp"
 #include "byte_stream.h"
+#include "mplayer_serialization.cpp"
+#include "mplayer_lastfm.cpp"
 
 //~ NOTE(fakhri): Animation timer stuff
 internal void
@@ -1092,6 +1096,7 @@ draw_outline(Render_Group *group, Range2_F32 rect, f32 z, V4_F32 color, f32 thic
 
 #include "mplayer_ui.cpp"
 
+
 //~ NOTE(fakhri): Queue stuff
 #define _NULL_QUEUE_INDEX {}
 
@@ -1475,169 +1480,6 @@ enum Mplayer_Library_Index_Version : u32
 	INDEX_VERSION_NULL,
 	INDEX_VERSION_1,
 };
-
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Track_ID id)
-{
-	platform->write_block(file, &id, sizeof(id));
-}
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Artist_ID id)
-{
-	platform->write_block(file, &id, sizeof(id));
-}
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Album_ID id)
-{
-	platform->write_block(file, &id, sizeof(id));
-}
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Playlist_ID id)
-{
-	platform->write_block(file, &id, sizeof(id));
-}
-
-internal void
-mplayer_serialize(File_Handle *file, u32 num)
-{
-	platform->write_block(file, &num, sizeof(num));
-}
-
-internal void
-mplayer_serialize(File_Handle *file, b32 num)
-{
-	platform->write_block(file, &num, sizeof(num));
-}
-
-internal void
-mplayer_serialize(File_Handle *file, u64 num)
-{
-	platform->write_block(file, &num, sizeof(num));
-}
-
-internal void
-mplayer_serialize(File_Handle *file, String8 string)
-{
-	mplayer_serialize(file, string.len);
-	platform->write_block(file, string.str, string.len);
-}
-
-internal void
-mplayer_serialize(File_Handle *file, Buffer buffer)
-{
-	mplayer_serialize(file, buffer.size);
-	platform->write_block(file, buffer.data, buffer.size);
-}
-
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Item_Image image)
-{
-	mplayer_serialize(file, image.in_disk);
-	if (image.in_disk)
-	{
-		mplayer_serialize(file, image.path);
-	}
-	else
-	{
-		mplayer_serialize(file, image.texture_data);
-	}
-}
-
-internal void
-mplayer_serialize(File_Handle *file, Mplayer_Track_ID_List tracks)
-{
-	mplayer_serialize(file, tracks.count);
-	for(Mplayer_Track_ID_Entry *entry = tracks.first;
-			entry;
-			entry = entry->next)
-	{
-		mplayer_serialize(file, entry->track_id);
-	}
-}
-
-internal void
-mplayer_serialize_track(File_Handle *file, Mplayer_Track *track)
-{
-	mplayer_serialize(file, track->hash);
-	mplayer_serialize(file, track->path);
-	mplayer_serialize(file, track->title);
-	mplayer_serialize(file, track->album);
-	mplayer_serialize(file, track->artist);
-	mplayer_serialize(file, track->genre);
-	mplayer_serialize(file, track->date);
-	mplayer_serialize(file, track->track_number);
-	mplayer_serialize(file, track->start_sample_offset);
-	mplayer_serialize(file, track->end_sample_offset);
-	mplayer_serialize(file, track->play_count);
-}
-
-internal void
-mplayer_serialize_playlist(File_Handle *file, Mplayer_Playlist *playlist)
-{
-	mplayer_serialize(file, playlist->name);
-	mplayer_serialize(file, playlist->tracks);
-}
-
-internal void
-mplayer_serialize_artist(File_Handle *file, Mplayer_Artist *artist)
-{
-	mplayer_serialize(file, artist->hash);
-	mplayer_serialize(file, artist->name);
-}
-
-internal void
-mplayer_serialize_album(File_Handle *file, Mplayer_Album *album)
-{
-	mplayer_serialize(file, album->hash);
-	mplayer_serialize(file, album->name);
-	mplayer_serialize(file, album->artist);
-	
-	Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-	mplayer_serialize(file, *image);
-}
-
-internal void
-mplayer_deserialize_track(Byte_Stream *bs, Mplayer_Track *track)
-{
-	byte_stream_read(bs, &track->hash);
-	byte_stream_read(bs, &track->path);
-	byte_stream_read(bs, &track->title);
-	byte_stream_read(bs, &track->album);
-	byte_stream_read(bs, &track->artist);
-	byte_stream_read(bs, &track->genre);
-	byte_stream_read(bs, &track->date);
-	byte_stream_read(bs, &track->track_number);
-	byte_stream_read(bs, &track->start_sample_offset);
-	byte_stream_read(bs, &track->end_sample_offset);
-	byte_stream_read(bs, &track->play_count);
-}
-
-internal void
-mplayer_deserialize_artist(Byte_Stream *bs, Mplayer_Artist *artist)
-{
-	byte_stream_read(bs, &artist->hash);
-	byte_stream_read(bs, &artist->name);
-}
-
-internal void
-mplayer_deserialize_album(Byte_Stream *bs, Mplayer_Album *album)
-{
-	byte_stream_read(bs, &album->hash);
-	byte_stream_read(bs, &album->name);
-	byte_stream_read(bs, &album->artist);
-	
-	Mplayer_Item_Image *image = mplayer_get_image_by_id(album->image_id, 0);
-	byte_stream_read(bs, image);
-	if (image->in_disk)
-	{
-		image->path = str8_clone(&mplayer_ctx->library.arena, image->path);
-	}
-	else
-	{
-		image->texture_data = clone_buffer(&mplayer_ctx->library.arena, image->texture_data);
-	}
-}
-
 internal void
 mplayer_save_indexed_library()
 {
@@ -1832,7 +1674,7 @@ mplayer_find_cuesheet_for_file(Cuesheet_List cuesheet_list, String8 file_name)
 	Cuesheet_File *result = 0;
 	for (Cuesheet_File *cuesheet = cuesheet_list.first; cuesheet; cuesheet = cuesheet->next)
 	{
-		if (find_substr8(cuesheet->file, file_name, 0, MatchFlag_CaseInsensitive) < cuesheet->file.len)
+		if (str8_find(cuesheet->file, file_name, 0, MatchFlag_CaseInsensitive) < cuesheet->file.len)
 		{
 			result = cuesheet;
 			break;
@@ -2896,6 +2738,205 @@ mplayer_ui_side_bar_button(String8 string, Mplayer_Mode target_mode)
 	}
 }
 
+internal void
+mplayer_ui_setting_begin_section(String8 section_name)
+{
+	ui_next_height(ui_size_by_childs(1));
+	ui_horizontal_layout()
+	{
+		ui_next_width(ui_size_text_dim(1));
+		ui_next_height(ui_size_text_dim(1));
+		ui_next_font_size(30);
+		ui_label(section_name);
+	}
+	ui_spacer_pixels(10, 1);
+	
+	ui_push_height(ui_size_by_childs(1));
+	ui_push_parent(ui_layout(Axis2_X));
+	ui_padding(ui_size_pixel(30, 1));
+	ui_push_parent(ui_layout(Axis2_Y));
+}
+
+internal void
+mplayer_ui_setting_end_section()
+{
+	ui_pop_parent();
+	ui_pop_parent();
+	ui_pop_height();
+}
+#define mplayer_ui_setting_section(section_name) _defer_loop(mplayer_ui_setting_begin_section(section_name), mplayer_ui_setting_end_section())
+
+internal void
+mplayer_ui_settings(V4_F32 header_bg_color)
+{
+	// NOTE(fakhri): header
+	ui_next_background_color(header_bg_color);
+	ui_next_height(ui_size_pixel(69, 1));
+	ui_horizontal_layout()
+	{
+		ui_spacer_pixels(50, 0);
+		
+		ui_next_background_color(v4(1, 1, 1, 0));
+		ui_next_text_color(v4(1, 1, 1, 1));
+		ui_next_width(ui_size_text_dim(1));
+		ui_next_font_size(50);
+		ui_label(str8_lit("Settings"));
+	}
+	
+	ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
+	{
+		ui_next_childs_axis(Axis2_Y);
+		
+		UI_Element *setting_root_ui = ui_element(str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll);
+		ui_parent(setting_root_ui)
+			ui_padding(ui_size_pixel(20, 1))
+		{
+			mplayer_ui_setting_section(str8_lit("Library"))
+			{
+				ui_next_width(ui_size_parent_remaining());
+				ui_next_height(ui_size_by_childs(1));
+				ui_parent(ui_element({}, 0))
+				{
+					ui_next_background_color(v4(0.02f,0.02f,0.02f,1));
+					ui_next_height(ui_size_pixel(60, 1));
+					ui_next_roundness(5);
+					UI_Element *add_location_el = ui_element(str8_lit("setting-track-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
+					ui_parent(add_location_el) ui_padding(ui_size_parent_remaining()) ui_pref_height(ui_size_by_childs(1))
+						ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
+					{
+						ui_next_width(ui_size_text_dim(1));
+						ui_next_height(ui_size_text_dim(1));
+						ui_label(str8_lit("Track Library Locations"));
+						
+						ui_spacer(ui_size_parent_remaining());
+						
+						ui_next_roundness(5);
+						ui_next_background_color(v4(0.05f,0.05f,0.05f,1));
+						ui_next_width(ui_size_by_childs(1));
+						ui_next_height(ui_size_by_childs(1));
+						ui_next_childs_axis(Axis2_Y);
+						ui_next_hover_cursor(Cursor_Hand);
+						UI_Element *loc_el = ui_element(str8_lit("add-location-button"), UI_FLAG_Draw_Background | UI_FLAG_Clickable);
+						if (ui_interaction_from_element(loc_el).clicked_left)
+						{
+							mplayer_open_path_lister(&mplayer_ctx->path_lister);
+						}
+						
+						ui_parent(loc_el) 
+							ui_padding(ui_size_pixel(5, 1)) ui_pref_width(ui_size_by_childs(1))
+							ui_horizontal_layout() ui_padding(ui_size_pixel(5, 1))
+						{
+							ui_next_width(ui_size_text_dim(1));
+							ui_next_height(ui_size_text_dim(1));
+							ui_label(str8_lit("Add Location"));
+						}
+					}
+					
+					u32 location_to_delete = mplayer_ctx->settings.locations_count;
+					
+					if (mplayer_ctx->show_library_locations) 
+						ui_pref_background_color(v4(0.05f,0.05f,0.05f,1))
+						ui_pref_flags(UI_FLAG_Animate_Dim)
+						ui_pref_height(ui_size_by_childs(1))
+						ui_pref_roundness(10)
+						ui_for_each_list_item(str8_lit("settings-location-list"), mplayer_ctx->settings.locations_count, 40.0f, 1.0f, location_index)
+						ui_pref_height(ui_size_parent_remaining()) ui_pref_flags(0) ui_pref_roundness(100)
+					{
+						Mplayer_Library_Location *location = mplayer_ctx->settings.locations + location_index;
+						ui_next_border_thickness(2);
+						u32 flags = UI_FLAG_Animate_Dim | UI_FLAG_Clip | UI_FLAG_Draw_Background;
+						UI_Element *location_el = ui_element_f(flags, "location-item-%p", location);
+						location_el->child_layout_axis = Axis2_X;
+						
+						ui_parent(location_el) ui_padding(ui_size_pixel(10, 1))
+						{
+							ui_next_width(ui_size_text_dim(1));
+							ui_label(str8(location->path, location->path_len));
+							
+							ui_spacer(ui_size_parent_remaining());
+							
+							ui_next_width(ui_size_pixel(20, 1));
+							ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+							{
+								ui_next_height(ui_size_pixel(20, 1));
+								ui_next_roundness(10);
+								ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1));
+								if (ui_button_f("X###delete-location-%p", location).clicked_left)
+								{
+									location_to_delete = location_index;
+									mplayer_save_settings();
+								}
+							}
+						}
+					}
+					
+					if (location_to_delete < mplayer_ctx->settings.locations_count)
+					{
+						for (u32 i = location_to_delete; i < mplayer_ctx->settings.locations_count - 1; i += 1)
+						{
+							memory_copy_struct(&mplayer_ctx->settings.locations[i], &mplayer_ctx->settings.locations[i + 1]);
+						}
+						
+						mplayer_ctx->settings.locations_count -= 1;
+					}
+					
+					Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
+					if (add_loc_interaction.hover)
+					{
+						add_location_el->background_color = v4(0.069f,0.069f,0.069f,1);
+					}
+					if (add_loc_interaction.pressed_left)
+					{
+						add_location_el->background_color = v4(0.12f,0.12f,0.12f,1);
+					}
+					if (add_loc_interaction.clicked_left)
+					{
+						mplayer_ctx->show_library_locations = !mplayer_ctx->show_library_locations;
+						mplayer_animate_next_frame();
+					}
+				}
+				
+				ui_spacer_pixels(20,1);
+				ui_next_width(ui_size_text_dim(1));
+				ui_next_height(ui_size_text_dim(1));
+				if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked_left)
+				{
+					platform->set_cursor(Cursor_Wait);
+					mplayer_index_library();
+					platform->set_cursor(Cursor_Arrow);
+				}
+			}
+			
+			ui_spacer_pixels(30, 1);
+			
+			mplayer_ui_setting_section(str8_lit("Scrobbles"))
+			{
+				ui_spacer_pixels(20,1);
+				
+				if (!mplayer_ctx->lastfm.valid)
+				{
+					ui_next_width(ui_size_text_dim(1));
+					ui_next_height(ui_size_text_dim(1));
+					if (mplayer_ui_underlined_button(str8_lit("Link Last.fm account")).clicked_left)
+					{
+						mplayer_lastfm_start_authentication(&mplayer_ctx->lastfm);
+					}
+				}
+				else
+				{
+					// TODO(fakhri): display linked username and profile picture or whatever.
+					ui_label(mplayer_ctx->lastfm.username);
+				}
+			}
+			
+		}
+		
+		ui_interaction_from_element(setting_root_ui);
+	}
+	
+	
+}
+
 //~ NOTE(fakhri): Playlists stuff
 
 internal void
@@ -3107,6 +3148,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_ctx->volume = 1.0f;
 	mplayer_ctx->ssl_ctx = ssl_context_init();
 	mplayer_ctx->ui = ui_init(mplayer_ctx->font);
+	mplayer_ctx->lastfm = mplayer_lastfm_init();
 	
 #if 0
 	{
@@ -3129,7 +3171,6 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	}
 #endif
 	
-	
 	// NOTE(fakhri): ctx menu ids
 	{
 		mplayer_ctx->ctx_menu_ids[Track_Context_Menu] = ui_id_from_string(UI_NULL_ID, str8_lit("track-ctx-menu-id"));
@@ -3141,6 +3182,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 		mplayer_ctx->modal_menu_ids[MODAL_Path_Lister] = ui_id_from_string(UI_NULL_ID, str8_lit("path-lister-modal-menu-id"));
 		mplayer_ctx->modal_menu_ids[MODAL_Add_To_Playlist] = ui_id_from_string(UI_NULL_ID, str8_lit("add-to-playlist-modal-menu-id"));
 		mplayer_ctx->modal_menu_ids[MODAL_Create_Playlist] = ui_id_from_string(UI_NULL_ID, str8_lit("create-playlist-modal-menu-id"));
+		mplayer_ctx->modal_menu_ids[MODAL_Lastfm_Wait_User_Confirmation] = ui_id_from_string(UI_NULL_ID, str8_lit("lastfm-wait-user-confirm-modal-menu-id"));
 	}
 	
 	// NOTE(fakhri): init buffer backed strings
@@ -3154,10 +3196,11 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_change_mode(MODE_Track_Library);
 	mplayer_init_queue();
 	
-	mplayer_lastfm_init();
 	
 	return mplayer_ctx;
 }
+
+
 
 exported
 MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
@@ -3646,6 +3689,53 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					}
 				}
 				
+			}
+		}
+		
+		ui_modal_menu(mplayer_ctx->modal_menu_ids[MODAL_Lastfm_Wait_User_Confirmation])
+			ui_vertical_layout() ui_padding(ui_size_parent_remaining())
+			ui_pref_height(ui_size_by_childs(1)) ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
+		{
+			ui_next_border_color(v4(0,0,0,1));
+			ui_next_border_thickness(2);
+			ui_next_background_color(v4(0.02f, 0.02f, 0.02f, 1.0f));
+			ui_next_width(ui_size_percent(0.8f, 1));
+			ui_next_height(ui_size_by_childs(1));
+			ui_next_flags(UI_FLAG_Clip);
+			ui_vertical_layout() ui_padding(ui_size_pixel(20, 1))
+			{
+				ui_horizontal_layout() 
+					ui_padding(ui_size_pixel(100, 1))
+					ui_pref_height(ui_size_text_dim(1))
+				{
+					ui_next_font_size(35);
+					ui_label(str8_lit("Last.fm: Finish Authentication in browser"));
+				}
+				
+				ui_spacer(ui_size_pixel(25, 1));
+				
+				ui_next_font_size(25);
+				ui_label(str8_lit("and click OK to continue."));
+				ui_spacer(ui_size_pixel(20, 1));
+				
+				ui_spacer(ui_size_pixel(40, 1));
+				
+				ui_horizontal_layout() ui_padding(ui_size_parent_remaining())
+					ui_pref_height(ui_size_text_dim(1))
+					ui_pref_width(ui_size_text_dim(1))
+				{
+					if (mplayer_ui_underlined_button(str8_lit("OK")).clicked_left)
+					{
+						mplayer_lastfm_finish_authentication(&mplayer_ctx->lastfm);
+						ui_close_modal_menu();
+					}
+					
+					ui_spacer(ui_size_pixel(20, 1));
+					if (mplayer_ui_underlined_button(str8_lit("Cancel")).clicked_left)
+					{
+						ui_close_modal_menu();
+					}
+				}
 			}
 		}
 	}
@@ -4249,154 +4339,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 					
 					case MODE_Settings:
 					{
-						// NOTE(fakhri): header
-						ui_next_background_color(header_bg_color);
-						ui_next_height(ui_size_pixel(69, 1));
-						ui_horizontal_layout()
-						{
-							ui_spacer_pixels(50, 0);
-							
-							ui_next_background_color(v4(1, 1, 1, 0));
-							ui_next_text_color(v4(1, 1, 1, 1));
-							ui_next_width(ui_size_text_dim(1));
-							ui_next_font_size(50);
-							ui_label(str8_lit("Settings"));
-						}
-						
-						ui_horizontal_layout() ui_padding(ui_size_pixel(50, 1))
-						{
-							ui_next_childs_axis(Axis2_Y);
-							
-							UI_Element *setting_root_ui = ui_element(str8_lit("setting_scrollable_view_test"), UI_FLAG_View_Scroll | UI_FLAG_OverflowY | UI_FLAG_Clip | UI_FLAG_Animate_Scroll);
-							ui_parent(setting_root_ui)
-								ui_padding(ui_size_pixel(20, 1))
-							{
-								ui_next_height(ui_size_by_childs(1));
-								ui_horizontal_layout()
-								{
-									ui_next_width(ui_size_text_dim(1));
-									ui_next_height(ui_size_text_dim(1));
-									ui_label(str8_lit("Library"));
-								}
-								
-								ui_spacer_pixels(10, 1);
-								
-								ui_next_width(ui_size_parent_remaining());
-								ui_next_height(ui_size_by_childs(1));
-								ui_parent(ui_element({}, 0))
-								{
-									ui_next_background_color(v4(0.02f,0.02f,0.02f,1));
-									ui_next_height(ui_size_pixel(60, 1));
-									ui_next_roundness(5);
-									UI_Element *add_location_el = ui_element(str8_lit("setting-track-library"), UI_FLAG_Draw_Background|UI_FLAG_Clickable);
-									ui_parent(add_location_el) ui_padding(ui_size_parent_remaining()) ui_pref_height(ui_size_by_childs(1))
-										ui_horizontal_layout() ui_padding(ui_size_pixel(20, 1))
-									{
-										ui_next_width(ui_size_text_dim(1));
-										ui_next_height(ui_size_text_dim(1));
-										ui_label(str8_lit("Track Library Locations"));
-										
-										ui_spacer(ui_size_parent_remaining());
-										
-										ui_next_roundness(5);
-										ui_next_background_color(v4(0.05f,0.05f,0.05f,1));
-										ui_next_width(ui_size_by_childs(1));
-										ui_next_height(ui_size_by_childs(1));
-										ui_next_childs_axis(Axis2_Y);
-										ui_next_hover_cursor(Cursor_Hand);
-										UI_Element *loc_el = ui_element(str8_lit("add-location-button"), UI_FLAG_Draw_Background | UI_FLAG_Clickable);
-										if (ui_interaction_from_element(loc_el).clicked_left)
-										{
-											mplayer_open_path_lister(&mplayer_ctx->path_lister);
-										}
-										
-										ui_parent(loc_el) 
-											ui_padding(ui_size_pixel(5, 1)) ui_pref_width(ui_size_by_childs(1))
-											ui_horizontal_layout() ui_padding(ui_size_pixel(5, 1))
-										{
-											ui_next_width(ui_size_text_dim(1));
-											ui_next_height(ui_size_text_dim(1));
-											ui_label(str8_lit("Add Location"));
-										}
-									}
-									
-									u32 location_to_delete = mplayer_ctx->settings.locations_count;
-									
-									if (mplayer_ctx->show_library_locations) 
-										ui_pref_background_color(v4(0.05f,0.05f,0.05f,1))
-										ui_pref_flags(UI_FLAG_Animate_Dim)
-										ui_pref_height(ui_size_by_childs(1))
-										ui_pref_roundness(10)
-										ui_for_each_list_item(str8_lit("settings-location-list"), mplayer_ctx->settings.locations_count, 40.0f, 1.0f, location_index)
-										ui_pref_height(ui_size_parent_remaining()) ui_pref_flags(0) ui_pref_roundness(100)
-									{
-										Mplayer_Library_Location *location = mplayer_ctx->settings.locations + location_index;
-										ui_next_border_thickness(2);
-										u32 flags = UI_FLAG_Animate_Dim | UI_FLAG_Clip | UI_FLAG_Draw_Background;
-										UI_Element *location_el = ui_element_f(flags, "location-item-%p", location);
-										location_el->child_layout_axis = Axis2_X;
-										
-										ui_parent(location_el) ui_padding(ui_size_pixel(10, 1))
-										{
-											ui_next_width(ui_size_text_dim(1));
-											ui_label(str8(location->path, location->path_len));
-											
-											ui_spacer(ui_size_parent_remaining());
-											
-											ui_next_width(ui_size_pixel(20, 1));
-											ui_vertical_layout() ui_padding(ui_size_parent_remaining())
-											{
-												ui_next_height(ui_size_pixel(20, 1));
-												ui_next_roundness(10);
-												ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1));
-												if (ui_button_f("X###delete-location-%p", location).clicked_left)
-												{
-													location_to_delete = location_index;
-													mplayer_save_settings();
-												}
-											}
-										}
-									}
-									
-									if (location_to_delete < mplayer_ctx->settings.locations_count)
-									{
-										for (u32 i = location_to_delete; i < mplayer_ctx->settings.locations_count - 1; i += 1)
-										{
-											memory_copy_struct(&mplayer_ctx->settings.locations[i], &mplayer_ctx->settings.locations[i + 1]);
-										}
-										
-										mplayer_ctx->settings.locations_count -= 1;
-									}
-									
-									Mplayer_UI_Interaction add_loc_interaction = ui_interaction_from_element(add_location_el);
-									if (add_loc_interaction.hover)
-									{
-										add_location_el->background_color = v4(0.069f,0.069f,0.069f,1);
-									}
-									if (add_loc_interaction.pressed_left)
-									{
-										add_location_el->background_color = v4(0.12f,0.12f,0.12f,1);
-									}
-									if (add_loc_interaction.clicked_left)
-									{
-										mplayer_ctx->show_library_locations = !mplayer_ctx->show_library_locations;
-										mplayer_animate_next_frame();
-									}
-								}
-								
-								ui_spacer_pixels(20,1);
-								ui_next_width(ui_size_text_dim(1));
-								ui_next_height(ui_size_text_dim(1));
-								if (mplayer_ui_underlined_button(str8_lit("Reindex Library")).clicked_left)
-								{
-									platform->set_cursor(Cursor_Wait);
-									mplayer_index_library();
-									platform->set_cursor(Cursor_Arrow);
-								}
-							}
-							
-							ui_interaction_from_element(setting_root_ui);
-						}
+						mplayer_ui_settings(header_bg_color);
 					} break;
 					
 					case MODE_Queue:

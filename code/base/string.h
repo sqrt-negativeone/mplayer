@@ -123,12 +123,13 @@ internal String8 str8_skip_leading_spaces(String8 str);
 //- NOTE(fakhri): Mching
 internal b32 str8_match(String8 a, String8 b, Mch_Flags flags);
 internal b32 str8_is_subsequence(String8 a, String8 b, Mch_Flags flags);
-internal u64 find_substr8(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags);
+internal u64 str8_find(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags);
 internal b32 str8_starts_with(String8 a, String8 prefix, Mch_Flags flags);
 internal b32 str8_ends_with(String8 a, String8 b, Mch_Flags flags);
 internal u64 string_find_first_non_whitespace(String8 str);
 internal u64 string_find_first_characer(String8 str, u8 ch);
 internal u64 string_find_first_whitespace(String8 str);
+internal String8 str8_find_enclosed_substr(String8 str, String8 start, String8 end);
 internal void str8_list_push_node(String8_List *list, String8_Node *node);
 internal void str8_list_push(Memory_Arena *arena, String8_List *list, String8 str);
 internal void str8_list_push_fv(Memory_Arena *arena, String8_List *list, const char *fmt, va_list args);

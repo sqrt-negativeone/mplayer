@@ -9,3 +9,4 @@
 #include "thread_context.cpp"
 #include "http_core.cpp"
 #include "network.cpp"
+#include "json_parser.cpp"

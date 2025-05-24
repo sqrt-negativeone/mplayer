@@ -102,7 +102,8 @@ str8_fv(Memory_Arena *arena, const char *fmt, va_list args)
   result.str = m_arena_push_array(arena, u8, needed_bytes);
   result.len = needed_bytes - 1;
   stbsp_vsnprintf((char*)result.str, (int)needed_bytes, fmt, args2);
-  return result;
+	result.str[result.len] = 0;
+	return result;
 }
 
 internal String8
@@ -348,7 +349,7 @@ str8_chop_last(String8 str, u64 nmax)
 internal String8
 str8_chop_first_occurence(String8 string, String8 needle)
 {
-	u64 needle_pos = find_substr8(string, needle, 0, 0);
+	u64 needle_pos = str8_find(string, needle, 0, 0);
 	if(needle_pos < string.len)
 	{
 		string.len = needle_pos;
@@ -374,6 +375,37 @@ str8_skip_leading_spaces(String8 str)
 {
 	String8 result = str8_skip_first(str, string_find_first_non_whitespace(str));
 	return result;
+}
+
+
+internal String8
+str8_skip_after_first_occurance(String8 str, String8 needle)
+{
+	u64 needle_pos = str8_find(str, needle, 0, 0);
+	if (needle_pos < str.len)
+	{
+		str = str8_skip_first(str, needle_pos + needle.len);
+	}
+	return str;
+}
+
+internal String8
+str8_chop_to_first_occurance(String8 str, String8 needle)
+{
+	u64 needle_pos = str8_find(str, needle, 0, 0);
+	if (needle_pos < str.len)
+	{
+		str.len = needle_pos;
+	}
+	return str;
+}
+
+internal String8
+str8_find_enclosed_substr(String8 str, String8 start, String8 end)
+{
+	str = str8_skip_after_first_occurance(str, start);
+	str = str8_chop_to_first_occurance(str, end);
+	return str;
 }
 
 //- NOTE(fakhri): Mching
@@ -448,7 +480,7 @@ str8_is_subsequence(String8 a, String8 b, Mch_Flags flags)
 }
 
 internal u64
-find_substr8(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags)
+str8_find(String8 haystack, String8 needle, u64 start_pt, Mch_Flags flags)
 {
   u64 found_idx = haystack.len;
   b32 is_first = true;
@@ -669,8 +701,8 @@ str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_par
       ptr += join.sep.len;
     }
   }
-  memory_copy(ptr, join.pre.str, join.pre.len);
-  ptr += join.pre.len;
+  memory_copy(ptr, join.post.str, join.post.len);
+  ptr += join.post.len;
   
   return result;
 }
@@ -680,9 +712,9 @@ str8_list_join(Memory_Arena *arena, String8_List list, String_Join *optional_par
 internal String8
 str8_chop_last_slash(String8 string)
 {
-	u64 slash_pos = find_substr8(string, str8_lit("/"), 0,
-															 MatchFlag_SlashInsensitive|
-															 MatchFlag_FindLast);
+	u64 slash_pos = str8_find(string, str8_lit("/"), 0,
+														MatchFlag_SlashInsensitive|
+														MatchFlag_FindLast);
 	if(slash_pos < string.len)
 	{
 		string.len = slash_pos+1;

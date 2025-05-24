@@ -1,4 +1,17 @@
 
+internal Socket
+network_socket_connect(const char *url, const char *port)
+{
+	Socket result = ZERO_STRUCT;
+	Socket_Handle handle = platform->connect_to_server(url, port);
+	if (is_socket_handle_valid(handle))
+	{
+		result.handle = handle;
+		result.valid = 1;
+	}
+	return result;
+}
+
 internal void
 network_socket_close(Socket socket)
 {
@@ -45,7 +58,7 @@ network_socket_read(Socket socket, Buffer buf)
 	}
 	else
 	{
-		result = platform->network_receive_buffer(socket.handle, buf);
+		result = platform->network_read(socket.handle, buf);
 	}
 	
 	return result;
@@ -296,7 +309,7 @@ http_receive_body(Memory_Arena *arena, Buffered_Socket *buf_socket, Http_Respons
 		{
 			u64 body_size = u64_from_str8_base10(content_len_field->values.first->str);
 			String8 body;
-			body.str = m_arena_push_array(scratch.arena, u8, body_size);;
+			body.str = m_arena_push_array(arena, u8, body_size);;
 			body.len = body_size;
 			buffered_socket_receive_buffer(buf_socket, body.str, body.len);
 			str8_list_push(arena, &response->body, body);
@@ -315,11 +328,11 @@ http_receive_response(Memory_Arena *arena, Buffered_Socket *buf_socket, Http_Res
 		response->status_line = buffered_socket_receive_line(arena, buf_socket);
 		response->http_version = HTTP_VERSION_UNSUPPORTED;
 		String8 version_string = str8_chop_first_occurence(response->status_line, str8_lit(" "));
-		if (find_substr8(version_string, str8_lit("HTTP/1.0"), 0, 0) < version_string.len)
+		if (str8_find(version_string, str8_lit("HTTP/1.0"), 0, 0) < version_string.len)
 		{
 			response->http_version = HTTP_1_0;
 		}
-		else if (find_substr8(version_string, str8_lit("HTTP/1.1"), 0, 0) < version_string.len)
+		else if (str8_find(version_string, str8_lit("HTTP/1.1"), 0, 0) < version_string.len)
 		{
 			response->http_version = HTTP_1_1;
 		}

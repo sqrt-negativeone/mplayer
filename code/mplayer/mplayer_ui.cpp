@@ -370,8 +370,8 @@ ui_get_persistent_state_for_element(UI_ID id)
 	{
 		u64 bucket_idx = id.value % array_count(g_ui->persistent_states);
 		for (UI_Element_Persistent_State *node = g_ui->persistent_states[bucket_idx].first;
-			node;
-			node = node->next_hash)
+				 node;
+				 node = node->next_hash)
 		{
 			if (ui_id_is_equal(node->id, id))
 			{
@@ -394,10 +394,10 @@ ui_get_or_create_persistent_state_for_element(UI_ID id)
 		result->id = id;
 		u64 bucket_idx = id.value % array_count(g_ui->persistent_states);
 		DLLPushBack_NP(g_ui->persistent_states[bucket_idx].first,
-			g_ui->persistent_states[bucket_idx].last,
-			result,
-			next_hash,
-			prev_hash);
+									 g_ui->persistent_states[bucket_idx].last,
+									 result,
+									 next_hash,
+									 prev_hash);
 	}
 	return result;
 }
@@ -854,7 +854,7 @@ internal String8
 ui_drawable_text_from_string(String8 string)
 {
 	String8 result = string;
-	u64 sep_pos = find_substr8(string, str8_lit("##"), 0, 0);
+	u64 sep_pos = str8_find(string, str8_lit("##"), 0, 0);
 	if (sep_pos < string.len)
 	{
 		result.len = sep_pos;
@@ -866,7 +866,7 @@ internal String8
 ui_key_from_string(String8 string)
 {
 	String8 result = string;
-	u64 sep_pos = find_substr8(string, str8_lit("###"), 0, 0);
+	u64 sep_pos = str8_find(string, str8_lit("###"), 0, 0);
 	if (sep_pos < string.len)
 	{
 		result = str8_skip_first(string, sep_pos);
@@ -1338,10 +1338,10 @@ internal UI_Element *
 ui_label(String8 string)
 {
 	UI_Element *label = ui_element(ZERO_STRUCT,
-		UI_FLAG_Draw_Text |
-		UI_FLAG_Draw_Border |
-		UI_FLAG_Draw_Background
-	);
+																 UI_FLAG_Draw_Text |
+																 UI_FLAG_Draw_Border |
+																 UI_FLAG_Draw_Background
+																 );
 	
 	label->text = str8_clone(g_ui->frame_arena, ui_drawable_text_from_string(string));
 	return label;
@@ -1352,10 +1352,10 @@ ui_button(String8 string)
 {
 	ui_next_hover_cursor(Cursor_Hand);
 	UI_Element *button = ui_element(string,
-		UI_FLAG_Clickable |
-		UI_FLAG_Draw_Background |
-		UI_FLAG_Draw_Text
-	);
+																	UI_FLAG_Clickable |
+																	UI_FLAG_Draw_Background |
+																	UI_FLAG_Draw_Text
+																	);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(button);
 	
 	return interaction;
@@ -1395,12 +1395,12 @@ UI_CUSTOM_DRAW_PROC(ui_input_field_default_draw)
 		}
 		
 		V4_F32 cursor_color = lerp(element->background_color,
-			blink_t,
-			v4(0, 0, 0, 1));
+															 blink_t,
+															 v4(0, 0, 0, 1));
 		
 		V3_F32 cursor_pos = v3(pos.x + data->cursor_offset_x,
-			pos.y,
-			(f32)element->layer);
+													 pos.y,
+													 (f32)element->layer);
 		
 		push_rect(group, cursor_pos, data->cursor_dim, cursor_color, 0);
 	}
@@ -1413,7 +1413,7 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 	ui_next_childs_axis(Axis2_X);
 	ui_next_hover_cursor(Cursor_TextSelect);
 	UI_Element *text_input = ui_element(key, 
-		UI_FLAG_Draw_Background|UI_FLAG_Draw_Border|UI_FLAG_Clickable|UI_FLAG_Selectable);
+																			UI_FLAG_Draw_Background|UI_FLAG_Draw_Border|UI_FLAG_Clickable|UI_FLAG_Selectable);
 	Mplayer_UI_Interaction interaction = ui_interaction_from_element(text_input);
 	if (interaction.hover)
 	{
@@ -1436,8 +1436,8 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 			g_ui->input_cursor = 0;
 			
 			for (String8_UTF8_Iterator it = str8_utf8_iterator(*buffer);
-				str8_utf8_it_valid(&it);
-				str8_utf8_advance(&it))
+					 str8_utf8_it_valid(&it);
+					 str8_utf8_advance(&it))
 			{
 				Glyph_Metrics *glyph = fnt_get_glyph(font, font_size, it.utf8.codepoint);
 				f32 glyph_width = glyph->advance;
@@ -1468,8 +1468,8 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 						if (g_ui->input_cursor < buffer->len)
 						{
 							memory_move(buffer->str + g_ui->input_cursor + 1,
-								buffer->str + g_ui->input_cursor,
-								buffer->len - g_ui->input_cursor);
+													buffer->str + g_ui->input_cursor,
+													buffer->len - g_ui->input_cursor);
 						}
 						
 						buffer->str[g_ui->input_cursor] = (u8)event->text_character;
@@ -1488,8 +1488,8 @@ ui_input_field(String8 key, String8 *buffer, u64 max_capacity)
 							if (g_ui->input_cursor && buffer->len)
 							{
 								memory_move(buffer->str + g_ui->input_cursor - 1,
-									buffer->str + g_ui->input_cursor,
-									buffer->len - g_ui->input_cursor);
+														buffer->str + g_ui->input_cursor,
+														buffer->len - g_ui->input_cursor);
 								buffer->len     -= 1;
 								g_ui->input_cursor -= 1;
 							}
@@ -1588,8 +1588,8 @@ ui_slider_f32(String8 string, f32 *val, f32 min, f32 max)
 	if (interaction.pressed_left)
 	{
 		percent = map_into_range01(slider->computed_rect.min_x, 
-			g_ui->mouse_pos.x,
-			slider->computed_rect.max_x);
+															 g_ui->mouse_pos.x,
+															 slider->computed_rect.max_x);
 	}
 	
 	UI_Slider_Draw_Data *slider_data = m_arena_push_struct_z(g_ui->frame_arena, UI_Slider_Draw_Data);
@@ -1611,8 +1611,8 @@ ui_slider_u64(String8 string, u64 *val, u64 min, u64 max)
 	if (interaction.pressed_left)
 	{
 		percent = map_into_range01(slider->computed_rect.min_x, 
-			g_ui->mouse_pos.x,
-			slider->computed_rect.max_x);
+															 g_ui->mouse_pos.x,
+															 slider->computed_rect.max_x);
 	}
 	
 	UI_Slider_Draw_Data *slider_data = m_arena_push_struct_z(g_ui->frame_arena, UI_Slider_Draw_Data);
@@ -1839,7 +1839,7 @@ ui_draw_elements(Render_Group *group, UI_Element *node)
 	if (has_flag(node->flags, UI_FLAG_Draw_Text))
 	{
 		fnt_draw_text(group, node->font, node->font_size, node->text, pos, node->text_color, 
-			Text_Render_Flag_Centered);
+									Text_Render_Flag_Centered);
 	}
 	
 	if (has_flag(node->flags, UI_FLAG_Has_Custom_Draw))
@@ -2104,7 +2104,7 @@ ui_begin(Render_Group *group, V2_F32 mouse_p)
 		g_ui->ctx_menu_root = ui_element(str8_lit("ui-ctx-menu-root"), UI_FLAG_Clip|UI_FLAG_Floating|UI_FLAG_Animate_Dim);
 		g_ui->ctx_menu_root->computed_top_left = g_ui->ctx_menu_origin;
 		g_ui->ctx_menu_root->computed_rect = range2f32_topleft_dim(g_ui->ctx_menu_root->computed_top_left, 
-			g_ui->ctx_menu_root->computed_dim);
+																															 g_ui->ctx_menu_root->computed_dim);
 	}
 }
 
@@ -2130,7 +2130,7 @@ ui_end()
 		g_ui->root->size[Axis2_Y] = ui_size_pixel(g_ui->group->render_ctx->draw_dim.y, 1);
 		
 		g_ui->root->computed_top_left = v2(-0.5f * g_ui->group->render_ctx->draw_dim.x, 
-			+0.5f * g_ui->group->render_ctx->draw_dim.y);
+																			 +0.5f * g_ui->group->render_ctx->draw_dim.y);
 		
 		g_ui->root->computed_rect = range2f32_topleft_dim(g_ui->root->computed_top_left, g_ui->root->computed_dim);
 		

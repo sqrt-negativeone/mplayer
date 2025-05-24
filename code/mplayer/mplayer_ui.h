@@ -8,4 +8,5 @@ struct UI_ID
 	u64 value;
 };
 
+internal void ui_open_modal_menu(UI_ID id);
 #endif //MPLAYER_UI_H
