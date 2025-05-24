@@ -1678,6 +1678,7 @@ struct Cuesheet_File
 	Cuesheet_File *prev;
 	
 	String8 performer;
+	String8 album;
 	String8 title;
 	String8 file;
 	
@@ -1863,6 +1864,11 @@ mplayer_parse_flac_track_file(File_Info info, Directory dir, Cuesheet_List cuesh
 			
 			if (cuesheet)
 			{
+				if (cuesheet->album.len && !track_album.len)
+				{
+					track_album = str8_clone(&library->arena, cuesheet->album);
+				}
+				
 				for (Cuesheet_Track *cuesheet_track = cuesheet->first_tracks; cuesheet_track; cuesheet_track = cuesheet_track->next)
 				{
 					u64 samples_start = mplayer_sample_number_from_cue_index(cuesheet_track->index, tmp_flac_stream.streaminfo.sample_rate);
@@ -1993,7 +1999,9 @@ mplayer_load_tracks_in_directory(String8 library_path)
 							current_cuesheet_file = cuesheet;
 							current_ctx_kind = Cuesheet_Context_File;
 							
-							cuesheet->file = file_name_str;
+							cuesheet->file      = file_name_str;
+							cuesheet->album     = global_title;
+							cuesheet->performer = global_performer;
 						}
 						else if (str8_match(command, str8_lit("TRACK"), MatchFlag_CaseInsensitive)) 
 						{
@@ -2006,6 +2014,8 @@ mplayer_load_tracks_in_directory(String8 library_path)
 								DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
 								current_cuesheet_track = cuesheet_track;
 								current_ctx_kind = Cuesheet_Context_Track;
+								
+								cuesheet_track->performer = current_cuesheet_file->performer;
 							}
 						}
 						else if (str8_match(command, str8_lit("PERFORMER"), MatchFlag_CaseInsensitive)) 
