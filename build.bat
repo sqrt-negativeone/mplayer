@@ -29,9 +29,9 @@ set compiler_includes= ^
 
 
 if %release_mode% EQU 0 ( rem Debug
-	set compiler_flags=%compiler_flags% /DDEBUG_BUILD=1 /Od /MDd
+	set compiler_flags=%compiler_flags% /DDEBUG_BUILD=1 /Od /MTd 
 ) else ( rem Release
-	set compiler_flags=%compiler_flags% /O2 /MD
+	set compiler_flags=%compiler_flags% /O2 /MT
 )
 
 set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
@@ -50,7 +50,7 @@ set common_linker_flags=/incremental:no
 set platform_linker_flags=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32"
 set platform_linker_settings=%platform_libs% %platform_linker_flags%
 
-set app_linker_settings=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32" %app_libs% /NODEFAULTLIB:MSVCRT
+set app_linker_settings=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32" %app_libs%
 
 if not exist bld mkdir bld
 pushd bld

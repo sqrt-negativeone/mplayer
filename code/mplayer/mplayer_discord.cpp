@@ -29,7 +29,7 @@ mplayer_discord_update_rich_presence()
 			stbsp_snprintf(details, sizeof(details), "⏸  %.*s", STR8_EXPAND(current_track->title));
 		}
 		
-		stbsp_snprintf(state, sizeof(state), "by %.*s %.*s", STR8_EXPAND(current_track->album), STR8_EXPAND(current_track->artist));
+		stbsp_snprintf(state, sizeof(state), "by %.*s | %.*s", STR8_EXPAND(current_track->album), STR8_EXPAND(current_track->artist));
 		presence.startTimestamp = current_track->start_ts;
 		
 		presence.details  = details;
