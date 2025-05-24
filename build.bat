@@ -29,9 +29,9 @@ set compiler_includes= ^
 
 
 if %release_mode% EQU 0 ( rem Debug
-	set compiler_flags=%compiler_flags% /DDEBUG_BUILD=1 /Od
+	set compiler_flags=%compiler_flags% /DDEBUG_BUILD=1 /Od /MDd
 ) else ( rem Release
-	set compiler_flags=%compiler_flags% /O2 /MT
+	set compiler_flags=%compiler_flags% /O2 /MD
 )
 
 set compiler_settings=%compiler_includes% %compiler_flags% %compiler_warnings%
@@ -43,14 +43,14 @@ set platform_libs= ^
   libcrypto.lib libssl.lib
 
 set app_libs= ^
-  samplerate.lib libcrypto.lib libssl.lib
+  samplerate.lib libcrypto.lib libssl.lib advapi32.lib ws2_32.lib psapi.lib discord-rpc.lib
 
 set common_linker_flags=/incremental:no
 
 set platform_linker_flags=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32"
 set platform_linker_settings=%platform_libs% %platform_linker_flags%
 
-set app_linker_settings=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32" %app_libs% 
+set app_linker_settings=%common_linker_flags% /LIBPATH:"%code_dir%/lib/win32" %app_libs% /NODEFAULTLIB:MSVCRT
 
 if not exist bld mkdir bld
 pushd bld

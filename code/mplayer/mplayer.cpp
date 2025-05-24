@@ -101,6 +101,7 @@ struct Mplayer_Track
 	u64 end_sample_offset;
 	
 	u32 play_count;
+	u64 start_ts;
 };
 
 struct Mplayer_Track_List
@@ -991,6 +992,7 @@ mplayer_load_track(Mplayer_Track *track)
 	
 	mplayer_track_reset(track);
 	mplayer_track_update_report(track);
+	track->start_ts = time(0);
 }
 
 internal void
@@ -3112,6 +3114,7 @@ mplayer_remove_track_from_favorites(Mplayer_Playlists *playlists, Mplayer_Track_
 	}
 }
 
+#include "mplayer_discord.cpp"
 
 internal
 MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
@@ -3224,7 +3227,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_load_playlists(&mplayer_ctx->playlists);
 	mplayer_change_mode(MODE_Track_Library);
 	mplayer_init_queue();
-	
+	mplayer_discord_init();
 	
 	return mplayer_ctx;
 }
@@ -3260,6 +3263,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 		mplayer_change_next_mode();
 	}
 	
+	mplayer_discord_update_rich_presence();
 	ui_begin(&group, world_mouse_p);
 	
 	// NOTE(fakhri): context menus
