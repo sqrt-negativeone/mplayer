@@ -87,6 +87,9 @@ struct Mplayer_Track
 	String8 date;
 	String8 track_number;
 	
+	// TODO(fakhri): flags
+	b8 did_try_to_load_image_url;
+	String8 image_url;
 	Mplayer_Artist_ID artist_id;
 	Mplayer_Album_ID album_id;
 	
@@ -131,6 +134,7 @@ struct Mplayer_Album
 	
 	Mplayer_Track_List tracks;
 };
+
 struct Mplayer_Album_List
 {
 	Mplayer_Album *first;
@@ -1594,6 +1598,7 @@ mplayer_setup_track_album(Mplayer_Library *library, String8 album_name, Mplayer_
 		album->name   = album_name;
 		album->artist = artist->name;
 		album->image_id = mplayer_reserve_image_id(library);
+		
 		mplayer_insert_album(library, album);
 		
 		DLLPushBack_NP(artist->albums.first, artist->albums.last, album, next_artist, prev_artist);

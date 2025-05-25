@@ -17,6 +17,23 @@ struct Mplayer_Lastfm_Parameter
 };
 
 internal String8
+mplayer_lastfm_construct_query(Memory_Arena *arena, b32 is_uri, Mplayer_Lastfm_Parameter *params, u32 params_count)
+{
+	Memory_Checkpoint scratch = get_scratch(&arena, 1);
+	String8_List uri_args = ZERO_STRUCT;
+	
+	for (u32 i = 0; i < params_count; i += 1)
+	{
+		str8_list_push_f(scratch.arena, &uri_args, "%.*s=%.*s", STR8_EXPAND(params[i].name), STR8_EXPAND(params[i].value));
+	}
+	
+	String_Join list_join = {.pre=is_uri? str8_lit("/2.0/?"):str8_lit(""), .sep = str8_lit("&"), .post = str8_lit("")};
+	String8 result = str8_list_join(arena, uri_args, &list_join);
+	return result;
+}
+
+
+internal String8
 mplayer_lastfm_construct_query_with_signature(Memory_Arena *arena, b32 is_uri, Mplayer_Lastfm_Parameter *params, u32 params_count)
 {
 	Memory_Checkpoint scratch = get_scratch(&arena, 1);
@@ -283,4 +300,37 @@ mplayer_lastfm_scrobble_track(Mplayer_Lastfm *lastfm, Mplayer_Track *track)
 	}
 	
 	return good;
+}
+
+internal String8
+mplayer_lastfm_get_track_image_url(Memory_Arena *arena, String8 track, String8 artist)
+{
+	Memory_Checkpoint scratch = get_scratch(0, 0);
+	Socket socket = network_socket_connect(LASTFM_ROOT_URL, "80");
+	Buffered_Socket buf_socket = ZERO_STRUCT;
+	init_buffered_socket(&buf_socket, socket);
+	
+	Mplayer_Lastfm_Parameter params[] = {
+		{str8_lit("api_key"), str8_lit(LASTFM_API_KEY)},
+		{str8_lit("artist"),  artist},
+		{str8_lit("auto_correct"), str8_lit("1")},
+		{str8_lit("method"),  str8_lit("track.getInfo")},
+		{str8_lit("track"),   track},
+	};
+	
+	Http_Request req = ZERO_STRUCT;
+	req.method = HTTP_METHOD_POST;
+	req.uri = str8_lit("/2.0/");
+	req.body = mplayer_lastfm_construct_query(scratch.arena, 0, params, array_count(params));
+	http_header_add_field(scratch.arena, &req.header_fields, str8_lit("Content-Length"), str8_f(scratch.arena, "%lld", req.body.len));
+	http_send_request(socket, req);
+	
+	Http_Response response = ZERO_STRUCT;
+	http_receive_response(scratch.arena, &buf_socket, &response);
+	String8 body = str8_list_join(scratch.arena, response.body, 0);
+	
+	String8 image_url = str8_find_enclosed_substr(body, str8_lit("<image size=\"medium\">"), str8_lit("</image>"));
+	Log("%.*s", STR8_EXPAND(image_url));
+	String8 result = str8_clone(arena, image_url);
+	return result;
 }

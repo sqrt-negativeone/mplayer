@@ -382,10 +382,7 @@ internal String8
 str8_skip_after_first_occurance(String8 str, String8 needle)
 {
 	u64 needle_pos = str8_find(str, needle, 0, 0);
-	if (needle_pos < str.len)
-	{
-		str = str8_skip_first(str, needle_pos + needle.len);
-	}
+	str = str8_skip_first(str, needle_pos + needle.len);
 	return str;
 }
 

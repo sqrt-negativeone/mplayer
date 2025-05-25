@@ -36,6 +36,20 @@ mplayer_discord_update_rich_presence()
 		
 		presence.details  = details;
 		presence.state    = state;
+		
+		if (!current_track->image_url.len && !current_track->did_try_to_load_image_url)
+		{
+			current_track->did_try_to_load_image_url = true;
+			current_track->image_url = mplayer_lastfm_get_track_image_url(&mplayer_ctx->library.arena, current_track->title, current_track->artist);
+		}
+		
+		if (current_track->image_url.len)
+		{
+			char large_iamge_txt[128];
+			stbsp_snprintf(large_iamge_txt, sizeof(large_iamge_txt), "%.*s", STR8_EXPAND(current_track->image_url));
+			
+			presence.largeImageKey = large_iamge_txt;
+		}
 	}
 	else
 	{
