@@ -334,3 +334,29 @@ mplayer_lastfm_get_track_image_url(Memory_Arena *arena, String8 track, String8 a
 	String8 result = str8_clone(arena, image_url);
 	return result;
 }
+
+WORK_SIG(mplayer_get_track_image_url__async)
+{
+	Mplayer_Track *track = (Mplayer_Track *)input;
+	CompletePreviousWritesBeforeFutureWrites();
+	
+	String8 image_url = mplayer_lastfm_get_track_image_url(&mplayer_ctx->library.arena, track->title, track->artist);
+	if (image_url.len)
+	{
+		track->image_url.str = image_url.str;
+		CompletePreviousWritesBeforeFutureWrites();
+		track->image_url.len= image_url.len;
+	}
+}
+
+WORK_SIG(mplayer_lastfm_scrobble_track__async)
+{
+	Mplayer_Track *track = (Mplayer_Track *)input;
+	mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, track);
+}
+
+WORK_SIG(mplayer_lastfm_update_now_playing__async)
+{
+	Mplayer_Track *track = (Mplayer_Track *)input;
+	mplayer_lastfm_update_now_playing(&mplayer_ctx->lastfm, track);
+}

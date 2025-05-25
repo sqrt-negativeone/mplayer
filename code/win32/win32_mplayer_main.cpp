@@ -12,8 +12,6 @@
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
-#define CompletePreviousWritesBeforeFutureWrites() MemoryBarrier(); __faststorefence()
-
 #undef near
 #undef far
 

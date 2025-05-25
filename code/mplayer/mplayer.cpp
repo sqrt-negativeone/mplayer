@@ -233,6 +233,7 @@ struct Mplayer_Insight
 
 struct Mplayer_Library
 {
+	// TODO(fakhri): add mutex to guard this arena
 	Memory_Arena arena;
 	Memory_Arena track_transient_arena;
 	
@@ -1202,7 +1203,7 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		if (current_track)
 		{
 			// TODO(fakhri): only scrobble if we met last.fm definition of scrobble
-			mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, current_track);
+			platform->push_work(mplayer_lastfm_scrobble_track__async,  current_track);
 		}
 	}
 	
@@ -1234,7 +1235,7 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		{
 			Mplayer_Track *track = mplayer_queue_get_current_track();
 			mplayer_load_track(track);
-			mplayer_lastfm_update_now_playing(&mplayer_ctx->lastfm, track);
+			platform->push_work(mplayer_lastfm_update_now_playing__async,  track);
 		}
 	}
 }

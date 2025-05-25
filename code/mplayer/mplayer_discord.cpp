@@ -11,6 +11,8 @@ mplayer_discord_init()
 	Discord_Initialize(DISCORD_CLIENT_ID, &handlers, 1, NULL);
 }
 
+
+
 internal void
 mplayer_discord_update_rich_presence()
 {
@@ -40,14 +42,13 @@ mplayer_discord_update_rich_presence()
 		if (!current_track->image_url.len && !current_track->did_try_to_load_image_url)
 		{
 			current_track->did_try_to_load_image_url = true;
-			current_track->image_url = mplayer_lastfm_get_track_image_url(&mplayer_ctx->library.arena, current_track->title, current_track->artist);
+			platform->push_work(mplayer_get_track_image_url__async,  current_track);
 		}
 		
 		if (current_track->image_url.len)
 		{
 			char large_iamge_txt[128];
 			stbsp_snprintf(large_iamge_txt, sizeof(large_iamge_txt), "%.*s", STR8_EXPAND(current_track->image_url));
-			
 			presence.largeImageKey = large_iamge_txt;
 		}
 	}
