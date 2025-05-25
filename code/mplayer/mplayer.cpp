@@ -428,6 +428,19 @@ global Mplayer_Context *mplayer_ctx;
 #include "mplayer_serialization.cpp"
 
 internal u64
+mplayer_track_get_seconds_played(Mplayer_Track *track)
+{
+	u64 result = 0;
+	if (track && track->flac_stream)
+	{
+		u64 sample_number = track->flac_stream->next_sample_number - track->start_sample_offset;
+		u64 sample_rate = u64(track->flac_stream->streaminfo.sample_rate);
+		result = sample_number / sample_rate;
+	}
+	return result;
+}
+
+internal u64
 mplayer_get_track_duration(Mplayer_Track *track)
 {
 	u64 duration = 0;
@@ -1317,6 +1330,13 @@ mplayer_queue_resume()
 {
 	mplayer_ctx->queue.playing = 1;
 	mplayer_save_queue();
+	
+	Mplayer_Track *current_track = mplayer_queue_get_current_track();
+	if (current_track)
+	{
+		u64 seconds_played = mplayer_track_get_seconds_played(current_track);
+		current_track->start_ts = time(0) - seconds_played;
+	}
 }
 
 internal void

@@ -22,7 +22,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#define ActivityType_Playing 0
+#define ActivityType_Streaming 1
+#define ActivityType_Listening 2
+#define ActivityType_Watching 3
+#define ActivityType_Custom 4
+#define ActivityType_Competing 5
 typedef struct DiscordRichPresence {
     const char* state;   /* max 128 bytes */
     const char* details; /* max 128 bytes */
@@ -40,6 +45,9 @@ typedef struct DiscordRichPresence {
     const char* joinSecret;     /* max 128 bytes */
     const char* spectateSecret; /* max 128 bytes */
     int8_t instance;
+
+    int type;
+    const char* name;
 } DiscordRichPresence;
 
 typedef struct DiscordUser {
