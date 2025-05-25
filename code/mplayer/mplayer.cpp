@@ -3157,6 +3157,38 @@ mplayer_remove_track_from_favorites(Mplayer_Playlists *playlists, Mplayer_Track_
 
 #include "mplayer_discord.cpp"
 
+/*
+
+function easeInOutCirc(x: number): number {
+return x < 0.5
+  ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2
+  : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
+}
+*/
+
+internal f32
+ease_in_out_circ(f32 in)
+{
+	f32 out = 0;
+	if (in < 0.5f)
+	{
+		out = (1 - SQRTF(1 - SQUARE(2 * in))) / 2.0f;
+	}
+	else
+	{
+		out = (SQRTF(1 - SQUARE(-2 * in + 2)) + 1) / 2.0f;
+	}
+	return out;
+}
+
+
+internal f32
+ease_in_out_sine(f32 in)
+{
+	f32 out = -(COSF(PI32 * in) - 1) / 2.0f;
+	return out;
+}
+
 internal
 MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 {
@@ -3166,7 +3198,8 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 	if (track && mplayer_is_queue_playing())
 	{
 		Flac_Stream *flac_stream = track->flac_stream;
-		f32 volume = mplayer_ctx->volume;
+		// TODO(fakhri): lerp volume
+		f32 volume = ease_in_out_sine(mplayer_ctx->volume);
 		if (flac_stream)
 		{
 			u32 channels_count = flac_stream->streaminfo.nb_channels;
