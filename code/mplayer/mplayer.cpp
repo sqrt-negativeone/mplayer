@@ -89,6 +89,7 @@ struct Mplayer_Track
 	
 	// TODO(fakhri): flags
 	b8 did_try_to_load_image_url;
+	b8 need_scrobble;
 	String8 image_url;
 	Mplayer_Artist_ID artist_id;
 	Mplayer_Album_ID album_id;
@@ -1011,12 +1012,21 @@ mplayer_load_track(Mplayer_Track *track)
 	mplayer_track_reset(track);
 	mplayer_track_update_report(track);
 	track->start_ts = time(0);
+	track->need_scrobble = true;
+	// platform->push_work(mplayer_lastfm_update_now_playing__async,  track);
 }
 
 internal void
 mplayer_unload_track(Mplayer_Track *track)
 {
 	if (!track) return;
+	
+	if (track->need_scrobble)
+	{
+		track->need_scrobble = false;
+		//mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, track);
+		platform->push_work(mplayer_lastfm_scrobble_track__async,  mplayer_make_scrobble_input(track));
+	}
 	
 	track->build_seektable_work_data.cancel_req = 1;
 	for (;track->build_seektable_work_data.running;)
@@ -1197,15 +1207,6 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	
 	Mplayer_Queue *queue = &mplayer_ctx->queue;
 	
-	// NOTE(fakhri): update scrobbles
-	{
-		Mplayer_Track *current_track = mplayer_queue_get_current_track();
-		if (current_track)
-		{
-			// TODO(fakhri): only scrobble if we met last.fm definition of scrobble
-			platform->push_work(mplayer_lastfm_scrobble_track__async,  current_track);
-		}
-	}
 	
 	// TODO(fakhri): Since now we have tracks that point to 
 	// parts of a file, when we play these track we seek
@@ -1219,8 +1220,17 @@ mplayer_set_current(Mplayer_Queue_Index index)
 			is_queue_index_valid(index) && 
 			is_equal(queue->tracks[index], queue->tracks[queue->current_index]))
 	{
+		// NOTE(fakhri): update scrobbles
+		Mplayer_Track *current_track = mplayer_queue_get_current_track();
+		if (current_track && current_track->need_scrobble)
+		{
+			current_track->need_scrobble = false;
+			// TODO(fakhri): only scrobble if we met last.fm definition of scrobble
+			//mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, current_track);
+			platform->push_work(mplayer_lastfm_scrobble_track__async,  mplayer_make_scrobble_input(current_track));
+		}
+		
 		queue->current_index = index;
-		mplayer_load_track(mplayer_queue_get_current_track());
 	}
 	else
 	{
@@ -1230,14 +1240,9 @@ mplayer_set_current(Mplayer_Queue_Index index)
 		}
 		
 		queue->current_index = index;
-		
-		if (is_queue_index_valid(queue->current_index))
-		{
-			Mplayer_Track *track = mplayer_queue_get_current_track();
-			mplayer_load_track(track);
-			platform->push_work(mplayer_lastfm_update_now_playing__async,  track);
-		}
 	}
+	
+	mplayer_load_track(mplayer_queue_get_current_track());
 }
 
 internal void

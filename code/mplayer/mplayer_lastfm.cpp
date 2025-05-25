@@ -256,7 +256,7 @@ mplayer_lastfm_update_now_playing(Mplayer_Lastfm *lastfm, Mplayer_Track *track)
 
 
 internal b32
-mplayer_lastfm_scrobble_track(Mplayer_Lastfm *lastfm, Mplayer_Track *track)
+mplayer_lastfm_scrobble_track(Mplayer_Lastfm *lastfm, String8 album, String8 artist, String8 track)
 {
 	b32 good = false;
 	if (lastfm->valid)
@@ -267,14 +267,13 @@ mplayer_lastfm_scrobble_track(Mplayer_Lastfm *lastfm, Mplayer_Track *track)
 		init_buffered_socket(&buf_socket, socket);
 		
 		Mplayer_Lastfm_Parameter params[] = {
-			{str8_lit("album"),  track->album},
+			{str8_lit("album"),  album},
 			{str8_lit("api_key"), str8_lit(LASTFM_API_KEY)},
-			{str8_lit("artist"),  track->artist},
-			{str8_lit("duration"), str8_f(scratch.arena, "%lld", mplayer_get_track_duration(track))},
+			{str8_lit("artist"),  artist},
 			{str8_lit("method"),  str8_lit("track.scrobble")},
 			{str8_lit("sk"),      lastfm->session_key},
 			{str8_lit("timestamp"), str8_f(scratch.arena, "%ld", time(0))},
-			{str8_lit("track"),   track->title},
+			{str8_lit("track"),   track},
 		};
 		
 		Http_Request req = ZERO_STRUCT;
@@ -291,11 +290,11 @@ mplayer_lastfm_scrobble_track(Mplayer_Lastfm *lastfm, Mplayer_Track *track)
 		if (str8_find(body, str8_lit("ok"), 0, 0) < body.len)
 		{
 			good = true;
-			Log("Scrobbled: %.*s", STR8_EXPAND(track->title));
+			Log("Scrobbled: %.*s", STR8_EXPAND(track));
 		}
 		else
 		{
-			Log("Failed to scrobble: %.*s", STR8_EXPAND(track->title));
+			Log("Failed to scrobble: %.*s", STR8_EXPAND(track));
 		}
 	}
 	
@@ -349,13 +348,37 @@ WORK_SIG(mplayer_get_track_image_url__async)
 	}
 }
 
-WORK_SIG(mplayer_lastfm_scrobble_track__async)
+struct Lastfm_Scrobble_Work_Input
 {
-	Mplayer_Track *track = (Mplayer_Track *)input;
-	mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, track);
+	Memory_Arena work_arena;
+	
+	String8 album; 
+	String8 artist; 
+	String8 track;
+};
+
+internal Lastfm_Scrobble_Work_Input *
+mplayer_make_scrobble_input(Mplayer_Track *track)
+{
+	Lastfm_Scrobble_Work_Input *result = m_arena_bootstrap_push(Lastfm_Scrobble_Work_Input, work_arena);
+	assert(result);
+	result->album  = str8_clone(&result->work_arena, track->album);
+	result->artist = str8_clone(&result->work_arena, track->artist);
+	result->track  = str8_clone(&result->work_arena, track->title);
+	
+	return result;
 }
 
-WORK_SIG(mplayer_lastfm_update_now_playing__async)
+WORK_SIG(mplayer_lastfm_scrobble_track__async)
+{
+	Lastfm_Scrobble_Work_Input *input_data = (Lastfm_Scrobble_Work_Input*)input;
+	mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, input_data->album, input_data->artist, input_data->track);
+	
+	Memory_Arena arena = input_data->work_arena;
+	m_arena_free_all(&arena);
+}
+
+WORK_SIG(_mplayer_lastfm_update_now_playing__async)
 {
 	Mplayer_Track *track = (Mplayer_Track *)input;
 	mplayer_lastfm_update_now_playing(&mplayer_ctx->lastfm, track);

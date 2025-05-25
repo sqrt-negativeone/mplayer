@@ -1,8 +1,5 @@
-
 #include "third_party/discord_rpc.h"
-
 #define DISCORD_CLIENT_ID "1375870442778394705"
-
 
 internal void
 mplayer_discord_init()
@@ -10,8 +7,6 @@ mplayer_discord_init()
 	DiscordEventHandlers handlers = ZERO_STRUCT;
 	Discord_Initialize(DISCORD_CLIENT_ID, &handlers, 1, NULL);
 }
-
-
 
 internal void
 mplayer_discord_update_rich_presence()
