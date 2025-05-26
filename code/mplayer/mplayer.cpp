@@ -365,6 +365,7 @@ struct Mplayer_Context
 	
 	f32 time_since_last_play;
 	f32 volume;
+	f32 current_volume;
 	
 	Mplayer_Mode_Stack *mode_stack;
 	Mplayer_Mode_Stack *mode_stack_free_list_first;
@@ -3198,8 +3199,6 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 	if (track && mplayer_is_queue_playing())
 	{
 		Flac_Stream *flac_stream = track->flac_stream;
-		// TODO(fakhri): lerp volume
-		f32 volume = ease_in_out_sine(mplayer_ctx->volume);
 		if (flac_stream)
 		{
 			u32 channels_count = flac_stream->streaminfo.nb_channels;
@@ -3210,10 +3209,16 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 			Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, device_config.sample_rate, scratch.arena);
 			
+			f32 change_rate = 42.0f;
+			f32 dt = change_rate * (1.0f / (f32)device_config.sample_rate);
 			for (u32 i = 0; i < streamed_samples.frames_count; i += 1)
 			{
 				f32 *samples = streamed_samples.samples + i * channels_count;
 				f32 *out_f32 = (f32*)output_buf + i * channels_count;
+				
+				f32 volume = ease_in_out_sine(mplayer_ctx->current_volume);
+				
+				mplayer_ctx->current_volume += (mplayer_ctx->volume - mplayer_ctx->current_volume) * dt;
 				for (u32 c = 0; c < channels_count; c += 1)
 				{
 					out_f32[c] = volume * samples[c];
