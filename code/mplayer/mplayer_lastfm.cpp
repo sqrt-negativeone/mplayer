@@ -378,7 +378,7 @@ WORK_SIG(mplayer_lastfm_scrobble_track__async)
 	m_arena_free_all(&arena);
 }
 
-WORK_SIG(_mplayer_lastfm_update_now_playing__async)
+WORK_SIG(mplayer_lastfm_update_now_playing__async)
 {
 	Mplayer_Track *track = (Mplayer_Track *)input;
 	mplayer_lastfm_update_now_playing(&mplayer_ctx->lastfm, track);

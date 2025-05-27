@@ -970,6 +970,21 @@ mplayer_track_update_report(Mplayer_Track *track)
 }
 
 internal void
+mplayer_try_scrobble_track(Mplayer_Track *track)
+{
+	if (track && track->need_scrobble)
+	{
+		u64 played_duration = mplayer_track_get_seconds_played(track);
+		u64 duration = mplayer_get_track_duration(track);
+		if (duration >= 30 && ((played_duration > 4 * 60) || (2 * played_duration >= duration)))
+		{
+			track->need_scrobble = false;
+			platform->push_work(mplayer_lastfm_scrobble_track__async,  mplayer_make_scrobble_input(track));
+		}
+	}
+}
+
+internal void
 mplayer_track_reset(Mplayer_Track *track)
 {
 	if (track && track->flac_stream)
@@ -1024,7 +1039,7 @@ mplayer_load_track(Mplayer_Track *track)
 	mplayer_track_update_report(track);
 	track->start_ts = time(0);
 	track->need_scrobble = true;
-	// platform->push_work(mplayer_lastfm_update_now_playing__async,  track);
+	platform->push_work(mplayer_lastfm_update_now_playing__async,  track);
 }
 
 internal void
@@ -1032,12 +1047,7 @@ mplayer_unload_track(Mplayer_Track *track)
 {
 	if (!track) return;
 	
-	if (track->need_scrobble)
-	{
-		track->need_scrobble = false;
-		//mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, track);
-		platform->push_work(mplayer_lastfm_scrobble_track__async,  mplayer_make_scrobble_input(track));
-	}
+	mplayer_try_scrobble_track(track);
 	
 	track->build_seektable_work_data.cancel_req = 1;
 	for (;track->build_seektable_work_data.running;)
@@ -1233,13 +1243,7 @@ mplayer_set_current(Mplayer_Queue_Index index)
 	{
 		// NOTE(fakhri): update scrobbles
 		Mplayer_Track *current_track = mplayer_queue_get_current_track();
-		if (current_track && current_track->need_scrobble)
-		{
-			current_track->need_scrobble = false;
-			// TODO(fakhri): only scrobble if we met last.fm definition of scrobble
-			//mplayer_lastfm_scrobble_track(&mplayer_ctx->lastfm, current_track);
-			platform->push_work(mplayer_lastfm_scrobble_track__async,  mplayer_make_scrobble_input(current_track));
-		}
+		mplayer_try_scrobble_track(current_track);
 		
 		queue->current_index = index;
 	}
