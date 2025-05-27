@@ -62,19 +62,29 @@ struct Seek_Table_Work_Data
 	u8 bits_per_sample;
 };
 
+
+enum Mplayer_Link_Kind
+{
+	LINK_Album,
+	LINK_Artist,
+	LINK_Hash,
+	LINK_COUNT,
+};
+union Mplayer_Track_Links
+{
+	struct Mplayer_Track *links[LINK_COUNT];
+	struct {
+		struct Mplayer_Track *album;
+		struct Mplayer_Track *artist;
+		struct Mplayer_Track *hash;
+	};
+};
+
 struct Mplayer_Track
 {
-	// NOTE(fakhri): album links
-	Mplayer_Track *next_album;
-	Mplayer_Track *prev_album;
+	Mplayer_Track_Links next;
+	Mplayer_Track_Links prev;
 	
-	// NOTE(fakhri): artist links
-	Mplayer_Track *next_artist;
-	Mplayer_Track *prev_artist;
-	
-	// NOTE(fakhri): hash table links
-	Mplayer_Track *next_hash;
-	Mplayer_Track *prev_hash;
 	Mplayer_Track_ID hash;
 	
 	Mplayer_Image_ID image_id;
@@ -616,7 +626,7 @@ mplayer_track_by_id(Mplayer_Library *library, Mplayer_Track_ID id)
 	u32 slot_index = id.v[1] % array_count(library->tracks_table);
 	
 	Mplayer_Track *track = 0;
-	for (Mplayer_Track *entry = library->tracks_table[slot_index].first; entry; entry = entry->next_hash)
+	for (Mplayer_Track *entry = library->tracks_table[slot_index].first; entry; entry = entry->next.hash)
 	{
 		if (is_equal(entry->hash, id))
 		{
@@ -753,7 +763,7 @@ mplayer_insert_track(Mplayer_Library *library, Mplayer_Track *track)
 	u32 slot_index = id.v[1] % array_count(library->tracks_table);
 	DLLPushBack_NP(library->tracks_table[slot_index].first, library->tracks_table[slot_index].last, 
 								 track, 
-								 next_hash, prev_hash);
+								 next.hash, prev.hash);
 	
 	library->tracks_table[slot_index].count += 1;
 	
@@ -1506,6 +1516,38 @@ mplayer_queue_current_track_id()
 }
 
 
+internal void
+mplayer_queue_tracks(Mplayer_Track_ID *track_ids, u32 tracks_count)
+{
+	for (u16 index = 0; index < tracks_count; index += 1)
+	{
+		mplayer_queue_last(track_ids[index]);
+	}
+}
+
+internal void
+mplayer_queue_tracks(Mplayer_Track_List tracks, Mplayer_Link_Kind link_kind)
+{
+	for (Mplayer_Track *track = tracks.first;
+			 track; 
+			 track = track->next.links[link_kind])
+	{
+		mplayer_queue_last(track->hash);
+	}
+}
+
+internal void
+mplayer_queue_tracks(Mplayer_Track_ID_List track_ids)
+{
+	for (Mplayer_Track_ID_Entry *entry = track_ids.first;
+			 entry; 
+			 entry = entry->next)
+	{
+		mplayer_queue_last(entry->track_id);
+	}
+}
+
+
 //~ NOTE(fakhri): Library Indexing, Serializing and stuff
 
 internal void
@@ -1668,7 +1710,7 @@ mplayer_load_indexed_library()
 				Mplayer_Artist_ID artist_hash = mplayer_compute_artist_id(track->artist);
 				Mplayer_Artist *artist = mplayer_artist_by_id(library, artist_hash);
 				assert(artist);
-				DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next_artist, prev_artist);
+				DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next.artist, prev.artist);
 				artist->tracks.count += 1;
 				track->artist_id = artist->hash;
 			}
@@ -1678,7 +1720,7 @@ mplayer_load_indexed_library()
 				Mplayer_Album_ID album_hash = mplayer_compute_album_id(track->artist, track->album);
 				Mplayer_Album *album = mplayer_album_by_id(library, album_hash);
 				
-				DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next_album, prev_album);
+				DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next.album, prev.album);
 				album->tracks.count += 1;
 				track->album_id = album->hash;
 			}
@@ -1781,13 +1823,13 @@ mplayer_make_track(File_Info info, u64 samples_start, u64 samples_end, Mplayer_A
 		
 		// TODO(fakhri): use parent directory name as album name if the track doesn't contain an album name
 		
-		DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next_artist, prev_artist);
+		DLLPushBack_NP(artist->tracks.first, artist->tracks.last, track, next.artist, prev.artist);
 		artist->tracks.count += 1;
 		track->artist_id = artist->hash;
 		
 		// NOTE(fakhri): setup album
 		{
-			DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next_album, prev_album);
+			DLLPushBack_NP(album->tracks.first, album->tracks.last, track, next.album, prev.album);
 			album->tracks.count += 1;
 			track->album_id = album->hash;
 			
@@ -4044,10 +4086,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_spacer_pixels(20, 1);
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
-										for (u32 track_index = 0; track_index < mplayer_ctx->library.tracks_count; track_index += 1)
-										{
-											mplayer_queue_last(mplayer_ctx->library.track_ids[track_index]);
-										}
+										mplayer_queue_tracks(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
 										mplayer_queue_resume();
 									}
 									
@@ -4068,7 +4107,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 																																						 );
 								if (interaction.clicked_left)
 								{
-									mplayer_queue_play_track(track_id);
+									mplayer_clear_queue();
+									mplayer_queue_tracks(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
+									mplayer_set_current((u16)track_index);
 									mplayer_queue_resume();
 								}
 								if (interaction.clicked_right)
@@ -4112,7 +4153,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									{
 										for (Mplayer_Track *track = artist->tracks.first; 
 												 track; 
-												 track = track->next_artist)
+												 track = track->next.artist)
 										{
 											mplayer_queue_last(track->hash);
 										}
@@ -4237,12 +4278,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											
 											if (interaction.clicked_left)
 											{
-												for (Mplayer_Track *track = album->tracks.first; 
-														 track; 
-														 track = track->next_album)
-												{
-													mplayer_queue_last(track->hash);
-												}
+												mplayer_queue_tracks(album->tracks, LINK_Album);
 												mplayer_queue_resume();
 											}
 										}
@@ -4265,18 +4301,25 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								{
 									u32 count; for(count = 0, first_track = album->tracks.first; 
 																 count < item_index && first_track; 
-																 count += 1, first_track = first_track->next_album);
+																 count += 1, first_track = first_track->next.album);
 								}
-								for(Mplayer_Track *track = first_track; ui_list_item_begin(); (track = track->next_album, ui_list_item_end()))
+								
+								
+								for(Mplayer_Track *track = first_track; 
+										ui_list_item_begin(); 
+										(track = track->next.album, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = track->hash;
 									Mplayer_UI_Interaction interaction = mplayer_ui_track_item_f(track, 
 																																							 is_equal(track_id, mplayer_queue_current_track_id()),
-																																							 "library_track_%p", track
-																																							 );
+																																							 "library_track_%p", track);
 									if (interaction.clicked_left)
 									{
-										mplayer_queue_play_track(track_id);
+										mplayer_clear_queue();
+										
+										u16 index = (u16)(item_index + (track - first_track));
+										mplayer_queue_tracks(album->tracks, LINK_Album);
+										mplayer_set_current(index);
 										mplayer_queue_resume();
 									}
 									if (interaction.clicked_right)
@@ -4355,11 +4398,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 												
 												if (interaction.clicked_left)
 												{
-													mplayer_clear_queue();
-													for(Mplayer_Track_ID_Entry *entry = playlist->tracks.first; entry; entry = entry->next)
-													{
-														mplayer_queue_last(entry->track_id);
-													}
+													mplayer_queue_tracks(playlist->tracks);
 													mplayer_queue_resume();
 												}
 											}
@@ -4384,6 +4423,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 																 count < item_index && first_entry; 
 																 count += 1, first_entry = first_entry->next);
 								}
+								
 								for(Mplayer_Track_ID_Entry *entry = first_entry; ui_list_item_begin(); (entry = entry->next, ui_list_item_end()))
 								{
 									Mplayer_Track_ID track_id = entry->track_id;
@@ -4404,7 +4444,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									Mplayer_UI_Interaction interaction = ui_interaction_from_element(track_el);
 									if (interaction.clicked_left)
 									{
-										mplayer_queue_play_track(track_id);
+										mplayer_clear_queue();
+										mplayer_queue_tracks(playlist->tracks);
+										u16 index = (u16)(item_index + (entry - first_entry));
+										mplayer_set_current(index);
 										mplayer_queue_resume();
 									}
 									if (interaction.clicked_right)
@@ -4555,11 +4598,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_spacer_pixels(10, 1);
 									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
 									{
-										mplayer_clear_queue();
-										for(Mplayer_Track_ID_Entry *entry = playlists->fav_tracks.first; entry; entry = entry->next)
-										{
-											mplayer_queue_last(entry->track_id);
-										}
+										mplayer_queue_tracks(playlists->fav_tracks);
 										mplayer_queue_resume();
 									}
 									
@@ -4591,7 +4630,10 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 																																							 );
 									if (interaction.clicked_left)
 									{
-										mplayer_queue_play_track(track_id);
+										mplayer_clear_queue();
+										mplayer_queue_tracks(playlists->fav_tracks);
+										u16 index = (u16)(item_index + (entry - first_entry));
+										mplayer_set_current(index);
 										mplayer_queue_resume();
 									}
 									if (interaction.clicked_right)
