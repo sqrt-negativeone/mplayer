@@ -388,6 +388,7 @@ struct Mplayer_Context
 	
 	Mplayer_Path_Lister path_lister;
 	
+	f32 is_playing_t;
 	Mplayer_Queue queue;
 	
 	b32 show_library_locations;
@@ -1308,7 +1309,7 @@ mplayer_load_queue()
 	Buffer queue_content = platform->load_entire_file(mplayer_ctx->frame_arena, MPLAYER_QUEUE_FILENAME);
 	if (queue_content.size)
 	{
-		assert(queue_content.size == sizeof(Mplayer_Queue));
+		assert(queue_content.size <= sizeof(Mplayer_Queue));
 		memory_copy(queue, queue_content.data, queue_content.size);
 		
 		if (is_queue_index_valid(queue->current_index))
@@ -3247,15 +3248,8 @@ return x < 0.5
 internal f32
 ease_in_out_circ(f32 in)
 {
-	f32 out = 0;
-	if (in < 0.5f)
-	{
-		out = (1 - SQRTF(1 - SQUARE(2 * in))) / 2.0f;
-	}
-	else
-	{
-		out = (SQRTF(1 - SQUARE(-2 * in + 2)) + 1) / 2.0f;
-	}
+	f32 out = (in < 0.5f? 
+						 ( (1 - SQRTF(1 - SQUARE(2 * in))) / 2.0f) : (SQRTF(1 - SQUARE(-2 * in + 2)) + 1) / 2.0f);
 	return out;
 }
 
@@ -3267,18 +3261,28 @@ ease_in_out_sine(f32 in)
 	return out;
 }
 
+internal f32
+ease_out_cubic(f32 in)
+{
+	f32 out = 1 - (1 - in) * SQUARE(1 - in);
+	return out;
+}
 internal
 MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 {
 	mplayer_update_queue();
 	
 	Mplayer_Track *track = mplayer_queue_get_current_track();
-	if (track && mplayer_is_queue_playing())
+	if (track && mplayer_is_queue_playing() || mplayer_ctx->is_playing_t)
 	{
 		Flac_Stream *flac_stream = track->flac_stream;
 		if (flac_stream)
 		{
 			u32 channels_count = flac_stream->streaminfo.nb_channels;
+			f32 dt = (1.0f / (f32)device_config.sample_rate);
+			
+			f32 dvolume = 1 - pow_f(2, -42 * dt);
+			f32 dplaying = 10.f * dt; 
 			
 			// TODO(fakhri): convert to device channel layout
 			assert(channels_count == device_config.channels_count);
@@ -3286,19 +3290,19 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 			Decoded_Samples streamed_samples = flac_read_samples(flac_stream, frame_count, device_config.sample_rate, scratch.arena);
 			
-			f32 change_rate = 42.0f;
-			f32 dt = change_rate * (1.0f / (f32)device_config.sample_rate);
 			for (u32 i = 0; i < streamed_samples.frames_count; i += 1)
 			{
 				f32 *samples = streamed_samples.samples + i * channels_count;
 				f32 *out_f32 = (f32*)output_buf + i * channels_count;
 				
-				f32 volume = ease_in_out_sine(mplayer_ctx->current_volume);
+				f32 is_playing_t = ease_in_out_sine(mplayer_ctx->is_playing_t);
+				f32 volume       = ease_out_cubic(mplayer_ctx->current_volume);
 				
-				mplayer_ctx->current_volume += (mplayer_ctx->volume - mplayer_ctx->current_volume) * dt;
+				mplayer_ctx->current_volume += (mplayer_ctx->volume - mplayer_ctx->current_volume) * dvolume;
+				mplayer_ctx->is_playing_t   += (!!mplayer_ctx->queue.playing - mplayer_ctx->is_playing_t) * dplaying;
 				for (u32 c = 0; c < channels_count; c += 1)
 				{
-					out_f32[c] = volume * samples[c];
+					out_f32[c] = is_playing_t * volume * samples[c];
 				}
 			}
 			
@@ -3306,6 +3310,11 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			{
 				// NOTE(fakhri): track just finished playing
 			}
+		}
+		
+		if (ABS(mplayer_ctx->is_playing_t - !!mplayer_ctx->queue.playing) < 0.01f)
+		{
+			mplayer_ctx->is_playing_t = !!mplayer_ctx->queue.playing;
 		}
 	}
 }
@@ -3337,27 +3346,6 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_ctx->ssl_ctx = ssl_context_init();
 	mplayer_ctx->ui = ui_init(mplayer_ctx->font);
 	mplayer_ctx->lastfm = mplayer_lastfm_init();
-	
-#if 0
-	{
-		Socket test_socket = secure_socket_connect(mplayer_ctx->ssl_ctx, "google.com", "443");
-		assert(test_socket.valid);
-		Buffered_Socket buf_socket = ZERO_STRUCT;
-		init_buffered_socket(&buf_socket, test_socket);
-		Http_Request req = ZERO_STRUCT;
-		
-		req.method = HTTP_METHOD_GET;
-		req.uri = str8_lit("/");
-		
-		Memory_Checkpoint scratch = get_scratch(0, 0);
-		http_send_request(test_socket, req);
-		
-		Http_Response response = ZERO_STRUCT;
-		http_receive_response(scratch.arena, &buf_socket, &response);
-		
-		Log("Http response: %.*s", STR8_EXPAND(response.status_line));
-	}
-#endif
 	
 	// NOTE(fakhri): ctx menu ids
 	{
