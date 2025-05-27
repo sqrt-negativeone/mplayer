@@ -13,10 +13,12 @@ mplayer_discord_update_rich_presence()
 {
 	DiscordRichPresence presence = ZERO_STRUCT;
 	Mplayer_Track *current_track = mplayer_queue_get_current_track();
-	char details[128];
-	char state[128];
 	if (current_track)
 	{
+		char details[128];
+		char state[128];
+		char name[128];
+		
 		if (mplayer_ctx->queue.playing)
 		{
 			stbsp_snprintf(details, sizeof(details), "🎶  %.*s", STR8_EXPAND(current_track->title));
@@ -28,11 +30,13 @@ mplayer_discord_update_rich_presence()
 		{
 			stbsp_snprintf(details, sizeof(details), "⏸  %.*s (Paused)", STR8_EXPAND(current_track->title));
 		}
+		stbsp_snprintf(name, sizeof(name), "%.*s", STR8_EXPAND(current_track->artist));
 		
 		stbsp_snprintf(state, sizeof(state), "by %.*s | %.*s", STR8_EXPAND(current_track->album), STR8_EXPAND(current_track->artist));
 		
 		presence.details  = details;
 		presence.state    = state;
+		presence.name     = name;
 		
 		if (!current_track->image_url.len && !current_track->did_try_to_load_image_url)
 		{
@@ -51,10 +55,10 @@ mplayer_discord_update_rich_presence()
 	{
 		presence.details  = "🎧 Music Player";
 		presence.state    = "Ready to play music";
+		presence.name = "Mplayer";
 	}
 	
 	presence.type = ActivityType_Listening;
-	presence.name = "Mplayer";
 	Discord_UpdatePresence(&presence);
 	Discord_RunCallbacks();
 }

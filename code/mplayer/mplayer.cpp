@@ -1517,7 +1517,7 @@ mplayer_queue_current_track_id()
 
 
 internal void
-mplayer_queue_tracks(Mplayer_Track_ID *track_ids, u32 tracks_count)
+mplayer_queue_tracks_last(Mplayer_Track_ID *track_ids, u32 tracks_count)
 {
 	for (u16 index = 0; index < tracks_count; index += 1)
 	{
@@ -1526,7 +1526,7 @@ mplayer_queue_tracks(Mplayer_Track_ID *track_ids, u32 tracks_count)
 }
 
 internal void
-mplayer_queue_tracks(Mplayer_Track_List tracks, Mplayer_Link_Kind link_kind)
+mplayer_queue_tracks_last(Mplayer_Track_List tracks, Mplayer_Link_Kind link_kind)
 {
 	for (Mplayer_Track *track = tracks.first;
 			 track; 
@@ -1537,13 +1537,44 @@ mplayer_queue_tracks(Mplayer_Track_List tracks, Mplayer_Link_Kind link_kind)
 }
 
 internal void
-mplayer_queue_tracks(Mplayer_Track_ID_List track_ids)
+mplayer_queue_tracks_last(Mplayer_Track_ID_List track_ids)
 {
 	for (Mplayer_Track_ID_Entry *entry = track_ids.first;
 			 entry; 
 			 entry = entry->next)
 	{
 		mplayer_queue_last(entry->track_id);
+	}
+}
+
+internal void
+mplayer_queue_tracks_next(Mplayer_Track_ID *track_ids, u32 tracks_count)
+{
+	for (u16 index = 0; index < tracks_count; index += 1)
+	{
+		mplayer_queue_next(track_ids[tracks_count - index - 1]);
+	}
+}
+
+internal void
+mplayer_queue_tracks_next(Mplayer_Track_List tracks, Mplayer_Link_Kind link_kind)
+{
+	for (Mplayer_Track *track = tracks.last;
+			 track; 
+			 track = track->prev.links[link_kind])
+	{
+		mplayer_queue_next(track->hash);
+	}
+}
+
+internal void
+mplayer_queue_tracks_next(Mplayer_Track_ID_List track_ids)
+{
+	for (Mplayer_Track_ID_Entry *entry = track_ids.last;
+			 entry; 
+			 entry = entry->prev)
+	{
+		mplayer_queue_next(entry->track_id);
 	}
 }
 
@@ -4084,13 +4115,18 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_pref_width(ui_size_text_dim(1))
 								{
 									ui_spacer_pixels(20, 1);
-									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
+									if (mplayer_ui_underlined_button(str8_lit("Queue Next")).clicked_left)
 									{
-										mplayer_queue_tracks(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
+										mplayer_queue_tracks_next(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
 										mplayer_queue_resume();
 									}
 									
-									ui_spacer_pixels(10, 1);
+									ui_spacer_pixels(20, 1);
+									if (mplayer_ui_underlined_button(str8_lit("Queue Last")).clicked_left)
+									{
+										mplayer_queue_tracks_last(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
+										mplayer_queue_resume();
+									}
 								}
 							}
 						}
@@ -4108,7 +4144,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 								if (interaction.clicked_left)
 								{
 									mplayer_clear_queue();
-									mplayer_queue_tracks(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
+									mplayer_queue_tracks_last(mplayer_ctx->library.track_ids, mplayer_ctx->library.tracks_count);
 									mplayer_set_current((u16)track_index);
 									mplayer_queue_resume();
 								}
@@ -4149,18 +4185,18 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_pref_width(ui_size_text_dim(1))
 								{
 									ui_spacer_pixels(10, 1);
-									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
+									if (mplayer_ui_underlined_button(str8_lit("Queue Next")).clicked_left)
 									{
-										for (Mplayer_Track *track = artist->tracks.first; 
-												 track; 
-												 track = track->next.artist)
-										{
-											mplayer_queue_last(track->hash);
-										}
+										mplayer_queue_tracks_next(artist->tracks, LINK_Artist);
 										mplayer_queue_resume();
 									}
 									
 									ui_spacer_pixels(10, 1);
+									if (mplayer_ui_underlined_button(str8_lit("Queue Last")).clicked_left)
+									{
+										mplayer_queue_tracks_last(artist->tracks, LINK_Artist);
+										mplayer_queue_resume();
+									}
 								}
 							}
 						}
@@ -4264,13 +4300,13 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										
 										ui_spacer(ui_size_parent_remaining());
 										
-										// NOTE(fakhri): queue album button
+										// NOTE(fakhri): queue album next button
 										{
 											ui_next_width(ui_size_text_dim(1));
 											ui_next_height(ui_size_text_dim(1));
 											ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
 											ui_next_font_size(18);
-											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Album");
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Next");
 											if (interaction.pressed_left)
 											{
 												interaction.element->text_color = v4(1, 1, 1, 1);
@@ -4278,10 +4314,32 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											
 											if (interaction.clicked_left)
 											{
-												mplayer_queue_tracks(album->tracks, LINK_Album);
+												mplayer_queue_tracks_next(album->tracks, LINK_Album);
 												mplayer_queue_resume();
 											}
 										}
+										
+										// NOTE(fakhri): queue album button
+										{
+											ui_next_width(ui_size_text_dim(1));
+											ui_next_height(ui_size_text_dim(1));
+											ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
+											ui_next_font_size(18);
+											Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Last");
+											if (interaction.pressed_left)
+											{
+												interaction.element->text_color = v4(1, 1, 1, 1);
+											}
+											
+											if (interaction.clicked_left)
+											{
+												mplayer_queue_tracks_last(album->tracks, LINK_Album);
+												mplayer_queue_resume();
+											}
+										}
+										ui_spacer_pixels(10, 1);
+										
+										
 										ui_spacer_pixels(10, 1);
 									}
 								}
@@ -4318,7 +4376,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 										mplayer_clear_queue();
 										
 										u16 index = (u16)(item_index + (track - first_track));
-										mplayer_queue_tracks(album->tracks, LINK_Album);
+										mplayer_queue_tracks_last(album->tracks, LINK_Album);
 										mplayer_set_current(index);
 										mplayer_queue_resume();
 									}
@@ -4383,14 +4441,13 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 											ui_label(playlist->name);
 											
 											ui_spacer_pixels(10, 1);
-											
-											// NOTE(fakhri): queue playlist button
+											// NOTE(fakhri): queue playlist next button
 											{
 												ui_next_width(ui_size_text_dim(1));
 												ui_next_height(ui_size_text_dim(1));
 												ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
 												ui_next_font_size(18);
-												Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Playlist");
+												Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Next");
 												if (interaction.pressed_left)
 												{
 													interaction.element->text_color = v4(1, 1, 1, 1);
@@ -4398,10 +4455,32 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 												
 												if (interaction.clicked_left)
 												{
-													mplayer_queue_tracks(playlist->tracks);
+													mplayer_queue_tracks_next(playlist->tracks);
 													mplayer_queue_resume();
 												}
 											}
+											
+											ui_spacer_pixels(10, 1);
+											// NOTE(fakhri): queue playlist button
+											{
+												ui_next_width(ui_size_text_dim(1));
+												ui_next_height(ui_size_text_dim(1));
+												ui_next_text_color(v4(0.6f, 0.6f, 0.6f, 1));
+												ui_next_font_size(18);
+												Mplayer_UI_Interaction interaction = mplayer_ui_underlined_button_f("Queue Last");
+												if (interaction.pressed_left)
+												{
+													interaction.element->text_color = v4(1, 1, 1, 1);
+												}
+												
+												if (interaction.clicked_left)
+												{
+													mplayer_queue_tracks_last(playlist->tracks);
+													mplayer_queue_resume();
+												}
+											}
+											
+											
 										}
 									}
 								}
@@ -4445,7 +4524,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (interaction.clicked_left)
 									{
 										mplayer_clear_queue();
-										mplayer_queue_tracks(playlist->tracks);
+										mplayer_queue_tracks_last(playlist->tracks);
 										u16 index = (u16)(item_index + (entry - first_entry));
 										mplayer_set_current(index);
 										mplayer_queue_resume();
@@ -4596,13 +4675,19 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									ui_pref_width(ui_size_text_dim(1))
 								{
 									ui_spacer_pixels(10, 1);
-									if (mplayer_ui_underlined_button(str8_lit("Queue All")).clicked_left)
+									if (mplayer_ui_underlined_button(str8_lit("Queue Next")).clicked_left)
 									{
-										mplayer_queue_tracks(playlists->fav_tracks);
+										mplayer_queue_tracks_next(playlists->fav_tracks);
 										mplayer_queue_resume();
 									}
 									
+									
 									ui_spacer_pixels(10, 1);
+									if (mplayer_ui_underlined_button(str8_lit("Queue Last")).clicked_left)
+									{
+										mplayer_queue_tracks_last(playlists->fav_tracks);
+										mplayer_queue_resume();
+									}
 								}
 							}
 						}
@@ -4631,7 +4716,7 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 									if (interaction.clicked_left)
 									{
 										mplayer_clear_queue();
-										mplayer_queue_tracks(playlists->fav_tracks);
+										mplayer_queue_tracks_last(playlists->fav_tracks);
 										u16 index = (u16)(item_index + (entry - first_entry));
 										mplayer_set_current(index);
 										mplayer_queue_resume();
