@@ -374,8 +374,9 @@ struct Mplayer_Context
 	Mplayer_Lastfm lastfm;
 	
 	f32 time_since_last_play;
+	
 	f32 volume;
-	f32 current_volume;
+	f32 target_volume;
 	
 	Mplayer_Mode_Stack *mode_stack;
 	Mplayer_Mode_Stack *mode_stack_free_list_first;
@@ -710,6 +711,7 @@ mplayer_compute_track_id(String8 track_path, u64 samples_offset, u64 samples_end
 	Mplayer_Track_ID id = NULL_TRACK_ID;
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
+	// TODO(fakhri): case insensitive
 	Buffer buffer = arena_push_buffer(scratch.arena, track_path.len + sizeof(samples_offset) + sizeof(samples_end));
 	((u64*)buffer.data)[0] = samples_offset;
 	((u64*)buffer.data)[1] = samples_end;
@@ -728,6 +730,7 @@ mplayer_compute_album_id(String8 artist_name, String8 album_name)
 	
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
+	// TODO(fakhri): case insensitive
 	String8 data = str8_f(scratch.arena, "%.*s%.*s", STR8_EXPAND(artist_name), STR8_EXPAND(album_name));
 	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, data.len, data.str);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
@@ -740,6 +743,7 @@ mplayer_compute_artist_id(String8 artist_name)
 {
 	Mplayer_Artist_ID id = NULL_ARTIST_ID;
 	
+	// TODO(fakhri): case insensitive
 	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, artist_name.len, artist_name.str);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
 	
@@ -1296,6 +1300,7 @@ mplayer_clear_queue()
 		mplayer_unload_track(mplayer_queue_get_current_track());
 	}
 	
+	mplayer_ctx->is_playing_t = 0;
 	queue->playing = 0;
 	queue->current_index = 0;
 	queue->count = 0;
@@ -1348,12 +1353,17 @@ mplayer_play_prev_in_queue()
 internal void
 mplayer_queue_pause()
 {
+	if (mplayer_ctx->queue.playing != 0)
+		mplayer_ctx->is_playing_t = 0;
+	
 	mplayer_ctx->queue.playing = 0;
 }
 
 internal void
 mplayer_queue_resume()
 {
+	if (mplayer_ctx->queue.playing != 1)
+		mplayer_ctx->is_playing_t = 0;
 	mplayer_ctx->queue.playing = 1;
 	mplayer_save_queue();
 	
@@ -2074,7 +2084,6 @@ mplayer_load_tracks_in_directory(String8 library_path)
 			Cuesheet_File *current_cuesheet_file = 0;
 			Cuesheet_Track *current_cuesheet_track = 0;
 			
-			// TODO(fakhri): parse cue file
 			String8 content = to_string(platform->load_entire_file(temp_mem.arena, info.path));
 			
 			for (u32 line_start_offset = 0; line_start_offset < content.len;)
@@ -3253,6 +3262,22 @@ ease_in_out_circ(f32 in)
 	return out;
 }
 
+internal f32
+ease_in_out_expo(f32 in)
+{
+	f32 out = ((in == 0)? 0 : 
+						 ((in == 1)? 1 :
+							((in < 0.5f)? (0.5f * pow_f(2, 20 * in - 10)) : (2 - pow_f(2, -20 * in + 10)))));
+	return out;
+}
+
+internal f32
+ease_in_out_quad(f32 in)
+{
+	f32 out = ((in < 0.5f)? (2 * SQUARE(in)) : (1 - SQUARE(-2 * in + 2)) * 0.5f);
+	return out;
+}
+
 
 internal f32
 ease_in_out_sine(f32 in)
@@ -3267,13 +3292,14 @@ ease_out_cubic(f32 in)
 	f32 out = 1 - (1 - in) * SQUARE(1 - in);
 	return out;
 }
+
 internal
 MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 {
 	mplayer_update_queue();
 	
 	Mplayer_Track *track = mplayer_queue_get_current_track();
-	if (track && mplayer_is_queue_playing() || mplayer_ctx->is_playing_t)
+	if (track && (mplayer_is_queue_playing() || (mplayer_ctx->is_playing_t != 1.0f)))
 	{
 		Flac_Stream *flac_stream = track->flac_stream;
 		if (flac_stream)
@@ -3281,8 +3307,7 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			u32 channels_count = flac_stream->streaminfo.nb_channels;
 			f32 dt = (1.0f / (f32)device_config.sample_rate);
 			
-			f32 dvolume = 1 - pow_f(2, -42 * dt);
-			f32 dplaying = 10.f * dt; 
+			f32 dvolume = 42 * dt;
 			
 			// TODO(fakhri): convert to device channel layout
 			assert(channels_count == device_config.channels_count);
@@ -3295,15 +3320,18 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 				f32 *samples = streamed_samples.samples + i * channels_count;
 				f32 *out_f32 = (f32*)output_buf + i * channels_count;
 				
-				f32 is_playing_t = ease_in_out_sine(mplayer_ctx->is_playing_t);
-				f32 volume       = ease_out_cubic(mplayer_ctx->current_volume);
+				mplayer_ctx->volume = lerpf(mplayer_ctx->volume, 10 * dt, mplayer_ctx->target_volume);
+				f32 volume = ease_in_out_sine(mplayer_ctx->volume);
 				
-				mplayer_ctx->current_volume += (mplayer_ctx->volume - mplayer_ctx->current_volume) * dvolume;
-				mplayer_ctx->is_playing_t   += (!!mplayer_ctx->queue.playing - mplayer_ctx->is_playing_t) * dplaying;
+				f32 is_playing_t = ease_in_out_sine(mplayer_ctx->is_playing_t);
+				f32 is_playing = lerpf((f32)!mplayer_ctx->queue.playing, is_playing_t, (f32)!!mplayer_ctx->queue.playing);
+				mplayer_ctx->is_playing_t = CLAMP(0, mplayer_ctx->is_playing_t + 10 * dt, 1);
+				
 				for (u32 c = 0; c < channels_count; c += 1)
 				{
-					out_f32[c] = is_playing_t * volume * samples[c];
+					out_f32[c] = is_playing * volume * samples[c];
 				}
+				
 			}
 			
 			if (streamed_samples.last_samples_in_track)
@@ -3317,6 +3345,12 @@ MPLAYER_GET_AUDIO_SAMPLES(mplayer_get_audio_samples)
 			mplayer_ctx->is_playing_t = !!mplayer_ctx->queue.playing;
 		}
 	}
+}
+
+internal void
+mplayer_set_volume(f32 volume)
+{
+	mplayer_ctx->target_volume = volume;
 }
 
 internal
@@ -3342,7 +3376,7 @@ MPLAYER_INITIALIZE(mplayer_initialize)
 	mplayer_ctx->render_ctx = render_ctx;
 	mplayer_ctx->fonts_ctx = fnt_init(render_ctx);
 	mplayer_ctx->font = fnt_open_font(str8_lit("data/fonts/arial.ttf"));
-	mplayer_ctx->volume = 1.0f;
+	mplayer_set_volume(1.0f);
 	mplayer_ctx->ssl_ctx = ssl_context_init();
 	mplayer_ctx->ui = ui_init(mplayer_ctx->font);
 	mplayer_ctx->lastfm = mplayer_lastfm_init();
@@ -4945,7 +4979,9 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 							ui_next_height(ui_size_pixel(12, 1));
 							ui_next_background_color(v4(0.2f, 0.2f, 0.2f, 1.0f));
 							ui_next_roundness(5);
-							ui_slider_f32(str8_lit("volume-control-slider"), &mplayer_ctx->volume, 0, 1);
+							f32 target_volume = mplayer_ctx->target_volume;
+							ui_slider_f32(str8_lit("volume-control-slider"), &target_volume, 0, 1);
+							mplayer_set_volume(target_volume);
 						}
 						
 						ui_spacer(ui_size_parent_remaining());
