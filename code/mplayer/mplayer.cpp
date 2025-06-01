@@ -2063,6 +2063,191 @@ str8_chop_quotes(String8 str)
 	return result;
 }
 
+internal Cuesheet_List
+mplayer_parse_cue_file(Memory_Arena *arena, String8 path)
+{
+	Cuesheet_List cuesheet_list = ZERO_STRUCT;
+	enum Cuesheet_Context_Kind
+	{
+		Cuesheet_Context_None,
+		Cuesheet_Context_File,
+		Cuesheet_Context_Track,
+	} current_ctx_kind = Cuesheet_Context_None;
+	
+	String8 global_performer = ZERO_STRUCT;
+	String8 global_title = ZERO_STRUCT;
+	
+	Cuesheet_File *current_cuesheet_file = 0;
+	Cuesheet_Track *current_cuesheet_track = 0;
+	
+	String8 content = to_string(platform->load_entire_file(arena, path));
+	
+	for (u32 line_start_offset = 0; line_start_offset < content.len;)
+	{
+		u32 line_len = 0;
+		for (; line_start_offset + line_len < content.len; line_len += 1)
+		{
+			if (content.str[line_start_offset + line_len] == '\n' || 
+					content.str[line_start_offset + line_len] == '\r' && content.str[line_start_offset + line_len + 1] == '\n')
+			{
+				String8 line = str8(content.str + line_start_offset, line_len);
+				line_len += ((content.str[line_start_offset + line_len] == '\r')? 2:1);
+				
+				// NOTE(fakhri): skip whitespaces at the begining of the line
+				line = str8_skip_first(line, string_find_first_non_whitespace(line));
+				
+				String8 command = prefix8(line, string_find_first_whitespace(line));
+				if (0) {}
+				else if (str8_match(command, str8_lit("REM"), MatchFlag_CaseInsensitive)) {/*NOTE(fakhri): do nothing*/}
+				else if (str8_match(command, str8_lit("FILE"), MatchFlag_CaseInsensitive)) 
+				{
+					String8 file_cmd_str = str8_skip_first(line, command.len);
+					String8 file_name_str = str8_skip_leading_spaces(file_cmd_str);
+					if (file_name_str.str[0] == '"')
+					{
+						file_name_str = str8_skip_first(file_name_str, 1);
+						file_name_str = prefix8(file_name_str, string_find_first_characer(file_name_str, '"'));
+					}
+					
+					Cuesheet_File *cuesheet = m_arena_push_struct_z(arena, Cuesheet_File);
+					DLLPushBack(cuesheet_list.first, cuesheet_list.last, cuesheet);
+					current_cuesheet_file = cuesheet;
+					current_ctx_kind = Cuesheet_Context_File;
+					
+					cuesheet->file      = file_name_str;
+					cuesheet->album     = global_title;
+					cuesheet->performer = global_performer;
+				}
+				else if (str8_match(command, str8_lit("TRACK"), MatchFlag_CaseInsensitive)) 
+				{
+					String8 track_cmd_str = str8_skip_first(line, command.len);
+					// TODO(fakhri): parse track number
+					assert(current_cuesheet_file);
+					if (current_cuesheet_file)
+					{
+						Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(arena, Cuesheet_Track);
+						DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
+						current_cuesheet_track = cuesheet_track;
+						current_ctx_kind = Cuesheet_Context_Track;
+						
+						cuesheet_track->performer = current_cuesheet_file->performer;
+					}
+				}
+				else if (str8_match(command, str8_lit("PERFORMER"), MatchFlag_CaseInsensitive)) 
+				{
+					String8 performer_str = str8_skip_first(line, command.len);
+					performer_str = str8_skip_leading_spaces(performer_str);
+					performer_str = str8_chop_quotes(performer_str);
+					
+					switch(current_ctx_kind)
+					{
+						case Cuesheet_Context_None:
+						{
+							global_performer = performer_str;
+						} break;
+						case Cuesheet_Context_Track:
+						{
+							assert(current_cuesheet_track);
+							if (current_cuesheet_track)
+							{
+								current_cuesheet_track->performer = performer_str;
+							}
+						} break;
+						case Cuesheet_Context_File:
+						{
+							// invalid_code_path("PERFORMER is not allowed in FILE context");
+						} break;
+					}
+				}
+				else if (str8_match(command, str8_lit("TITLE"), MatchFlag_CaseInsensitive)) 
+				{
+					String8 title_str = str8_skip_first(line, command.len);
+					title_str = str8_skip_leading_spaces(title_str);
+					title_str = str8_chop_quotes(title_str);
+					
+					switch(current_ctx_kind)
+					{
+						case Cuesheet_Context_None:
+						{
+							global_title = title_str;
+						} break;
+						case Cuesheet_Context_Track:
+						{
+							assert(current_cuesheet_track);
+							if (current_cuesheet_track)
+							{
+								current_cuesheet_track->title = title_str;
+							}
+						} break;
+						case Cuesheet_Context_File:
+						{
+							//invalid_code_path("TITLE is not allowed in FILE context");
+						} break;
+					}
+				}
+				else if (str8_match(command, str8_lit("INDEX"), MatchFlag_CaseInsensitive))
+				{
+					line = str8_skip_leading_spaces(str8_skip_first(line, command.len));
+					String8 index_number = prefix8(line, string_find_first_whitespace(line));
+					
+					// TODO(fakhri): handle multiple index numbers
+					
+					Cuesheet_Track_Index track_index_ts = ZERO_STRUCT;
+					if (u64_from_str8_base10(index_number) == 1)
+					{
+						String8 index_timestamp = str8_skip_leading_spaces(str8_skip_first(line, index_number.len));
+						
+						String8 minutes_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
+						index_timestamp = str8_skip_first(index_timestamp, minutes_str.len + 1);
+						
+						String8 seconds_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
+						index_timestamp = str8_skip_first(index_timestamp, seconds_str.len + 1);
+						
+						String8 frames_str = index_timestamp;
+						
+						track_index_ts.minutes = (u32)u64_from_str8_base10(minutes_str);
+						track_index_ts.seconds = (u32)u64_from_str8_base10(seconds_str);
+						track_index_ts.frames  = (u32)u64_from_str8_base10(frames_str);
+					}
+					
+					if (current_ctx_kind == Cuesheet_Context_File)
+					{
+						// NOTE(fakhri): altho it's not allowed in official specification, some files 
+						// allow index command in file context, for these cases we create an implecit track
+						assert(current_cuesheet_file);
+						if (current_cuesheet_file)
+						{
+							Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(arena, Cuesheet_Track);
+							DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
+							current_cuesheet_track = cuesheet_track;
+							current_ctx_kind = Cuesheet_Context_Track;
+						}
+					}
+					
+					if (current_ctx_kind == Cuesheet_Context_Track)
+					{
+						assert(current_cuesheet_track);
+						if (current_cuesheet_track)
+						{
+							current_cuesheet_track->index = track_index_ts;
+						}
+					}
+					else 
+					{
+						invalid_code_path("INDEX command is not allowed in this context");
+					}
+					
+				}
+				
+				break;
+			}
+		}
+		line_start_offset += line_len;
+	}
+	
+	return cuesheet_list;
+}
+
 internal void
 mplayer_load_tracks_in_directory(String8 library_path)
 {
@@ -2070,7 +2255,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 	
 	Directory dir = platform->read_directory(temp_mem.arena, library_path);
 	
-	// NOTE(fakhri): extract cuesheets if exist
+	// NOTE(fakhri): find cuesheets and cover image if exist
 	String8 cover_image_path = ZERO_STRUCT;
 	Cuesheet_List cuesheet_list = ZERO_STRUCT;
 	
@@ -2088,184 +2273,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 		
 		if (str8_ends_with(info.path, str8_lit(".cue"), MatchFlag_CaseInsensitive))
 		{
-			enum Cuesheet_Context_Kind
-			{
-				Cuesheet_Context_None,
-				Cuesheet_Context_File,
-				Cuesheet_Context_Track,
-			} current_ctx_kind = Cuesheet_Context_None;
-			
-			String8 global_performer = ZERO_STRUCT;
-			String8 global_title = ZERO_STRUCT;
-			
-			Cuesheet_File *current_cuesheet_file = 0;
-			Cuesheet_Track *current_cuesheet_track = 0;
-			
-			String8 content = to_string(platform->load_entire_file(temp_mem.arena, info.path));
-			
-			for (u32 line_start_offset = 0; line_start_offset < content.len;)
-			{
-				u32 line_len = 0;
-				for (; line_start_offset + line_len < content.len; line_len += 1)
-				{
-					if (content.str[line_start_offset + line_len] == '\n' || 
-							content.str[line_start_offset + line_len] == '\r' && content.str[line_start_offset + line_len + 1] == '\n')
-					{
-						String8 line = str8(content.str + line_start_offset, line_len);
-						line_len += ((content.str[line_start_offset + line_len] == '\r')? 2:1);
-						
-						// NOTE(fakhri): skip whitespaces at the begining of the line
-						line = str8_skip_first(line, string_find_first_non_whitespace(line));
-						
-						String8 command = prefix8(line, string_find_first_whitespace(line));
-						if (0) {}
-						else if (str8_match(command, str8_lit("REM"), MatchFlag_CaseInsensitive)) {/*NOTE(fakhri): do nothing*/}
-						else if (str8_match(command, str8_lit("FILE"), MatchFlag_CaseInsensitive)) 
-						{
-							String8 file_cmd_str = str8_skip_first(line, command.len);
-							String8 file_name_str = str8_skip_leading_spaces(file_cmd_str);
-							if (file_name_str.str[0] == '"')
-							{
-								file_name_str = str8_skip_first(file_name_str, 1);
-								file_name_str = prefix8(file_name_str, string_find_first_characer(file_name_str, '"'));
-							}
-							
-							Cuesheet_File *cuesheet = m_arena_push_struct_z(temp_mem.arena, Cuesheet_File);
-							DLLPushBack(cuesheet_list.first, cuesheet_list.last, cuesheet);
-							current_cuesheet_file = cuesheet;
-							current_ctx_kind = Cuesheet_Context_File;
-							
-							cuesheet->file      = file_name_str;
-							cuesheet->album     = global_title;
-							cuesheet->performer = global_performer;
-						}
-						else if (str8_match(command, str8_lit("TRACK"), MatchFlag_CaseInsensitive)) 
-						{
-							String8 track_cmd_str = str8_skip_first(line, command.len);
-							// TODO(fakhri): parse track number
-							assert(current_cuesheet_file);
-							if (current_cuesheet_file)
-							{
-								Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(temp_mem.arena, Cuesheet_Track);
-								DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
-								current_cuesheet_track = cuesheet_track;
-								current_ctx_kind = Cuesheet_Context_Track;
-								
-								cuesheet_track->performer = current_cuesheet_file->performer;
-							}
-						}
-						else if (str8_match(command, str8_lit("PERFORMER"), MatchFlag_CaseInsensitive)) 
-						{
-							String8 performer_str = str8_skip_first(line, command.len);
-							performer_str = str8_skip_leading_spaces(performer_str);
-							performer_str = str8_chop_quotes(performer_str);
-							
-							switch(current_ctx_kind)
-							{
-								case Cuesheet_Context_None:
-								{
-									global_performer = performer_str;
-								} break;
-								case Cuesheet_Context_Track:
-								{
-									assert(current_cuesheet_track);
-									if (current_cuesheet_track)
-									{
-										current_cuesheet_track->performer = performer_str;
-									}
-								} break;
-								case Cuesheet_Context_File:
-								{
-									// invalid_code_path("PERFORMER is not allowed in FILE context");
-								} break;
-							}
-						}
-						else if (str8_match(command, str8_lit("TITLE"), MatchFlag_CaseInsensitive)) 
-						{
-							String8 title_str = str8_skip_first(line, command.len);
-							title_str = str8_skip_leading_spaces(title_str);
-							title_str = str8_chop_quotes(title_str);
-							
-							switch(current_ctx_kind)
-							{
-								case Cuesheet_Context_None:
-								{
-									global_title = title_str;
-								} break;
-								case Cuesheet_Context_Track:
-								{
-									assert(current_cuesheet_track);
-									if (current_cuesheet_track)
-									{
-										current_cuesheet_track->title = title_str;
-									}
-								} break;
-								case Cuesheet_Context_File:
-								{
-									//invalid_code_path("TITLE is not allowed in FILE context");
-								} break;
-							}
-						}
-						else if (str8_match(command, str8_lit("INDEX"), MatchFlag_CaseInsensitive))
-						{
-							line = str8_skip_leading_spaces(str8_skip_first(line, command.len));
-							String8 index_number = prefix8(line, string_find_first_whitespace(line));
-							
-							// TODO(fakhri): handle multiple index numbers
-							
-							Cuesheet_Track_Index track_index_ts = ZERO_STRUCT;
-							if (u64_from_str8_base10(index_number) == 1)
-							{
-								String8 index_timestamp = str8_skip_leading_spaces(str8_skip_first(line, index_number.len));
-								
-								String8 minutes_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
-								index_timestamp = str8_skip_first(index_timestamp, minutes_str.len + 1);
-								
-								String8 seconds_str = prefix8(index_timestamp, string_find_first_characer(index_timestamp, ':'));
-								index_timestamp = str8_skip_first(index_timestamp, seconds_str.len + 1);
-								
-								String8 frames_str = index_timestamp;
-								
-								track_index_ts.minutes = (u32)u64_from_str8_base10(minutes_str);
-								track_index_ts.seconds = (u32)u64_from_str8_base10(seconds_str);
-								track_index_ts.frames  = (u32)u64_from_str8_base10(frames_str);
-							}
-							
-							if (current_ctx_kind == Cuesheet_Context_File)
-							{
-								// NOTE(fakhri): altho it's not allowed in official specification, some files 
-								// allow index command in file context, for these cases we create an implecit track
-								assert(current_cuesheet_file);
-								if (current_cuesheet_file)
-								{
-									Cuesheet_Track *cuesheet_track = m_arena_push_struct_z(temp_mem.arena, Cuesheet_Track);
-									DLLPushBack(current_cuesheet_file->first_tracks, current_cuesheet_file->last_tracks, cuesheet_track);
-									current_cuesheet_track = cuesheet_track;
-									current_ctx_kind = Cuesheet_Context_Track;
-								}
-							}
-							
-							if (current_ctx_kind == Cuesheet_Context_Track)
-							{
-								assert(current_cuesheet_track);
-								if (current_cuesheet_track)
-								{
-									current_cuesheet_track->index = track_index_ts;
-								}
-							}
-							else 
-							{
-								invalid_code_path("INDEX command is not allowed in this context");
-							}
-							
-						}
-						
-						break;
-					}
-				}
-				
-				line_start_offset += line_len;
-			}
+			cuesheet_list = mplayer_parse_cue_file(temp_mem.arena, info.path);
 		}
 	}
 	
