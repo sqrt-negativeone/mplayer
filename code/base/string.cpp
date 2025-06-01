@@ -58,7 +58,6 @@ char_to_forward_slash(u8 c)
   return (c == '\\' ? '/' : c);
 }
 
-
 #define STB_SPRINTF_STATIC
 #define STB_SPRINTF_IMPLEMENTATION
 #include "third_party/stb_sprintf.h"

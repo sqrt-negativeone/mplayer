@@ -730,8 +730,12 @@ mplayer_compute_album_id(String8 artist_name, String8 album_name)
 	
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
-	// TODO(fakhri): case insensitive
 	String8 data = str8_f(scratch.arena, "%.*s%.*s", STR8_EXPAND(artist_name), STR8_EXPAND(album_name));
+	for (u32 i = 0; i < data.len; i += 1)
+	{
+		data.str[i] = char_to_lower(data.str[i]);
+	}
+	
 	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, data.len, data.str);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
 	
@@ -743,8 +747,15 @@ mplayer_compute_artist_id(String8 artist_name)
 {
 	Mplayer_Artist_ID id = NULL_ARTIST_ID;
 	
-	// TODO(fakhri): case insensitive
-	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, artist_name.len, artist_name.str);
+	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
+	
+	String8 data = str8_clone(scratch.arena, artist_name);
+	for (u32 i = 0; i < data.len; i += 1)
+	{
+		data.str[i] = char_to_lower(data.str[i]);
+	}
+	
+	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, data.len, data.str);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
 	
 	return id;
@@ -2249,7 +2260,6 @@ mplayer_load_tracks_in_directory(String8 library_path)
 				
 				line_start_offset += line_len;
 			}
-			
 		}
 	}
 	
