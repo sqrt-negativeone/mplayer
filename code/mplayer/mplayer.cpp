@@ -711,11 +711,16 @@ mplayer_compute_track_id(String8 track_path, u64 samples_offset, u64 samples_end
 	Mplayer_Track_ID id = NULL_TRACK_ID;
 	Memory_Checkpoint_Scoped scratch(get_scratch(0, 0));
 	
-	// TODO(fakhri): case insensitive
-	Buffer buffer = arena_push_buffer(scratch.arena, track_path.len + sizeof(samples_offset) + sizeof(samples_end));
+	String8 tmp_str = str8_clone(scratch.arena, track_path);
+	for (u32 i = 0; i < tmp_str.len; i += 1)
+	{
+		tmp_str.str[i] = char_to_lower(tmp_str.str[i]);
+	}
+	
+	Buffer buffer = arena_push_buffer(scratch.arena, tmp_str.len + sizeof(samples_offset) + sizeof(samples_end));
 	((u64*)buffer.data)[0] = samples_offset;
 	((u64*)buffer.data)[1] = samples_end;
-	memory_copy(buffer.data + 2 * sizeof(u64), track_path.str, track_path.len);
+	memory_copy(buffer.data + 2 * sizeof(u64), tmp_str.str, tmp_str.len);
 	
 	meow_u128 meow_hash = MeowHash(MeowDefaultSeed, buffer.size, buffer.data);
 	memory_copy(&id, &meow_hash, sizeof(meow_hash));
@@ -1854,6 +1859,7 @@ mplayer_make_track(File_Info info, u64 samples_start, u64 samples_end, Mplayer_A
 {
 	Mplayer_Library *library = &mplayer_ctx->library;
 	Mplayer_Track_ID track_hash = mplayer_compute_track_id(info.path, samples_start, samples_end);
+	assert(!is_equal(track_hash, NULL_TRACK_ID));
 	Mplayer_Track *track = mplayer_track_by_id(library, track_hash);
 	if (!track)
 	{
