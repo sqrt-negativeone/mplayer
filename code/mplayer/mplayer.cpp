@@ -1459,7 +1459,10 @@ mplayer_queue_remove_at(Mplayer_Queue_Index index)
 	}
 	
 	queue->count -= 1;
-	// TODO(fakhri): correctly update current_index
+	if (index < queue->current_index)
+	{
+		queue->current_index -= 1;
+	}
 	
 	if (index == queue->current_index && is_queue_index_valid(index))
 	{
@@ -3591,7 +3594,6 @@ MPLAYER_UPDATE_AND_RENDER(mplayer_update_and_render)
 						if (mplayer_ui_underlined_button(str8_lit("Remove From Queue")).clicked_left)
 						{
 							mplayer_queue_remove_at(index);
-							mplayer_queue_resume();
 							ui_close_ctx_menu();
 						}
 						
