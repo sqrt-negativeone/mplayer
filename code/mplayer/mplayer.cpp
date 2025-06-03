@@ -2063,10 +2063,9 @@ str8_chop_quotes(String8 str)
 	return result;
 }
 
-internal Cuesheet_List
-mplayer_parse_cue_file(Memory_Arena *arena, String8 path)
+internal void
+mplayer_parse_cue_file(Cuesheet_List *cuesheet_list, Memory_Arena *arena, String8 path)
 {
-	Cuesheet_List cuesheet_list = ZERO_STRUCT;
 	enum Cuesheet_Context_Kind
 	{
 		Cuesheet_Context_None,
@@ -2110,7 +2109,7 @@ mplayer_parse_cue_file(Memory_Arena *arena, String8 path)
 					}
 					
 					Cuesheet_File *cuesheet = m_arena_push_struct_z(arena, Cuesheet_File);
-					DLLPushBack(cuesheet_list.first, cuesheet_list.last, cuesheet);
+					DLLPushBack(cuesheet_list->first, cuesheet_list->last, cuesheet);
 					current_cuesheet_file = cuesheet;
 					current_ctx_kind = Cuesheet_Context_File;
 					
@@ -2245,7 +2244,6 @@ mplayer_parse_cue_file(Memory_Arena *arena, String8 path)
 		line_start_offset += line_len;
 	}
 	
-	return cuesheet_list;
 }
 
 internal void
@@ -2273,7 +2271,7 @@ mplayer_load_tracks_in_directory(String8 library_path)
 		
 		if (str8_ends_with(info.path, str8_lit(".cue"), MatchFlag_CaseInsensitive))
 		{
-			cuesheet_list = mplayer_parse_cue_file(temp_mem.arena, info.path);
+			mplayer_parse_cue_file(&cuesheet_list, temp_mem.arena, info.path);
 		}
 	}
 	
